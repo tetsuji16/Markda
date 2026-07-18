@@ -10,6 +10,7 @@ Typoraの商標・ロゴ・同梱資産は使用しない。公開仕様およ�
 
 - VS Codeの`TextDocument`を永続データの唯一の正本とする。
 - Webviewは文書バージョンと同期済みテキストを保持し、一度に一つの差分を送信する。
+- WebviewはCodeMirrorの変更セットを入力フレーム単位で合成し、全文比較を行わずに差分を送信する。非表示化・終了時は、期待するホスト本文が一致する場合だけ最終差分を適用する。
 - 差分はUTF-16オフセットの`from`、`to`、`insert`で表し、共通接頭辞・接尾辞を除いた最小の単一置換として送信する。
 - 拡張ホストは`baseVersion`が現在の`TextDocument.version`と一致する場合だけ`WorkspaceEdit`を適用する。不一致時は全文と現在バージョンを返す。
 - Webview起因の更新は`transactionId`で確認し、外部変更だけを全文再同期する。
@@ -19,11 +20,14 @@ Typoraの商標・ロゴ・同梱資産は使用しない。公開仕様およ�
 
 CodeMirror 6の同一文書上でライブ表示とソース表示を切り替える。ライブ表示は非アクティブ行の構文記号を隠し、見出し、引用、強調、リンク、画像、タスクリスト、コードブロック、数式、Mermaidおよび表を編集面内で視覚化する。キャレットがあるブロックでは原文へ戻せる。
 
-ライブ表ではセルの直接編集、Tab移動、行列の追加・削除、ドラッグによる行列並べ替え、列幅変更および列整列を行える。画像は複数ファイル選択、クリップボード貼り付け、ドラッグ＆ドロップ、移動・名前変更、コピー、ごみ箱への削除に対応する。書式ツールバーから太字、斜体、インラインコード、リンク、箇条書き、タスクリストを挿入できる。
+ライブ表示の通常段落ではEnterを段落区切り、Shift+EnterをMarkdownハードブレークとして扱う。リスト、引用、見出し、コードフェンスおよびソース表示ではCodeMirrorのMarkdown操作を優先する。HTMLクリップボードは見出し、段落、書式、リンク、画像、リスト、引用および表をMarkdownへ変換して貼り付ける。
+
+ライブ表ではセルの直接編集、IME確定後の逐次同期、Tab移動、セル内書式ショートカット、行列の追加・削除、ドラッグによる行列並べ替え、列幅変更および列整列を行える。設定したセル数を超える表はDOMを大量生成せずソース編集へ切り替える。画像は複数ファイル選択、クリップボード貼り付け、ドラッグ＆ドロップ、移動・名前変更、コピー、ごみ箱への削除に対応する。コードブロックは内容の直接編集、IME、言語変更、コピーに対応する。
 
 Focus Modeは現在行以外を減光する。Typewriter Modeは選択変更時にキャレットを表示領域中央へスクロールする。両モードはビューごとに保持し、同一文書の内容だけを分割ビュー間で共有する。
 
 レンダリングプレビューはMarkdown、表、タスクリスト、脚注、下付き、上付き、ハイライト、KaTeX、Mermaidを表示する。生成HTMLはDOMPurifyでサニタイズする。生HTMLは`allowUnsafeHtml`が有効な場合だけMarkdownパーサーへ渡し、その後もサニタイズする。
+KaTeXとMermaidは対応要素が初めて表示された時だけ読み込む。分割プレビューは既定で無効とし、有効時も入力停止後にだけ全文を更新する。
 
 ## 4. VS Code統合
 
@@ -47,6 +51,17 @@ View typeは`markda.editor`である。アウトラインは見出し階層、�
 - `markda.insertTable`
 - `markda.insertImage`
 - `markda.insertMathBlock`
+- `markda.toggleBold`
+- `markda.toggleItalic`
+- `markda.toggleInlineCode`
+- `markda.insertLink`
+- `markda.toggleBulletList`
+- `markda.toggleOrderedList`
+- `markda.toggleTaskList`
+- `markda.toggleBlockquote`
+- `markda.toggleStrikethrough`
+- `markda.insertCodeBlock`
+- `markda.clearFormatting`
 - `markda.showStatistics`
 - `markda.exportHtml`
 - `markda.exportHtmlBare`
@@ -60,6 +75,8 @@ View typeは`markda.editor`である。アウトラインは見出し階層、�
 | `markda.editor.autoPairMarkdown` | boolean | `true` |
 | `markda.editor.contentWidth` | integer | `860` |
 | `markda.editor.typewriterKeepCentered` | boolean | `true` |
+| `markda.editor.previewUpdateDelay` | integer | `500` |
+| `markda.editor.liveTableMaxCells` | integer | `600` |
 | `markda.markdown.math` | boolean | `true` |
 | `markda.markdown.diagrams` | boolean | `true` |
 | `markda.markdown.html` | boolean | `true` |

@@ -8,6 +8,8 @@ tsconfig.json
 esbuild.mjs
 *.vsix
 node_modules/**
+media/.edge-preview-profile/**
 dist/*.map
+dist/**/*.map
 docs/DEMO.md
 docs/PUBLISHING.md

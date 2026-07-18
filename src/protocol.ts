@@ -7,6 +7,8 @@ export interface EditorSettings {
   contentWidth: number;
   autoPairMarkdown: boolean;
   typewriterKeepCentered: boolean;
+  previewUpdateDelay: number;
+  liveTableMaxCells: number;
   markdown: {
     math: boolean;
     diagrams: boolean;
@@ -22,7 +24,8 @@ export interface EditorSettings {
 
 export type HostToEditorMessage =
   | { type: 'initialize'; uri: string; resourceBaseUri: string; themeBaseUri: string; version: number; text: string; settings: EditorSettings }
-  | { type: 'documentChanged'; version: number; text: string; sourceTransactionId?: string }
+  | { type: 'documentChanged'; version: number; sourceTransactionId: string }
+  | { type: 'documentChanged'; version: number; text: string; sourceTransactionId?: undefined }
   | { type: 'command'; command: EditorCommand; payload?: unknown }
   | { type: 'configurationChanged'; settings: EditorSettings };
 
@@ -43,7 +46,12 @@ export type EditorCommand =
   | 'insertLink'
   | 'setHeading'
   | 'toggleBulletList'
+  | 'toggleOrderedList'
   | 'toggleTaskList'
+  | 'toggleBlockquote'
+  | 'toggleStrikethrough'
+  | 'insertCodeBlock'
+  | 'clearFormatting'
   | 'replaceImageSource'
   | 'removeImageSource'
   | 'focusHeading';
@@ -57,6 +65,7 @@ export type EditorToHostMessage =
       changes: readonly TextChange[];
       selection: SelectionAnchor;
     }
+  | { type: 'finalSync'; uri: string; expectedText: string; text: string }
   | { type: 'ready' }
   | { type: 'state'; sourceMode: boolean; focusMode: boolean; typewriterMode: boolean; cursor?: number }
   | { type: 'statistics'; statistics: DocumentStatistics }
@@ -110,6 +119,10 @@ export function parseEditorToHostMessage(value: unknown): EditorToHostMessage | 
         type: 'edit', uri: value.uri, baseVersion: value.baseVersion,
         transactionId: value.transactionId, changes: value.changes, selection: value.selection,
       };
+    case 'finalSync':
+      if (typeof value.uri !== 'string' || typeof value.expectedText !== 'string' || typeof value.text !== 'string'
+        || value.expectedText.length > 25_000_000 || value.text.length > 25_000_000) return undefined;
+      return { type: 'finalSync', uri: value.uri, expectedText: value.expectedText, text: value.text };
     case 'state':
       if (typeof value.sourceMode !== 'boolean' || typeof value.focusMode !== 'boolean' || typeof value.typewriterMode !== 'boolean') return undefined;
       if (value.cursor !== undefined && !isNonNegativeInteger(value.cursor)) return undefined;

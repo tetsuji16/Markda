@@ -9,7 +9,9 @@ Write Markdown as a formatted document without giving up the source file. Markda
 ## Highlights
 
 - Edit rendered Markdown in place or switch to the full source view.
+- Use Typora-style paragraph breaks, smart HTML-to-Markdown paste, and modifier-click link opening.
 - Work with tables using direct cell editing, row and column controls, drag reordering, resizing, alignment, and Tab navigation.
+- Edit code blocks directly, change their language, and copy their contents without opening source mode.
 - Render KaTeX math and Mermaid diagrams without sending document content to an online rendering service.
 - Insert multiple images, or save images from the clipboard and drag-and-drop into a configurable asset folder.
 - Navigate with filterable Outline and Files views, workspace Markdown search, and Quick Open.
@@ -36,6 +38,11 @@ The Markda activity-bar view provides document outline and Markdown file navigat
 | Bold | `Ctrl+B` | `Cmd+B` |
 | Italic | `Ctrl+I` | `Cmd+I` |
 | Insert link | `Ctrl+K` | `Cmd+K` |
+| Numbered list | `Ctrl+Shift+[` | `Cmd+Option+O` |
+| Bulleted list | `Ctrl+Shift+]` | `Cmd+Option+U` |
+| Block quote | `Ctrl+Shift+Q` | `Cmd+Option+Q` |
+| Code block | `Ctrl+Shift+K` | `Cmd+Option+C` |
+| Strikethrough | `Alt+Shift+5` | `Ctrl+Shift+Backtick` |
 | Copy as Markdown | `Ctrl+Shift+C` | `Cmd+Shift+C` |
 | Paste as plain text | `Ctrl+Shift+V` | `Cmd+Shift+V` |
 
@@ -43,7 +50,7 @@ Search for `Markda:` in the Command Palette to see all available commands, inclu
 
 ## Settings
 
-Settings under `markda.*` control editor width, delimiter pairing, typewriter behavior, Markdown features, image paths, themes, export behavior, remote resources, and unsafe HTML. Open **Settings** and search for `markda` to see descriptions and defaults.
+Settings under `markda.*` control editor width, delimiter pairing, typewriter behavior, split-preview delay, the live-table size limit, Markdown features, image paths, themes, export behavior, remote resources, and unsafe HTML. Open **Settings** and search for `markda` to see descriptions and defaults.
 
 By default, remote resources require confirmation and unsafe HTML is disabled. In an untrusted workspace, workspace-controlled image destinations and security overrides are restricted.
 
@@ -67,6 +74,8 @@ npm run build
 ```
 
 Press `F5` in VS Code to open the Extension Development Host with `docs/DEMO.md`. See `docs/SPECIFICATION.ja.md` for the compatibility contract and implementation status, and `docs/PUBLISHING.md` for the release checklist.
+
+The editing rationale and completed plan are recorded in [TyporaとのMarkdown編集ユーザビリティ比較](docs/TYPORA_USABILITY_REVIEW.ja.md).
 
 Bug reports and focused feature requests are welcome in [GitHub Issues](https://github.com/tetsuji16/Markda/issues).
 

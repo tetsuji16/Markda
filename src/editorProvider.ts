@@ -4,12 +4,14 @@ import * as vscode from 'vscode';
 import { areValidTextChanges, parseEditorToHostMessage, type EditorCommand, type EditorToHostMessage, type HostToEditorMessage, type TextChange } from './protocol.js';
 import { getEditorSettings } from './settings.js';
 import { getStatistics } from './statistics.js';
+import { findMinimalChange } from './textChange.js';
 import { OutlineProvider } from './outlineProvider.js';
 
 interface EditorView {
   panel: vscode.WebviewPanel;
   document: vscode.TextDocument;
   pendingTransactions: Set<string>;
+  messageQueue: Promise<void>;
 }
 
 export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
@@ -45,8 +47,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       enableScripts: true,
       localResourceRoots: [this.context.extensionUri, this.context.globalStorageUri, vscode.Uri.joinPath(document.uri, '..')],
     };
-    panel.webview.html = this.getHtml(panel.webview, document.uri);
-    const view: EditorView = { panel, document, pendingTransactions: new Set() };
+    const view: EditorView = { panel, document, pendingTransactions: new Set(), messageQueue: Promise.resolve() };
     this.views.add(view);
     this.activeView = view;
     this.onDidActivateDocument?.(document.uri);
@@ -68,11 +69,15 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
         if (isMessageType(rawMessage, 'edit')) this.resync(view);
         return;
       }
-      void this.onMessage(view, message).catch((error: unknown) => {
+      view.messageQueue = view.messageQueue.then(() => this.onMessage(view, message)).catch((error: unknown) => {
         console.error('markda: Failed to handle a webview message.', error);
         if (message.type === 'edit') this.resync(view);
       });
     });
+    // Install the message listener before loading the webview. The webview posts
+    // `ready` as soon as its script runs, so loading it first can lose that
+    // one-shot handshake and leave the editor without its initial document.
+    panel.webview.html = this.getHtml(panel.webview, document.uri, this.initializationMessage(view));
   }
 
   sendCommand(command: EditorCommand, payload?: unknown): void {
@@ -91,17 +96,15 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
   private async onMessage(view: EditorView, message: EditorToHostMessage): Promise<void> {
     switch (message.type) {
       case 'ready':
-        this.post(view, {
-          type: 'initialize', uri: view.document.uri.toString(),
-          resourceBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(view.document.uri, '..')).toString()}/`,
-          themeBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.globalStorageUri, 'themes')).toString()}/`,
-          version: view.document.version,
-          text: view.document.getText(), settings: getEditorSettings(view.document.uri),
-        });
+        // The initial document is embedded in the webview HTML so the editor can
+        // paint immediately. `ready` only confirms that command messaging is live.
         this.refreshStatus();
         return;
       case 'edit':
         await this.applyEdit(view, message.baseVersion, message.transactionId, message.changes);
+        return;
+      case 'finalSync':
+        await this.applyFinalSync(view, message.uri, message.expectedText, message.text);
         return;
       case 'outline':
         if (view === this.getActiveView()) this.outline.update(message.headings);
@@ -148,17 +151,32 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
   }
 
+  private async applyFinalSync(view: EditorView, uri: string, expectedText: string, text: string): Promise<void> {
+    if (uri !== view.document.uri.toString() || text === view.document.getText()) return;
+    // Only finish a local tail when all preceding queued local edits produced the
+    // exact state predicted by the webview. Never overwrite an external change.
+    if (view.document.getText() !== expectedText) {
+      this.resync(view);
+      return;
+    }
+    const change = findMinimalChange(expectedText, text);
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(view.document.uri, new vscode.Range(view.document.positionAt(change.from), view.document.positionAt(change.to)), change.insert);
+    await vscode.workspace.applyEdit(edit);
+  }
+
   private onDocumentChanged(event: vscode.TextDocumentChangeEvent): void {
     for (const view of this.views) {
       if (view.document.uri.toString() !== event.document.uri.toString()) continue;
       const sourceTransactionId = view.pendingTransactions.values().next().value as string | undefined;
       if (sourceTransactionId) view.pendingTransactions.delete(sourceTransactionId);
-      this.post(view, {
-        type: 'documentChanged', version: event.document.version, text: event.document.getText(),
-        ...(sourceTransactionId ? { sourceTransactionId } : {}),
-      });
+      // The originating webview already owns the submitted text. A lightweight
+      // acknowledgement avoids serializing and transferring the complete document
+      // after every keystroke. Other views still receive the authoritative text.
+      this.post(view, sourceTransactionId
+        ? { type: 'documentChanged', version: event.document.version, sourceTransactionId }
+        : { type: 'documentChanged', version: event.document.version, text: event.document.getText() });
     }
-    this.refreshStatus();
   }
 
   private async insertImage(view: EditorView): Promise<void> {
@@ -311,16 +329,33 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     this.post(view, { type: 'documentChanged', version: view.document.version, text: view.document.getText() });
   }
 
-  private getHtml(webview: vscode.Webview, documentUri: vscode.Uri): string {
+  private initializationMessage(view: EditorView): Extract<HostToEditorMessage, { type: 'initialize' }> {
+    return {
+      type: 'initialize', uri: view.document.uri.toString(),
+      resourceBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(view.document.uri, '..')).toString()}/`,
+      themeBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.globalStorageUri, 'themes')).toString()}/`,
+      version: view.document.version,
+      text: view.document.getText(), settings: getEditorSettings(view.document.uri),
+    };
+  }
+
+  private getHtml(
+    webview: vscode.Webview,
+    documentUri: vscode.Uri,
+    initialization: Extract<HostToEditorMessage, { type: 'initialize' }>,
+  ): string {
     const nonce = createNonce();
     const allowRemoteImages = vscode.workspace.getConfiguration('markda', documentUri).get<string>('security.allowRemoteResources', 'prompt') === 'always';
     const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'));
     const styles = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'));
+    const initialData = JSON.stringify(initialization)
+      .replace(/&/gu, '\\u0026').replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e')
+      .replace(/\u2028/gu, '\\u2028').replace(/\u2029/gu, '\\u2029');
     return `<!doctype html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:${allowRemoteImages ? ' https:' : ''}; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:${allowRemoteImages ? ' https:' : ''}; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src ${webview.cspSource} 'nonce-${nonce}';">
 <link rel="stylesheet" href="${styles}"><title>markda</title></head>
-<body><div id="app" role="application" aria-label="markda Markdown editor"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
+<body><div id="app" role="application" aria-label="markda Markdown editor"></div><script nonce="${nonce}">globalThis.__markdaInitial=${initialData};</script><script type="module" nonce="${nonce}" src="${script}"></script></body></html>`;
   }
 }
 

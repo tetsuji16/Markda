@@ -1,28 +1,26 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import '@vscode/codicons/dist/codicon.css';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
-import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
+import { syntaxHighlighting, defaultHighlightStyle, syntaxTree } from '@codemirror/language';
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
-import { Annotation, EditorSelection, EditorState, StateEffect, StateField } from '@codemirror/state';
+import { Annotation, ChangeSet, EditorSelection, EditorState, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import DOMPurify from 'dompurify';
-import katex from 'katex';
 import MarkdownIt from 'markdown-it';
 import footnote from 'markdown-it-footnote';
 import mark from 'markdown-it-mark';
 import sub from 'markdown-it-sub';
 import sup from 'markdown-it-sup';
 import taskLists from 'markdown-it-task-lists';
-import mermaid from 'mermaid';
 import type {
-  DocumentStatistics, EditorCommand, EditorSettings, EditorToHostMessage, Heading, HostToEditorMessage,
+  DocumentStatistics, EditorCommand, EditorSettings, EditorToHostMessage, Heading, HostToEditorMessage, TextChange,
 } from '../protocol.js';
-import { getStatistics } from '../statistics.js';
-import { findMinimalChange } from '../textChange.js';
+import { analyzeDocument, getStatistics } from '../statistics.js';
 import {
   addTableColumn, addTableRow, alignTableColumn, deleteTableColumn, deleteTableRow,
   findMarkdownTable, serializeMarkdownTable, tableCursor, type MarkdownTable, type TableAlignment,
 } from '../table.js';
+import { CompositionCommitGate, htmlFragmentToMarkdown, liveEnterEdit } from './editorLogic.js';
 
 declare function acquireVsCodeApi<T = unknown>(): {
   postMessage(message: EditorToHostMessage): void;
@@ -36,6 +34,9 @@ interface ViewState {
   typewriterMode: boolean;
   previewVisible: boolean;
 }
+
+type InitializationMessage = Extract<HostToEditorMessage, { type: 'initialize' }>;
+const initialDocument = (globalThis as typeof globalThis & { __markdaInitial?: InitializationMessage }).__markdaInitial;
 
 const vscode = acquireVsCodeApi<ViewState>();
 const isJapanese = navigator.language.toLocaleLowerCase().startsWith('ja');
@@ -52,20 +53,27 @@ const modeField = StateField.define<ViewState>({
   },
 });
 
-let documentUri = '';
-let resourceBaseUri = '';
-let themeBaseUri = '';
-let documentVersion = 0;
-let syncedText = '';
+let documentUri = initialDocument?.uri ?? '';
+let resourceBaseUri = initialDocument?.resourceBaseUri ?? '';
+let themeBaseUri = initialDocument?.themeBaseUri ?? '';
+let documentVersion = initialDocument?.version ?? 0;
+let syncedText = initialDocument?.text ?? '';
 let inFlightTransaction: string | undefined;
+let inFlightChanges: readonly TextChange[] | undefined;
+let pendingChanges: ChangeSet | undefined;
 let sendTimer: number | undefined;
 let previewTimer: number | undefined;
+let derivedStateTimer: number | undefined;
 let previewRenderVersion = 0;
 let clientRenderer: MarkdownIt | undefined;
+let mermaidPromise: Promise<typeof import('mermaid')['default']> | undefined;
+let katexPromise: Promise<typeof import('katex')['default']> | undefined;
 let cachedDocumentText = '';
 let cachedTable: MarkdownTable | undefined;
-let settings: EditorSettings = {
-  contentWidth: 860, autoPairMarkdown: true, typewriterKeepCentered: true,
+let activeTableFrom: number | undefined;
+let activeCodeFrom: number | undefined;
+let settings: EditorSettings = initialDocument?.settings ?? {
+  contentWidth: 860, autoPairMarkdown: true, typewriterKeepCentered: true, previewUpdateDelay: 500, liveTableMaxCells: 600,
   markdown: { math: true, diagrams: true, html: true, breaks: false },
   security: { allowRemoteResources: 'prompt', allowUnsafeHtml: false },
   theme: { light: 'paper', dark: 'midnight' },
@@ -125,7 +133,7 @@ if (isJapanese) localizeStaticUi();
 const view = new EditorView({
   parent: document.querySelector<HTMLElement>('#editor')!,
   state: EditorState.create({
-    doc: '',
+    doc: initialDocument?.text ?? '',
     extensions: [
       modeField,
       history(),
@@ -169,7 +177,7 @@ document.querySelector('#preview-button')?.addEventListener('click', () => toggl
 statisticsButton.addEventListener('click', () => toggleStatistics());
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideStatistics(); });
 document.querySelector('#table-insert-confirm')?.addEventListener('click', () => insertTableFromDialog());
-view.dom.addEventListener('paste', (event) => void receiveImageFiles(event.clipboardData?.files, event));
+view.dom.addEventListener('paste', (event) => void handlePaste(event));
 view.dom.addEventListener('drop', (event) => void receiveImageFiles(event.dataTransfer?.files, event));
 preview.addEventListener('scroll', () => syncScroll(preview, view.scrollDOM));
 view.scrollDOM.addEventListener('scroll', () => syncScroll(view.scrollDOM, preview));
@@ -181,10 +189,18 @@ preview.addEventListener('keydown', (event) => {
 });
 window.addEventListener('message', (event: MessageEvent<HostToEditorMessage>) => onHostMessage(event.data));
 window.addEventListener('beforeunload', () => {
+  synchronizeBeforeSuspend();
   window.clearTimeout(sendTimer);
   window.clearTimeout(previewTimer);
+  window.clearTimeout(derivedStateTimer);
 });
+window.addEventListener('pagehide', synchronizeBeforeSuspend);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') synchronizeBeforeSuspend(); });
 applyViewState(initialViewState);
+if (initialDocument) {
+  applySettings();
+  scheduleDerivedStateUpdate();
+}
 vscode.postMessage({ type: 'ready' });
 
 function onHostMessage(message: HostToEditorMessage): void {
@@ -196,18 +212,22 @@ function onHostMessage(message: HostToEditorMessage): void {
       documentVersion = message.version;
       settings = message.settings;
       syncedText = message.text;
-      if (!replaceDocument(message.text)) updateDocumentDerivedState();
+      if (!replaceDocument(message.text)) scheduleDerivedStateUpdate();
       applySettings();
       return;
     case 'documentChanged':
       documentVersion = message.version;
-      syncedText = message.text;
       if (message.sourceTransactionId && message.sourceTransactionId === inFlightTransaction) {
+        syncedText = applyTextChanges(syncedText, inFlightChanges ?? []);
         inFlightTransaction = undefined;
+        inFlightChanges = undefined;
         syncState.textContent = 'Saved in buffer';
-        scheduleEdit();
-      } else {
+        flushEdit();
+      } else if ('text' in message) {
+        syncedText = message.text;
         inFlightTransaction = undefined;
+        inFlightChanges = undefined;
+        pendingChanges = undefined;
         replaceDocument(message.text);
         syncState.textContent = 'Updated externally';
       }
@@ -225,12 +245,19 @@ function onHostMessage(message: HostToEditorMessage): void {
 
 function onEditorUpdate(update: ViewUpdate): void {
   if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(externalUpdate))) {
+    pendingChanges = pendingChanges ? pendingChanges.compose(update.changes) : update.changes;
     scheduleEdit();
   }
-  if (update.docChanged) updateDocumentDerivedState();
+  if (update.docChanged) {
+    cachedDocumentText = '';
+    cachedTable = undefined;
+    updateTableToolbar();
+    scheduleDerivedStateUpdate();
+    if (update.state.field(modeField).previewVisible) schedulePreviewRender();
+  }
   else if (update.selectionSet) {
     updateTableToolbar();
-    updateStatistics();
+    if (!statisticsPanel.hidden) updateStatistics();
     const state = update.state.field(modeField);
     vscode.postMessage({ type: 'state', sourceMode: state.sourceMode, focusMode: state.focusMode, typewriterMode: state.typewriterMode, cursor: update.state.selection.main.head });
   }
@@ -241,21 +268,60 @@ function onEditorUpdate(update: ViewUpdate): void {
 }
 
 function scheduleEdit(): void {
-  window.clearTimeout(sendTimer);
-  sendTimer = window.setTimeout(flushEdit, 35);
+  if (sendTimer !== undefined || inFlightTransaction) return;
+  // Coalesce edits from the same input frame while sending the leading edge
+  // quickly enough that closing the editor does not strand a debounce tail.
+  sendTimer = window.setTimeout(() => { sendTimer = undefined; flushEdit(); }, 0);
 }
 
 function flushEdit(): void {
-  if (inFlightTransaction) return;
-  const current = view.state.doc.toString();
-  if (current === syncedText) return;
-  const change = findMinimalChange(syncedText, current);
+  if (inFlightTransaction || !pendingChanges) return;
+  window.clearTimeout(sendTimer);
+  sendTimer = undefined;
+  const changes = changeSetToTextChanges(pendingChanges);
+  pendingChanges = undefined;
+  if (!changes.length) return;
   inFlightTransaction = crypto.randomUUID();
+  inFlightChanges = changes;
   syncState.textContent = 'Syncing…';
   vscode.postMessage({
     type: 'edit', uri: documentUri, baseVersion: documentVersion, transactionId: inFlightTransaction,
-    changes: [change], selection: { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head },
+    changes, selection: { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head },
   });
+}
+
+function changeSetToTextChanges(changes: ChangeSet): TextChange[] {
+  const result: TextChange[] = [];
+  changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    result.push({ from: fromA, to: toA, insert: inserted.toString() });
+  });
+  return result;
+}
+
+function applyTextChanges(text: string, changes: readonly TextChange[]): string {
+  let result = text;
+  for (const change of [...changes].sort((a, b) => b.from - a.from)) {
+    result = result.slice(0, change.from) + change.insert + result.slice(change.to);
+  }
+  return result;
+}
+
+function flushActiveEditable(): void {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active.isContentEditable) active.blur();
+}
+
+function synchronizeBeforeSuspend(): void {
+  flushActiveEditable();
+  flushEdit();
+  const expectedText = applyTextChanges(syncedText, inFlightChanges ?? []);
+  const text = view.state.doc.toString();
+  if (text !== expectedText) {
+    // The final snapshot subsumes the unsent tail. Clearing it prevents the tail
+    // from being submitted a second time if this hidden webview becomes active.
+    pendingChanges = undefined;
+    vscode.postMessage({ type: 'finalSync', uri: documentUri, expectedText, text });
+  }
 }
 
 function replaceDocument(text: string): boolean {
@@ -325,8 +391,23 @@ function runCommand(command: EditorCommand, payload?: unknown): void {
     case 'toggleBulletList':
       toggleLinePrefix('- ');
       return;
+    case 'toggleOrderedList':
+      toggleOrderedList();
+      return;
     case 'toggleTaskList':
       toggleLinePrefix('- [ ] ');
+      return;
+    case 'toggleBlockquote':
+      toggleBlockquote();
+      return;
+    case 'toggleStrikethrough':
+      wrapSelection(view, '~~', '~~');
+      return;
+    case 'insertCodeBlock':
+      wrapCodeBlock(view);
+      return;
+    case 'clearFormatting':
+      clearFormatting(view);
       return;
     case 'replaceImageSource':
       updateImageSource(payload, false);
@@ -440,6 +521,54 @@ function toggleLinePrefix(prefix: string): void {
   view.focus();
 }
 
+function toggleOrderedList(): void {
+  toggleLinePrefixes(/^\s*\d+[.)]\s+/u, (index) => `${index + 1}. `);
+}
+
+function toggleBlockquote(): void {
+  toggleLinePrefixes(/^\s*>\s?/u, () => '> ');
+}
+
+function toggleLinePrefixes(expression: RegExp, prefix: (index: number) => string): void {
+  const selection = view.state.selection.main;
+  const first = view.state.doc.lineAt(selection.from);
+  const last = view.state.doc.lineAt(selection.to);
+  const lines = Array.from({ length: last.number - first.number + 1 }, (_value, index) => view.state.doc.line(first.number + index));
+  const remove = lines.every((line) => expression.test(line.text));
+  view.dispatch({ changes: lines.map((line, index) => ({
+    from: line.from,
+    to: remove ? line.from + (line.text.match(expression)?.[0].length ?? 0) : line.from,
+    insert: remove ? '' : prefix(index),
+  })) });
+  view.focus();
+}
+
+function wrapCodeBlock(editor: EditorView): boolean {
+  const selection = editor.state.selection.main;
+  const selected = editor.state.sliceDoc(selection.from, selection.to);
+  const fenced = selected.match(/^```[^\n]*\n([\s\S]*?)\n```$/u);
+  const insert = fenced ? fenced[1] ?? '' : `\`\`\`\n${selected}\n\`\`\``;
+  editor.dispatch({ changes: { from: selection.from, to: selection.to, insert }, selection: EditorSelection.cursor(selection.from + insert.length) });
+  return true;
+}
+
+function clearFormatting(editor: EditorView): boolean {
+  const selection = editor.state.selection.main;
+  const line = editor.state.doc.lineAt(selection.head);
+  const from = selection.empty ? line.from : selection.from;
+  const to = selection.empty ? line.to : selection.to;
+  const original = editor.state.sliceDoc(from, to);
+  const cleared = original
+    .replace(/^\s*(?:#{1,6}|>|[-+*]|\d+[.)])\s+/gmu, '')
+    .replace(/(\*\*|__|~~|==)(?=\S)(.+?\S)\1/gu, '$2')
+    .replace(/(?<!\*)\*(?=\S)(.+?\S)\*(?!\*)/gu, '$1')
+    .replace(/`([^`]+)`/gu, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/gu, '$1');
+  if (cleared === original) return true;
+  editor.dispatch({ changes: { from, to, insert: cleared }, selection: EditorSelection.range(from, from + cleared.length) });
+  return true;
+}
+
 function insertTableFromDialog(): void {
   const columns = clampNumber(Number(document.querySelector<HTMLInputElement>('#table-columns')?.value), 1, 20);
   const rows = clampNumber(Number(document.querySelector<HTMLInputElement>('#table-rows')?.value), 1, 100);
@@ -464,6 +593,50 @@ async function receiveImageFiles(files: FileList | undefined, event: Event): Pro
   vscode.postMessage({ type: 'saveImages', selection: currentSelection(), images: values });
 }
 
+async function handlePaste(event: ClipboardEvent): Promise<void> {
+  const editable = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[contenteditable="true"]') : null;
+  if (editable) {
+    if (event.clipboardData?.files.length) {
+      event.preventDefault();
+      return;
+    }
+    const html = event.clipboardData?.getData('text/html') ?? '';
+    const plain = event.clipboardData?.getData('text/plain') ?? '';
+    const value = editable.matches('code') ? plain : html ? htmlFragmentToMarkdown(html) : plain;
+    if (value) {
+      event.preventDefault();
+      insertTextIntoEditable(editable, value);
+    }
+    return;
+  }
+  if (event.clipboardData?.files.length) {
+    await receiveImageFiles(event.clipboardData.files, event);
+    return;
+  }
+  if (view.state.field(modeField).sourceMode) return;
+  const html = event.clipboardData?.getData('text/html') ?? '';
+  if (!html) return;
+  const markdown = htmlFragmentToMarkdown(html);
+  if (!markdown) return;
+  event.preventDefault();
+  insertAtSelection(markdown);
+}
+
+function insertTextIntoEditable(editable: HTMLElement, value: string): void {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (!editable.contains(range.commonAncestorContainer)) return;
+  range.deleteContents();
+  const textNode = document.createTextNode(value);
+  range.insertNode(textNode);
+  range.setStartAfter(textNode);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  editable.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste', data: value }));
+}
+
 function readDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -480,7 +653,9 @@ function renderStatistics(stat: DocumentStatistics): void {
     ? `<dt>${isJapanese ? '選択範囲' : 'Selection'}</dt><dd>${stat.selectionWords} ${isJapanese ? '語' : 'words'} · ${stat.selectionCharacters} ${isJapanese ? '文字' : 'characters'}</dd>` : '';
   statisticsPanel.innerHTML = `<dl>${selected}<dt>${isJapanese ? '単語数' : 'Words'}</dt><dd>${stat.words}</dd><dt>${isJapanese ? '文字数' : 'Characters'}</dt><dd>${stat.characters}</dd><dt>${isJapanese ? '空白を除く文字数' : 'Without spaces'}</dt><dd>${stat.charactersWithoutSpaces}</dd><dt>${isJapanese ? '行数' : 'Lines'}</dt><dd>${stat.lines}</dd><dt>${isJapanese ? '読了時間' : 'Reading time'}</dt><dd>${stat.readingMinutes} ${isJapanese ? '分' : 'min'}</dd></dl>`;
   statisticsButton.textContent = stat.selectionCharacters > 0 ? `${stat.selectionWords} ${isJapanese ? '語を選択' : 'selected'}` : `${stat.words} ${isJapanese ? '語' : 'words'}`;
-  statisticsButton.title = `${stat.words} words · ${stat.characters} characters · ${stat.lines} lines · ${stat.readingMinutes} min read`;
+  statisticsButton.title = isJapanese
+    ? `${stat.words}語・${stat.characters}文字・${stat.lines}行・読了${stat.readingMinutes}分`
+    : `${stat.words} words · ${stat.characters} characters · ${stat.lines} lines · ${stat.readingMinutes} min read`;
 }
 
 function localizeStaticUi(): void {
@@ -527,16 +702,20 @@ function updateDocumentDerivedState(): void {
   const source = view.state.doc.toString();
   cachedDocumentText = source;
   cachedTable = undefined;
-  const headings = extractHeadings(source);
-  const stat = getStatistics(source);
-  statisticsButton.textContent = `${stat.words} words`;
+  const { headings, statistics: stat } = analyzeDocument(source);
   renderStatistics(stat);
   vscode.postMessage({ type: 'outline', headings });
   vscode.postMessage({ type: 'statistics', statistics: stat });
   const mode = view.state.field(modeField);
   vscode.postMessage({ type: 'state', sourceMode: mode.sourceMode, focusMode: mode.focusMode, typewriterMode: mode.typewriterMode, cursor: view.state.selection.main.head });
   updateTableToolbar(source);
-  if (view.state.field(modeField).previewVisible) schedulePreviewRender();
+}
+
+function scheduleDerivedStateUpdate(): void {
+  window.clearTimeout(derivedStateTimer);
+  // Outline and document statistics are useful shortly after typing settles, but
+  // neither belongs on the latency-sensitive keystroke path.
+  derivedStateTimer = window.setTimeout(updateDocumentDerivedState, 180);
 }
 
 function calculateStatistics(): DocumentStatistics {
@@ -576,18 +755,49 @@ function createMarkdownPairing() { return EditorView.inputHandler.of((editor, fr
 
 function createMarkdaKeymap() {
   return [
+    { key: 'Enter', run: (editor: EditorView) => insertLiveLineBreak(editor, false) },
+    { key: 'Shift-Enter', run: (editor: EditorView) => insertLiveLineBreak(editor, true) },
     { key: 'Tab', run: (editor: EditorView) => navigateTableCell(editor, false) },
     { key: 'Shift-Tab', run: (editor: EditorView) => navigateTableCell(editor, true) },
     { key: 'Mod-b', run: (editor: EditorView) => wrapSelection(editor, '**', '**') },
     { key: 'Mod-i', run: (editor: EditorView) => wrapSelection(editor, '*', '*') },
     { key: 'Mod-k', run: (editor: EditorView) => wrapLink(editor) },
     { key: 'Mod-Shift-`', run: (editor: EditorView) => wrapSelection(editor, '`', '`') },
+    { key: 'Mod-Shift-[', run: () => { toggleOrderedList(); return true; } },
+    { key: 'Mod-Shift-]', run: () => { toggleLinePrefix('- '); return true; } },
+    { key: 'Mod-Shift-q', run: () => { toggleBlockquote(); return true; } },
+    { key: 'Mod-Shift-k', run: (editor: EditorView) => wrapCodeBlock(editor) },
+    { key: 'Alt-Shift-5', run: (editor: EditorView) => wrapSelection(editor, '~~', '~~') },
     ...Array.from({ length: 6 }, (_, index) => ({
       key: `Mod-${index + 1}`,
       run: (editor: EditorView) => setHeading(editor, index + 1),
     })),
     { key: 'Mod-0', run: (editor: EditorView) => setHeading(editor, 0) },
   ];
+}
+
+function insertLiveLineBreak(editor: EditorView, shiftKey: boolean): boolean {
+  if (editor.state.field(modeField).sourceMode) return false;
+  const selection = editor.state.selection.main;
+  if (!selection.empty) return false;
+  let syntax = syntaxTree(editor.state).resolveInner(selection.head, -1);
+  let insideFence = false;
+  for (;;) {
+    if (syntax.name === 'FencedCode') { insideFence = true; break; }
+    if (!syntax.parent) break;
+    syntax = syntax.parent;
+  }
+  const line = editor.state.doc.lineAt(selection.head);
+  const contextLine = Math.min(editor.state.doc.lines, line.number + 2);
+  const contextTo = editor.state.doc.line(contextLine).to;
+  const context = editor.state.sliceDoc(line.from, contextTo);
+  const edit = liveEnterEdit(context, selection.head - line.from, shiftKey, insideFence);
+  if (!edit) return false;
+  editor.dispatch({
+    changes: { from: line.from + edit.from, to: line.from + edit.to, insert: edit.insert },
+    selection: EditorSelection.cursor(line.from + edit.cursor),
+  });
+  return true;
 }
 
 function updateTableToolbar(source = cachedDocumentText): void {
@@ -598,9 +808,10 @@ function updateTableToolbar(source = cachedDocumentText): void {
     appRoot.classList.remove('table-active');
     return;
   }
+  if (!source) source = view.state.doc.toString();
   const table = cachedTable && position >= cachedTable.from && position <= cachedTable.to
     ? cachedTable
-    : findMarkdownTable(source, position);
+    : findMarkdownTable(source, position, view.state.doc.lineAt(position).number - 1);
   cachedTable = table;
   appRoot.classList.toggle('table-active', Boolean(table));
   const cursor = table ? tableCursor(source, table, position) : undefined;
@@ -610,7 +821,7 @@ function updateTableToolbar(source = cachedDocumentText): void {
 
 function runTableCommand(command: string): void {
   const source = view.state.doc.toString();
-  const table = findMarkdownTable(source, view.state.selection.main.head);
+  const table = findMarkdownTable(source, view.state.selection.main.head, view.state.doc.lineAt(view.state.selection.main.head).number - 1);
   if (!table) return;
   const cursor = tableCursor(source, table, view.state.selection.main.head);
   let updated: MarkdownTable = table;
@@ -652,7 +863,7 @@ function replaceTable(source: string, original: MarkdownTable, updated: Markdown
   const eol = source.includes('\r\n') ? '\r\n' : source.includes('\r') ? '\r' : '\n';
   const replacement = serializeMarkdownTable(updated, eol);
   view.dispatch({ changes: { from: original.from, to: original.to, insert: replacement } });
-  const reparsed = findMarkdownTable(view.state.doc.toString(), original.from);
+  const reparsed = findMarkdownTable(view.state.doc.toString(), original.from, view.state.doc.lineAt(original.from).number - 1);
   if (reparsed) {
     const position = tableCellPosition(view.state, reparsed, row, column);
     view.dispatch({ selection: EditorSelection.cursor(position), effects: EditorView.scrollIntoView(position) });
@@ -662,7 +873,7 @@ function replaceTable(source: string, original: MarkdownTable, updated: Markdown
 
 function navigateTableCell(editor: EditorView, backwards: boolean): boolean {
   const source = editor.state.doc.toString();
-  const table = findMarkdownTable(source, editor.state.selection.main.head);
+  const table = findMarkdownTable(source, editor.state.selection.main.head, editor.state.doc.lineAt(editor.state.selection.main.head).number - 1);
   if (!table) return false;
   const cursor = tableCursor(source, table, editor.state.selection.main.head);
   const rowCount = table.rows.length + 1;
@@ -765,6 +976,7 @@ function renderPreview(): void {
   preview.querySelectorAll<HTMLImageElement>('img[src]').forEach((image) => secureImage(image));
   wirePreviewTasks();
   wirePreviewNavigation();
+  void renderMathPlaceholders(renderVersion);
   void renderMermaidBlocks(renderVersion);
 }
 
@@ -810,7 +1022,9 @@ function taskMarkerOffsets(source: string): number[] {
 
 function schedulePreviewRender(): void {
   window.clearTimeout(previewTimer);
-  previewTimer = window.setTimeout(renderPreview, 120);
+  // The live editor is already the primary preview. Keep the optional split
+  // preview entirely off the typing path and refresh only after a real pause.
+  previewTimer = window.setTimeout(renderPreview, settings.previewUpdateDelay);
 }
 
 function secureImage(image: HTMLImageElement): void {
@@ -851,11 +1065,12 @@ function installMath(renderer: MarkdownIt): void {
     state.pos = end + 1;
     return true;
   });
-  renderer.renderer.rules.markda_math_inline = (tokens, index) => renderKatex(tokens[index]?.content ?? '', false);
+  renderer.renderer.rules.markda_math_inline = (tokens, index) =>
+    `<span class="markda-math-placeholder" data-markda-math="inline">${renderer.utils.escapeHtml(tokens[index]?.content ?? '')}</span>`;
   const defaultFence = renderer.renderer.rules.fence;
   renderer.renderer.rules.fence = (tokens, index, options, env, self) => {
     const token = tokens[index];
-    if (token?.info.trim() === 'math') return renderKatex(token.content, true);
+    if (token?.info.trim() === 'math') return `<div class="markda-math-placeholder" data-markda-math="block">${renderer.utils.escapeHtml(token.content)}</div>`;
     return defaultFence
       ? defaultFence(tokens, index, options, env, self)
       : `<pre><code>${renderer.utils.escapeHtml(token?.content ?? '')}</code></pre>\n`;
@@ -867,18 +1082,40 @@ function prepareMarkdownForPreview(source: string): string {
   return source.replace(/^\$\$[ \t]*\r?\n([\s\S]*?)\r?\n\$\$[ \t]*$/gmu, (_match, expression: string) => `\`\`\`math\n${expression}\n\`\`\``);
 }
 
-function renderKatex(source: string, displayMode: boolean): string {
+function loadKatex(): Promise<typeof import('katex')['default']> {
+  return katexPromise ??= import('./katexLoader.js').then((module) => module.api);
+}
+
+async function renderKatexInto(element: HTMLElement, source: string, displayMode: boolean): Promise<void> {
   try {
-    return katex.renderToString(source, { displayMode, throwOnError: false, strict: 'warn', trust: false });
+    const katex = await loadKatex();
+    if (!element.isConnected) return;
+    katex.render(source, element, { displayMode, throwOnError: false, strict: 'warn', trust: false });
   } catch (error) {
-    return `<span class="markda-render-error">${String(error)}</span>`;
+    if (element.isConnected) {
+      element.classList.add('markda-render-error');
+      element.textContent = String(error);
+    }
   }
+}
+
+async function renderMathPlaceholders(renderVersion: number): Promise<void> {
+  const placeholders = Array.from(preview.querySelectorAll<HTMLElement>('[data-markda-math]'));
+  if (!placeholders.length) return;
+  await loadKatex();
+  if (renderVersion !== previewRenderVersion) return;
+  await Promise.all(placeholders.map((element) => renderKatexInto(
+    element, element.textContent ?? '', element.dataset.markdaMath === 'block',
+  )));
 }
 
 async function renderMermaidBlocks(renderVersion: number): Promise<void> {
   if (!settings.markdown.diagrams) return;
-  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: document.body.classList.contains('vscode-dark') ? 'dark' : 'default' });
   const blocks = Array.from(preview.querySelectorAll<HTMLElement>('pre > code.language-mermaid'));
+  if (!blocks.length) return;
+  const mermaid = await loadMermaid();
+  if (renderVersion !== previewRenderVersion) return;
+  initializeMermaid(mermaid);
   for (const [index, block] of blocks.entries()) {
     try {
       const result = await mermaid.render(`markda-diagram-${index}-${Date.now()}`, block.textContent ?? '');
@@ -894,6 +1131,34 @@ async function renderMermaidBlocks(renderVersion: number): Promise<void> {
   }
 }
 
+function loadMermaid(): Promise<typeof import('mermaid')['default']> {
+  return mermaidPromise ??= import('./mermaidLoader.js').then((module) => module.api);
+}
+
+function initializeMermaid(mermaid: typeof import('mermaid')['default']): void {
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: document.body.classList.contains('vscode-dark') ? 'dark' : 'default' });
+}
+
+async function renderLiveMermaid(container: HTMLElement, source: string): Promise<void> {
+  try {
+    const mermaid = await loadMermaid();
+    if (!container.isConnected) return;
+    initializeMermaid(mermaid);
+    const result = await mermaid.render(`markda-live-${crypto.randomUUID()}`, source);
+    if (container.isConnected) container.innerHTML = DOMPurify.sanitize(result.svg, { USE_PROFILES: { svg: true, svgFilters: true } });
+  } catch {
+    if (container.isConnected) container.textContent = source;
+  }
+}
+
+function focusSourcePosition(editor: EditorView, position: number): void {
+  editor.dispatch({ selection: EditorSelection.cursor(position), effects: EditorView.scrollIntoView(position, { y: 'center' }) });
+  editor.focus();
+  // Block widgets and their source often have different heights. Re-anchor once
+  // after CodeMirror has measured the replacement to avoid a viewport jump.
+  requestAnimationFrame(() => editor.dispatch({ effects: EditorView.scrollIntoView(position, { y: 'center' }) }));
+}
+
 class LinkWidget extends WidgetType {
   constructor(private readonly editor: EditorView, private readonly from: number, private readonly label: string, private readonly href: string) { super(); }
   toDOM(): HTMLElement {
@@ -902,15 +1167,19 @@ class LinkWidget extends WidgetType {
     const link = document.createElement('a');
     link.href = '#';
     link.textContent = this.label;
-    link.title = this.href;
-    link.addEventListener('click', (event) => { event.preventDefault(); vscode.postMessage({ type: 'openLink', href: this.href }); });
+    link.title = isJapanese ? 'クリックで編集、Ctrl/Cmd+クリックで開く' : 'Click to edit; Ctrl/Cmd+click to open';
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (event.ctrlKey || event.metaKey) vscode.postMessage({ type: 'openLink', href: this.href });
+      else focusSourcePosition(this.editor, this.from);
+    });
     const edit = document.createElement('button');
     edit.type = 'button';
     edit.className = 'markda-link-edit';
     edit.ariaLabel = 'Edit link source';
     edit.title = 'Edit link source';
     edit.textContent = '✎';
-    edit.addEventListener('click', () => { this.editor.dispatch({ selection: EditorSelection.cursor(this.from) }); this.editor.focus(); });
+    edit.addEventListener('click', () => focusSourcePosition(this.editor, this.from));
     wrapper.append(link, edit);
     return wrapper;
   }
@@ -971,7 +1240,7 @@ class ImageWidget extends WidgetType {
       }
       figure.append(controls);
     }
-    const edit = () => { this.editor.dispatch({ selection: EditorSelection.cursor(this.from), effects: EditorView.scrollIntoView(this.from) }); this.editor.focus(); };
+    const edit = () => focusSourcePosition(this.editor, this.from);
     figure.addEventListener('dblclick', edit);
     figure.addEventListener('keydown', (event) => { if (event.key === 'Enter') edit(); });
     return figure;
@@ -985,31 +1254,109 @@ class CodeBlockWidget extends WidgetType {
   toDOM(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'markda-live-code';
-    container.tabIndex = 0;
-    container.title = 'Double-click or press Enter to edit source';
+    const controls = document.createElement('div');
+    controls.className = 'markda-code-controls';
+    const language = document.createElement('input');
+    language.type = 'text';
+    language.value = this.language;
+    language.placeholder = isJapanese ? '言語' : 'Language';
+    language.ariaLabel = isJapanese ? 'コード言語' : 'Code language';
+    language.addEventListener('change', () => commitCodeBlock(this.editor, this.from, undefined, language.value.trim()));
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.textContent = isJapanese ? 'コピー' : 'Copy';
+    copy.addEventListener('click', () => vscode.postMessage({ type: 'copyToClipboard', text: this.source }));
+    const editSource = document.createElement('button');
+    editSource.type = 'button';
+    editSource.textContent = isJapanese ? 'ソース' : 'Source';
+    const edit = () => focusSourcePosition(this.editor, this.from);
+    editSource.addEventListener('click', edit);
+    controls.append(language, copy, editSource);
+    container.append(controls);
     if (this.language === 'math' || this.language === 'latex') {
-      container.innerHTML = DOMPurify.sanitize(renderKatex(this.source, true));
+      const rendered = document.createElement('div');
+      rendered.className = 'markda-code-rendered';
+      rendered.textContent = this.source;
+      rendered.tabIndex = 0;
+      rendered.addEventListener('dblclick', edit);
+      rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') edit(); });
+      container.append(rendered);
+      void renderKatexInto(rendered, this.source, true);
     } else if (this.language === 'mermaid' && settings.markdown.diagrams) {
-      container.textContent = this.source;
-      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: document.body.classList.contains('vscode-dark') ? 'dark' : 'default' });
-      void mermaid.render(`markda-live-${crypto.randomUUID()}`, this.source).then((result) => {
-        container.innerHTML = DOMPurify.sanitize(result.svg, { USE_PROFILES: { svg: true, svgFilters: true } });
-      }).catch(() => { container.textContent = this.source; });
+      const rendered = document.createElement('div');
+      rendered.className = 'markda-code-rendered';
+      rendered.textContent = this.source;
+      rendered.tabIndex = 0;
+      rendered.addEventListener('dblclick', edit);
+      rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') edit(); });
+      container.append(rendered);
+      void renderLiveMermaid(rendered, this.source);
     } else {
       const pre = document.createElement('pre');
       const code = document.createElement('code');
       code.className = this.language ? `language-${this.language}` : '';
       code.textContent = this.source;
+      code.contentEditable = 'true';
+      code.spellcheck = false;
+      code.setAttribute('aria-label', isJapanese ? 'コード内容' : 'Code content');
+      const gate = new CompositionCommitGate();
+      let timer: number | undefined;
+      const commit = () => commitCodeBlock(this.editor, this.from, code.textContent ?? '', undefined);
+      code.addEventListener('focus', () => { activeCodeFrom = this.from; });
+      code.addEventListener('input', () => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => { timer = undefined; gate.request(commit); }, 80);
+      });
+      code.addEventListener('compositionstart', () => gate.start());
+      code.addEventListener('compositionend', () => gate.end(commit));
+      code.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== 'Tab') return;
+        event.preventDefault();
+        insertTextIntoEditable(code, event.key === 'Enter' ? '\n' : '  ');
+      });
+      code.addEventListener('blur', () => {
+        window.clearTimeout(timer);
+        gate.flush(commit);
+        if (activeCodeFrom === this.from) activeCodeFrom = undefined;
+      });
       pre.append(code);
       container.append(pre);
     }
-    const edit = () => { this.editor.dispatch({ selection: EditorSelection.cursor(this.from) }); this.editor.focus(); };
-    container.addEventListener('dblclick', edit);
-    container.addEventListener('keydown', (event) => { if (event.key === 'Enter') edit(); });
     return container;
   }
   ignoreEvent(): boolean { return true; }
-  eq(other: CodeBlockWidget): boolean { return other.from === this.from && other.source === this.source && other.language === this.language; }
+  eq(other: CodeBlockWidget): boolean {
+    return other.from === this.from && (activeCodeFrom === this.from || (other.source === this.source && other.language === this.language));
+  }
+}
+
+function commitCodeBlock(editor: EditorView, from: number, source: string | undefined, language: string | undefined): void {
+  const opening = editor.state.doc.lineAt(Math.min(from, editor.state.doc.length));
+  const match = opening.text.match(/^(\s*)(```|~~~)\s*([^\s`]*)/u);
+  if (!match) return;
+  let closing = opening.number + 1;
+  const closePattern = new RegExp(`^\\s*${match[2]}\\s*$`, 'u');
+  while (closing <= editor.state.doc.lines && !closePattern.test(editor.state.doc.line(closing).text)) closing++;
+  if (closing > editor.state.doc.lines) return;
+  const changes: { from: number; to: number; insert: string }[] = [];
+  if (language !== undefined && language !== (match[3] ?? '')) {
+    changes.push({ from: opening.from, to: opening.to, insert: `${match[1] ?? ''}${match[2] ?? '```'}${language}` });
+  }
+  if (source !== undefined) {
+    const closingLine = editor.state.doc.line(closing);
+    const { from: contentFrom, to: contentTo } = codeContentRange(editor.state, opening.to, closingLine.from);
+    changes.push({ from: contentFrom, to: contentTo, insert: source.replace(/\r?\n$/u, '') });
+  }
+  if (changes.length) editor.dispatch({ changes });
+}
+
+function codeContentRange(state: EditorState, openingTo: number, closingFrom: number): { from: number; to: number } {
+  const afterOpening = state.sliceDoc(openingTo, Math.min(state.doc.length, openingTo + 2));
+  const openingBreak = afterOpening.startsWith('\r\n') ? 2 : /^[\r\n]/u.test(afterOpening) ? 1 : 0;
+  const beforeClosing = state.sliceDoc(Math.max(0, closingFrom - 2), closingFrom);
+  const closingBreak = beforeClosing.endsWith('\r\n') ? 2 : /[\r\n]$/u.test(beforeClosing) ? 1 : 0;
+  const from = openingTo + openingBreak;
+  return { from, to: Math.max(from, closingFrom - closingBreak) };
 }
 
 class TableWidget extends WidgetType {
@@ -1019,6 +1366,22 @@ class TableWidget extends WidgetType {
     container.className = 'markda-live-table-wrap';
     container.setAttribute('role', 'group');
     container.setAttribute('aria-label', 'Editable Markdown table');
+    const cellCount = (this.table.rows.length + 1) * this.table.header.length;
+    if (cellCount > settings.liveTableMaxCells) {
+      container.classList.add('markda-large-table');
+      const summary = document.createElement('span');
+      summary.textContent = isJapanese
+        ? `大きな表（${this.table.rows.length + 1}行 × ${this.table.header.length}列）`
+        : `Large table (${this.table.rows.length + 1} rows × ${this.table.header.length} columns)`;
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.textContent = isJapanese ? 'ソースで編集' : 'Edit source';
+      edit.addEventListener('click', () => {
+        focusSourcePosition(this.editor, this.table.from);
+      });
+      container.append(summary, edit);
+      return container;
+    }
     const controls = document.createElement('div');
     controls.className = 'markda-inline-table-controls';
     const actions: readonly [string, () => void][] = [
@@ -1026,7 +1389,7 @@ class TableWidget extends WidgetType {
       [isJapanese ? '− 行' : '− Row', () => commitWidgetTable(this.editor, this.table.from, (table) => { if (table.rows.length > 1) table.rows.pop(); })],
       [isJapanese ? '+ 列' : '+ Column', () => commitWidgetTable(this.editor, this.table.from, (table) => { table.header.push(''); table.alignments.push('default'); for (const row of table.rows) row.push(''); })],
       [isJapanese ? '− 列' : '− Column', () => commitWidgetTable(this.editor, this.table.from, (table) => { if (table.header.length > 1) { table.header.pop(); table.alignments.pop(); for (const row of table.rows) row.pop(); } })],
-      [isJapanese ? 'ソースを編集' : 'Edit source', () => { this.editor.dispatch({ selection: EditorSelection.cursor(this.table.from) }); this.editor.focus(); }],
+      [isJapanese ? 'ソースを編集' : 'Edit source', () => focusSourcePosition(this.editor, this.table.from)],
     ];
     for (const [label, action] of actions) { const button = document.createElement('button'); button.textContent = label; button.type = 'button'; button.addEventListener('click', action); controls.append(button); }
     container.append(controls);
@@ -1046,7 +1409,22 @@ class TableWidget extends WidgetType {
           element.title = 'Right-click to change alignment; drag to reorder';
           element.addEventListener('contextmenu', (event) => { event.preventDefault(); this.cycleAlignment(column); });
         }
-        element.addEventListener('blur', () => this.updateCell(rowIndex - 1, column, element.textContent ?? ''));
+        const commitGate = new CompositionCommitGate();
+        let commitTimer: number | undefined;
+        const commit = () => this.updateCell(rowIndex - 1, column, element.textContent ?? '');
+        const scheduleCommit = () => {
+          window.clearTimeout(commitTimer);
+          commitTimer = window.setTimeout(() => { commitTimer = undefined; commitGate.request(commit); }, 80);
+        };
+        element.addEventListener('focus', () => { activeTableFrom = this.table.from; });
+        element.addEventListener('input', scheduleCommit);
+        element.addEventListener('compositionstart', () => commitGate.start());
+        element.addEventListener('compositionend', () => commitGate.end(commit));
+        element.addEventListener('blur', () => {
+          window.clearTimeout(commitTimer);
+          commitGate.flush(commit);
+          if (activeTableFrom === this.table.from) activeTableFrom = undefined;
+        });
         element.addEventListener('keydown', (event) => navigateEditableCell(event, container));
         tr.append(element);
       });
@@ -1071,7 +1449,10 @@ class TableWidget extends WidgetType {
     return container;
   }
   ignoreEvent(): boolean { return true; }
-  eq(other: TableWidget): boolean { return other.table.from === this.table.from && serializeMarkdownTable(other.table) === serializeMarkdownTable(this.table); }
+  eq(other: TableWidget): boolean {
+    return other.table.from === this.table.from
+      && (activeTableFrom === this.table.from || serializeMarkdownTable(other.table) === serializeMarkdownTable(this.table));
+  }
   private updateCell(row: number, column: number, value: string): void {
     const clean = value.replaceAll('|', '\\|').replace(/\s*[\r\n]+\s*/gu, ' ').trim();
     commitWidgetTable(this.editor, this.table.from, (table) => {
@@ -1103,16 +1484,42 @@ function moveArrayItem<T>(values: T[], source: number, target: number): void {
 }
 
 function navigateEditableCell(event: KeyboardEvent, container: HTMLElement): void {
-  if (event.key !== 'Tab') return;
+  if ((event.ctrlKey || event.metaKey) && formatEditableSelection(event)) return;
+  if (event.key !== 'Tab' && event.key !== 'Enter') return;
   const cells = Array.from(container.querySelectorAll<HTMLElement>('th,td'));
   const current = cells.indexOf(event.currentTarget as HTMLElement);
-  const next = cells[current + (event.shiftKey ? -1 : 1)];
+  const next = cells[current + (event.key === 'Tab' && event.shiftKey ? -1 : 1)];
   if (next) { event.preventDefault(); next.focus(); }
+  else if (event.key === 'Enter') event.preventDefault();
+}
+
+function formatEditableSelection(event: KeyboardEvent): boolean {
+  const key = event.key.toLocaleLowerCase();
+  const markers: readonly [string, string] | undefined = key === 'b' ? ['**', '**'] : key === 'i' ? ['*', '*']
+    : key === 'k' ? ['[', ']()'] : event.shiftKey && event.key === '`' ? ['`', '`'] : undefined;
+  if (!markers) return false;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return false;
+  const range = selection.getRangeAt(0);
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLElement) || !target.contains(range.commonAncestorContainer)) return false;
+  event.preventDefault();
+  const selected = range.toString();
+  const inserted = document.createTextNode(`${markers[0]}${selected}${markers[1]}`);
+  range.deleteContents();
+  range.insertNode(inserted);
+  const next = document.createRange();
+  next.setStart(inserted, markers[0].length);
+  next.setEnd(inserted, markers[0].length + selected.length);
+  selection.removeAllRanges();
+  selection.addRange(next);
+  target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+  return true;
 }
 
 function commitWidgetTable(editor: EditorView, from: number, mutate: (table: MarkdownTable) => void): void {
   const source = editor.state.doc.toString();
-  const table = findMarkdownTable(source, from);
+  const table = findMarkdownTable(source, from, editor.state.doc.lineAt(from).number - 1);
   if (!table) return;
   const copy: MarkdownTable = { ...table, header: [...table.header], alignments: [...table.alignments], rows: table.rows.map((row) => [...row]) };
   mutate(copy);
@@ -1124,7 +1531,8 @@ class MathWidget extends WidgetType {
   toDOM(): HTMLElement {
     const element = document.createElement('span');
     element.className = 'markda-inline-math';
-    katex.render(this.source, element, { throwOnError: false, trust: false });
+    element.textContent = this.source;
+    void renderKatexInto(element, this.source, false);
     return element;
   }
   eq(other: MathWidget): boolean { return other.source === this.source; }
@@ -1133,12 +1541,18 @@ class MathWidget extends WidgetType {
 function createLivePreviewPlugin() {
   return ViewPlugin.fromClass(class {
     decorations: DecorationSet;
-    constructor(editor: EditorView) { this.decorations = buildDecorations(editor); }
+    private activeLine: number;
+    constructor(editor: EditorView) {
+      this.activeLine = editor.state.doc.lineAt(editor.state.selection.main.head).number;
+      this.decorations = buildDecorations(editor);
+    }
     update(update: ViewUpdate): void {
-      if (update.docChanged || update.selectionSet || update.viewportChanged
-        || update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(setMode)))) {
+      const nextActiveLine = update.state.doc.lineAt(update.state.selection.main.head).number;
+      const modeChanged = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(setMode)));
+      if (update.docChanged || update.viewportChanged || modeChanged || (update.selectionSet && nextActiveLine !== this.activeLine)) {
         this.decorations = buildDecorations(update.view);
       }
+      this.activeLine = nextActiveLine;
     }
   }, { decorations: (plugin) => plugin.decorations });
 }
@@ -1147,9 +1561,9 @@ function buildDecorations(editor: EditorView): DecorationSet {
   const decorations: { from: number; to?: number; decoration: Decoration }[] = [];
   const state = editor.state.field(modeField);
   const selection = editor.state.selection.main;
-  const documentSource = editor.state.doc.toString();
+  let documentSource: string | undefined;
   const activeLine = editor.state.doc.lineAt(selection.head).number;
-  const focusLines = activeFocusLines(editor, activeLine);
+  const focusLines = state.focusMode ? activeFocusLines(editor, activeLine) : { from: 1, to: editor.state.doc.lines };
   let processedUntil = -1;
   for (const range of editor.visibleRanges) {
     const firstLine = editor.state.doc.lineAt(range.from).number;
@@ -1162,22 +1576,24 @@ function buildDecorations(editor: EditorView): DecorationSet {
       const quote = text.match(/^(>[ \t]?)/u);
       const list = text.match(/^(\s*)(?:[-+*]|\d+[.)])([ \t]+)/u);
       if (!state.sourceMode) {
-        const table = text.includes('|') ? findMarkdownTable(documentSource, line.from) : undefined;
+        const table = text.includes('|') ? findMarkdownTable(documentSource ??= editor.state.doc.toString(), line.from, lineNumber - 1) : undefined;
         if (table && (selection.head < table.from || selection.head > table.to)) {
           decorations.push({ from: table.from, to: table.to, decoration: Decoration.replace({ widget: new TableWidget(editor, table), block: true }) });
           processedUntil = table.to;
           continue;
         }
-        const fence = text.match(/^\s*```\s*([^\s`]*)/u);
+        const fence = text.match(/^\s*(```|~~~)\s*([^\s`~]*)/u);
         if (fence) {
           let endLine = lineNumber;
-          while (endLine < editor.state.doc.lines && !/^\s*```\s*$/u.test(editor.state.doc.line(endLine + 1).text)) endLine++;
+          const closeFence = new RegExp(`^\\s*${fence[1]}\\s*$`, 'u');
+          while (endLine < editor.state.doc.lines && !closeFence.test(editor.state.doc.line(endLine + 1).text)) endLine++;
           if (endLine < editor.state.doc.lines) endLine++;
           const end = editor.state.doc.line(endLine).to;
           if (selection.head < line.from || selection.head > end) {
-            const contentFrom = line.to + 1;
-            const contentTo = editor.state.doc.line(endLine).from - 1;
-            decorations.push({ from: line.from, to: end, decoration: Decoration.replace({ widget: new CodeBlockWidget(editor, line.from, editor.state.sliceDoc(contentFrom, Math.max(contentFrom, contentTo)), fence[1] ?? ''), block: true }) });
+            const contentRange = codeContentRange(editor.state, line.to, editor.state.doc.line(endLine).from);
+            const contentFrom = contentRange.from;
+            const contentTo = contentRange.to;
+            decorations.push({ from: line.from, to: end, decoration: Decoration.replace({ widget: new CodeBlockWidget(editor, line.from, editor.state.sliceDoc(contentFrom, Math.max(contentFrom, contentTo)), fence[2] ?? ''), block: true }) });
             processedUntil = end;
             continue;
           }
@@ -1212,7 +1628,7 @@ function buildDecorations(editor: EditorView): DecorationSet {
 
 function activeFocusLines(editor: EditorView, activeLine: number): { from: number; to: number } {
   const active = editor.state.doc.line(activeLine);
-  const table = active.text.includes('|') ? findMarkdownTable(editor.state.doc.toString(), active.from) : undefined;
+  const table = active.text.includes('|') ? findMarkdownTable(editor.state.doc.toString(), active.from, activeLine - 1) : undefined;
   if (table) return { from: table.startLine + 1, to: table.endLine + 1 };
   let from = activeLine;
   let to = activeLine;
@@ -1275,7 +1691,8 @@ function getStyles(): string { return String.raw`
 .cm-editor{min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px max(24px,calc((100% - var(--markda-content-width))/2)) 90px;line-height:1.7}.cm-content{max-width:var(--markda-content-width);margin:0 auto;caret-color:var(--vscode-editorCursor-foreground)}.cm-line{padding:2px 0;transition:opacity .12s}.cm-selectionBackground{background:var(--vscode-editor-selectionBackground)!important}
 .markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--vscode-panel-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-quote{border-left:4px solid var(--vscode-textBlockQuote-border);padding-left:14px!important;color:var(--vscode-descriptionForeground)}.markda-list-marker{color:var(--vscode-symbolIcon-arrayForeground)}
   .markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-highlight{background:var(--vscode-editor-findMatchHighlightBackground);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
-  .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:middle}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;resize:both;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--vscode-panel-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{text-align:center;color:var(--vscode-descriptionForeground);font-size:.9em}.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--vscode-textCodeBlock-background)}.markda-live-table-wrap{overflow:auto;margin:12px 0}.markda-inline-table-controls{display:flex;gap:4px;justify-content:flex-end;margin-bottom:4px}.markda-inline-table-controls button{font-size:12px;min-height:24px}.markda-live-table-wrap table{border-collapse:collapse;width:100%}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--vscode-panel-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto}.markda-live-table-wrap th{background:var(--vscode-sideBar-background)}
+  .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:middle}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--vscode-panel-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{text-align:center;color:var(--vscode-descriptionForeground);font-size:.9em}.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-code-controls{display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px}.markda-code-controls input{min-width:70px;width:110px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:3px 5px}.markda-code-controls button{font-size:12px;min-height:24px}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--vscode-textCodeBlock-background)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none}.markda-code-rendered{padding:10px}.markda-live-table-wrap{overflow:auto;margin:12px 0}.markda-inline-table-controls{display:flex;gap:4px;justify-content:flex-end;margin-bottom:4px}.markda-inline-table-controls button{font-size:12px;min-height:24px}.markda-live-table-wrap table{border-collapse:collapse;width:100%}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--vscode-panel-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto}.markda-live-table-wrap th{background:var(--vscode-sideBar-background)}
+  .markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--vscode-panel-border);border-radius:5px;color:var(--vscode-descriptionForeground)}
   .markda-footer{height:24px;padding:0 10px;display:flex;align-items:center;justify-content:flex-end;gap:12px;color:var(--vscode-statusBar-foreground);background:var(--vscode-statusBar-background);font-size:12px;position:relative}.markda-footer button{font-size:12px;min-height:20px;padding:0 4px}#statistics-panel{position:absolute;right:8px;bottom:28px;z-index:10;min-width:250px;padding:12px;color:var(--vscode-editorWidget-foreground);background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border);box-shadow:0 4px 14px #0005;border-radius:6px}#statistics-panel[hidden]{display:none}#statistics-panel dl{display:grid;grid-template-columns:1fr auto;gap:6px 16px;margin:0}#statistics-panel dt{color:var(--vscode-descriptionForeground)}#statistics-panel dd{margin:0;text-align:right}
   dialog{color:var(--vscode-editorWidget-foreground);background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:260px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:76px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:5px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
   body[data-markda-theme="paper"] .cm-content{font-family:Georgia,"Times New Roman",serif}body[data-markda-theme="midnight"]{--markda-accent:#7aa2f7}body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}

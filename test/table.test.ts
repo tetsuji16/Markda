@@ -40,4 +40,20 @@ describe('Markdown table model', () => {
     expect(output).toContain('| :--- | ----: |');
     expect(findMarkdownTable(output, output.indexOf('| A'))?.rows).toEqual(table.rows);
   });
+
+  it('finds a local table without depending on uniform line endings', () => {
+    const mixed = `prefix\r\ntext\r| H | V |\r\n| --- | --- |\n| a | b |\r\nsuffix`;
+    const table = findMarkdownTable(mixed, mixed.indexOf('| a'))!;
+    expect(table.header).toEqual(['H', 'V']);
+    expect(table.rows).toEqual([['a', 'b']]);
+    expect(mixed.slice(table.from, table.to)).toContain('| a | b |');
+  });
+
+  it('locates a table inside a large document', () => {
+    const prefix = 'ordinary prose\n'.repeat(20_000);
+    const large = `${prefix}| H |\n| --- |\n| value |\nend`;
+    const table = findMarkdownTable(large, prefix.length + 5)!;
+    expect(table.startLine).toBe(20_000);
+    expect(table.rows[0]).toEqual(['value']);
+  });
 });

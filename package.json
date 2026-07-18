@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "Edit Markdown in place with a source-preserving live preview, tables, diagrams, math, images, and HTML export.",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "publisher": "tetsuji16",
   "license": "MIT",
   "homepage": "https://github.com/tetsuji16/Markda#readme",
@@ -16,8 +16,16 @@
   "engines": {
     "vscode": "^1.100.0"
   },
-  "categories": ["Other", "Visualization"],
-  "keywords": ["markdown", "wysiwym", "typora", "editor"],
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "markdown",
+    "wysiwym",
+    "typora",
+    "editor"
+  ],
   "icon": "media/icon.png",
   "galleryBanner": {
     "color": "#172033",
@@ -25,7 +33,9 @@
   },
   "preview": true,
   "main": "./dist/extension.js",
-  "extensionKind": ["ui"],
+  "extensionKind": [
+    "ui"
+  ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
@@ -61,13 +71,27 @@
         "viewType": "markda.editor",
         "displayName": "markda",
         "selector": [
-          { "filenamePattern": "*.md" },
-          { "filenamePattern": "*.markdown" },
-          { "filenamePattern": "*.mdown" },
-          { "filenamePattern": "*.mkd" },
-          { "filenamePattern": "*.mkdn" },
-          { "filenamePattern": "*.mdwn" },
-          { "filenamePattern": "*.txt" }
+          {
+            "filenamePattern": "*.md"
+          },
+          {
+            "filenamePattern": "*.markdown"
+          },
+          {
+            "filenamePattern": "*.mdown"
+          },
+          {
+            "filenamePattern": "*.mkd"
+          },
+          {
+            "filenamePattern": "*.mkdn"
+          },
+          {
+            "filenamePattern": "*.mdwn"
+          },
+          {
+            "filenamePattern": "*.txt"
+          }
         ],
         "priority": "default"
       }
@@ -83,91 +107,473 @@
     },
     "views": {
       "markda": [
-        { "id": "markda.outline", "name": "Outline" },
-        { "id": "markda.files", "name": "Files" }
+        {
+          "id": "markda.outline",
+          "name": "Outline"
+        },
+        {
+          "id": "markda.files",
+          "name": "Files"
+        }
       ]
     },
     "commands": [
-      { "command": "markda.open", "title": "Open with markda", "category": "markda" },
-      { "command": "markda.newFile", "title": "New Markdown File", "category": "markda" },
-      { "command": "markda.duplicate", "title": "Duplicate Document", "category": "markda" },
-      { "command": "markda.toggleSourceMode", "title": "Toggle Source Code Mode", "category": "markda", "icon": "$(code)" },
-      { "command": "markda.toggleFocusMode", "title": "Toggle Focus Mode", "category": "markda" },
-      { "command": "markda.toggleTypewriterMode", "title": "Toggle Typewriter Mode", "category": "markda" },
-      { "command": "markda.showOutline", "title": "Show Outline", "category": "markda" },
-      { "command": "markda.showFiles", "title": "Show Files", "category": "markda" },
-      { "command": "markda.showSearch", "title": "Find in Document", "category": "markda" },
-      { "command": "markda.copyAsMarkdown", "title": "Copy as Markdown", "category": "markda" },
-      { "command": "markda.pastePlainText", "title": "Paste as Plain Text", "category": "markda" },
-      { "command": "markda.insertTable", "title": "Insert Table", "category": "markda" },
-      { "command": "markda.insertImage", "title": "Insert Image", "category": "markda" },
-      { "command": "markda.insertMathBlock", "title": "Insert Math Block", "category": "markda" },
-      { "command": "markda.toggleBold", "title": "Format: Bold", "category": "markda", "icon": "$(bold)" },
-      { "command": "markda.toggleItalic", "title": "Format: Italic", "category": "markda", "icon": "$(italic)" },
-      { "command": "markda.toggleInlineCode", "title": "Format: Inline Code", "category": "markda", "icon": "$(code)" },
-      { "command": "markda.insertLink", "title": "Format: Link", "category": "markda", "icon": "$(link)" },
-      { "command": "markda.toggleBulletList", "title": "Format: Bulleted List", "category": "markda", "icon": "$(list-unordered)" },
-      { "command": "markda.toggleTaskList", "title": "Format: Task List", "category": "markda", "icon": "$(checklist)" },
-      { "command": "markda.filterOutline", "title": "Filter Outline", "category": "markda", "icon": "$(filter)" },
-      { "command": "markda.clearOutlineFilter", "title": "Clear Outline Filter", "category": "markda", "icon": "$(clear-all)" },
-      { "command": "markda.filterFiles", "title": "Filter Files", "category": "markda", "icon": "$(filter)" },
-      { "command": "markda.clearFileFilter", "title": "Clear File Filter", "category": "markda", "icon": "$(clear-all)" },
-      { "command": "markda.searchWorkspace", "title": "Search across Markdown Files", "category": "markda", "icon": "$(search)" },
-      { "command": "markda.quickOpen", "title": "Quick Open Markdown File", "category": "markda", "icon": "$(go-to-file)" },
-      { "command": "markda.showStatistics", "title": "Show Document Statistics", "category": "markda" },
-      { "command": "markda.exportHtml", "title": "Export: HTML", "category": "markda" },
-      { "command": "markda.exportHtmlBare", "title": "Export: HTML without styles", "category": "markda" },
-      { "command": "markda.exportWithPrevious", "title": "Export with Previous Settings", "category": "markda" },
-      { "command": "markda.openThemeFolder", "title": "Open Theme Folder", "category": "markda" }
+      {
+        "command": "markda.open",
+        "title": "Open with markda",
+        "category": "markda"
+      },
+      {
+        "command": "markda.newFile",
+        "title": "New Markdown File",
+        "category": "markda"
+      },
+      {
+        "command": "markda.duplicate",
+        "title": "Duplicate Document",
+        "category": "markda"
+      },
+      {
+        "command": "markda.toggleSourceMode",
+        "title": "Toggle Source Code Mode",
+        "category": "markda",
+        "icon": "$(code)"
+      },
+      {
+        "command": "markda.toggleFocusMode",
+        "title": "Toggle Focus Mode",
+        "category": "markda"
+      },
+      {
+        "command": "markda.toggleTypewriterMode",
+        "title": "Toggle Typewriter Mode",
+        "category": "markda"
+      },
+      {
+        "command": "markda.showOutline",
+        "title": "Show Outline",
+        "category": "markda"
+      },
+      {
+        "command": "markda.showFiles",
+        "title": "Show Files",
+        "category": "markda"
+      },
+      {
+        "command": "markda.showSearch",
+        "title": "Find in Document",
+        "category": "markda"
+      },
+      {
+        "command": "markda.copyAsMarkdown",
+        "title": "Copy as Markdown",
+        "category": "markda"
+      },
+      {
+        "command": "markda.pastePlainText",
+        "title": "Paste as Plain Text",
+        "category": "markda"
+      },
+      {
+        "command": "markda.insertTable",
+        "title": "Insert Table",
+        "category": "markda"
+      },
+      {
+        "command": "markda.insertImage",
+        "title": "Insert Image",
+        "category": "markda"
+      },
+      {
+        "command": "markda.insertMathBlock",
+        "title": "Insert Math Block",
+        "category": "markda"
+      },
+      {
+        "command": "markda.toggleBold",
+        "title": "Format: Bold",
+        "category": "markda",
+        "icon": "$(bold)"
+      },
+      {
+        "command": "markda.toggleItalic",
+        "title": "Format: Italic",
+        "category": "markda",
+        "icon": "$(italic)"
+      },
+      {
+        "command": "markda.toggleInlineCode",
+        "title": "Format: Inline Code",
+        "category": "markda",
+        "icon": "$(code)"
+      },
+      {
+        "command": "markda.insertLink",
+        "title": "Format: Link",
+        "category": "markda",
+        "icon": "$(link)"
+      },
+      {
+        "command": "markda.toggleBulletList",
+        "title": "Format: Bulleted List",
+        "category": "markda",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "markda.toggleOrderedList",
+        "title": "Format: Numbered List",
+        "category": "markda",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "markda.toggleTaskList",
+        "title": "Format: Task List",
+        "category": "markda",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "markda.toggleBlockquote",
+        "title": "Format: Block Quote",
+        "category": "markda"
+      },
+      {
+        "command": "markda.toggleStrikethrough",
+        "title": "Format: Strikethrough",
+        "category": "markda"
+      },
+      {
+        "command": "markda.insertCodeBlock",
+        "title": "Format: Code Block",
+        "category": "markda"
+      },
+      {
+        "command": "markda.clearFormatting",
+        "title": "Format: Clear Formatting",
+        "category": "markda"
+      },
+      {
+        "command": "markda.filterOutline",
+        "title": "Filter Outline",
+        "category": "markda",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "markda.clearOutlineFilter",
+        "title": "Clear Outline Filter",
+        "category": "markda",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "markda.filterFiles",
+        "title": "Filter Files",
+        "category": "markda",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "markda.clearFileFilter",
+        "title": "Clear File Filter",
+        "category": "markda",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "markda.searchWorkspace",
+        "title": "Search across Markdown Files",
+        "category": "markda",
+        "icon": "$(search)"
+      },
+      {
+        "command": "markda.quickOpen",
+        "title": "Quick Open Markdown File",
+        "category": "markda",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "markda.showStatistics",
+        "title": "Show Document Statistics",
+        "category": "markda"
+      },
+      {
+        "command": "markda.exportHtml",
+        "title": "Export: HTML",
+        "category": "markda"
+      },
+      {
+        "command": "markda.exportHtmlBare",
+        "title": "Export: HTML without styles",
+        "category": "markda"
+      },
+      {
+        "command": "markda.exportWithPrevious",
+        "title": "Export with Previous Settings",
+        "category": "markda"
+      },
+      {
+        "command": "markda.openThemeFolder",
+        "title": "Open Theme Folder",
+        "category": "markda"
+      }
     ],
     "menus": {
       "editor/title": [
-        { "command": "markda.toggleSourceMode", "when": "activeCustomEditorId == markda.editor", "group": "navigation" },
-        { "command": "markda.exportHtml", "when": "activeCustomEditorId == markda.editor", "group": "navigation" }
+        {
+          "command": "markda.toggleSourceMode",
+          "when": "activeCustomEditorId == markda.editor",
+          "group": "navigation"
+        },
+        {
+          "command": "markda.exportHtml",
+          "when": "activeCustomEditorId == markda.editor",
+          "group": "navigation"
+        }
       ],
       "view/title": [
-        { "command": "markda.filterOutline", "when": "view == markda.outline", "group": "navigation@1" },
-        { "command": "markda.clearOutlineFilter", "when": "view == markda.outline", "group": "navigation@2" },
-        { "command": "markda.filterFiles", "when": "view == markda.files", "group": "navigation@1" },
-        { "command": "markda.searchWorkspace", "when": "view == markda.files", "group": "navigation@2" },
-        { "command": "markda.quickOpen", "when": "view == markda.files", "group": "navigation@3" },
-        { "command": "markda.clearFileFilter", "when": "view == markda.files", "group": "navigation@4" }
+        {
+          "command": "markda.filterOutline",
+          "when": "view == markda.outline",
+          "group": "navigation@1"
+        },
+        {
+          "command": "markda.clearOutlineFilter",
+          "when": "view == markda.outline",
+          "group": "navigation@2"
+        },
+        {
+          "command": "markda.filterFiles",
+          "when": "view == markda.files",
+          "group": "navigation@1"
+        },
+        {
+          "command": "markda.searchWorkspace",
+          "when": "view == markda.files",
+          "group": "navigation@2"
+        },
+        {
+          "command": "markda.quickOpen",
+          "when": "view == markda.files",
+          "group": "navigation@3"
+        },
+        {
+          "command": "markda.clearFileFilter",
+          "when": "view == markda.files",
+          "group": "navigation@4"
+        }
       ],
       "explorer/context": [
-        { "command": "markda.open", "when": "resourceExtname =~ /\\.(md|markdown|mdown|mkd|mkdn|mdwn|txt)$/", "group": "open@1" }
+        {
+          "command": "markda.open",
+          "when": "resourceExtname =~ /\\.(md|markdown|mdown|mkd|mkdn|mdwn|txt)$/",
+          "group": "open@1"
+        }
       ]
     },
     "keybindings": [
-      { "command": "markda.toggleSourceMode", "key": "ctrl+/", "mac": "cmd+/", "when": "activeCustomEditorId == markda.editor" },
-      { "command": "markda.toggleFocusMode", "key": "f8", "when": "activeCustomEditorId == markda.editor" },
-      { "command": "markda.toggleTypewriterMode", "key": "f9", "when": "activeCustomEditorId == markda.editor" },
-      { "command": "markda.insertTable", "key": "ctrl+t", "mac": "cmd+alt+t", "when": "activeCustomEditorId == markda.editor" },
-      { "command": "markda.insertMathBlock", "key": "ctrl+shift+m", "mac": "cmd+alt+b", "when": "activeCustomEditorId == markda.editor" },
-      { "command": "markda.copyAsMarkdown", "key": "ctrl+shift+c", "mac": "cmd+shift+c", "when": "activeCustomEditorId == markda.editor" },
-      { "command": "markda.pastePlainText", "key": "ctrl+shift+v", "mac": "cmd+shift+v", "when": "activeCustomEditorId == markda.editor" },
-      { "command": "markda.toggleBold", "key": "ctrl+b", "mac": "cmd+b", "when": "activeCustomEditorId == markda.editor" },
-      { "command": "markda.toggleItalic", "key": "ctrl+i", "mac": "cmd+i", "when": "activeCustomEditorId == markda.editor" },
-      { "command": "markda.insertLink", "key": "ctrl+k", "mac": "cmd+k", "when": "activeCustomEditorId == markda.editor" }
+      {
+        "command": "markda.toggleSourceMode",
+        "key": "ctrl+/",
+        "mac": "cmd+/",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.toggleFocusMode",
+        "key": "f8",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.toggleTypewriterMode",
+        "key": "f9",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.insertTable",
+        "key": "ctrl+t",
+        "mac": "cmd+alt+t",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.insertMathBlock",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+alt+b",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.copyAsMarkdown",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.pastePlainText",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.toggleBold",
+        "key": "ctrl+b",
+        "mac": "cmd+b",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.toggleItalic",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.insertLink",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.toggleOrderedList",
+        "key": "ctrl+shift+[",
+        "mac": "cmd+alt+o",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.toggleBulletList",
+        "key": "ctrl+shift+]",
+        "mac": "cmd+alt+u",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.toggleBlockquote",
+        "key": "ctrl+shift+q",
+        "mac": "cmd+alt+q",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.insertCodeBlock",
+        "key": "ctrl+shift+k",
+        "mac": "cmd+alt+c",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.toggleStrikethrough",
+        "key": "alt+shift+5",
+        "mac": "ctrl+shift+`",
+        "when": "activeCustomEditorId == markda.editor"
+      },
+      {
+        "command": "markda.clearFormatting",
+        "key": "ctrl+\\",
+        "mac": "cmd+\\",
+        "when": "activeCustomEditorId == markda.editor"
+      }
     ],
     "configuration": {
       "title": "markda",
       "properties": {
-        "markda.editor.autoPairMarkdown": { "type": "boolean", "default": true, "scope": "resource", "description": "Automatically pair Markdown delimiters." },
-        "markda.editor.contentWidth": { "type": "integer", "default": 860, "minimum": 480, "maximum": 1800, "scope": "resource", "description": "Maximum editor content width in pixels." },
-        "markda.editor.typewriterKeepCentered": { "type": "boolean", "default": true, "scope": "resource" },
-        "markda.markdown.math": { "type": "boolean", "default": true, "scope": "resource" },
-        "markda.markdown.diagrams": { "type": "boolean", "default": true, "scope": "resource" },
-        "markda.markdown.html": { "type": "boolean", "default": true, "scope": "resource" },
-        "markda.markdown.breaks": { "type": "boolean", "default": false, "scope": "resource" },
-        "markda.image.folder": { "type": "string", "default": "${currentFileNameWithoutExt}.assets", "scope": "resource" },
-        "markda.image.useRelativePath": { "type": "boolean", "default": true, "scope": "resource" },
-        "markda.image.ensureDotSlash": { "type": "boolean", "default": false, "scope": "resource" },
-        "markda.theme.light": { "type": "string", "default": "paper", "scope": "window" },
-        "markda.theme.dark": { "type": "string", "default": "midnight", "scope": "window" },
-        "markda.export.defaultFolder": { "type": "string", "enum": ["same", "ask"], "default": "ask", "scope": "resource" },
-        "markda.export.allowFrontMatterOverrides": { "type": "boolean", "default": false, "scope": "resource" },
-        "markda.security.allowRemoteResources": { "type": "string", "enum": ["never", "prompt", "always"], "default": "prompt", "scope": "resource" },
-        "markda.security.allowUnsafeHtml": { "type": "boolean", "default": false, "scope": "resource" }
+        "markda.editor.autoPairMarkdown": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Automatically pair Markdown delimiters."
+        },
+        "markda.editor.contentWidth": {
+          "type": "integer",
+          "default": 860,
+          "minimum": 480,
+          "maximum": 1800,
+          "scope": "resource",
+          "description": "Maximum editor content width in pixels."
+        },
+        "markda.editor.typewriterKeepCentered": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource"
+        },
+        "markda.editor.previewUpdateDelay": {
+          "type": "integer",
+          "default": 500,
+          "minimum": 150,
+          "maximum": 2000,
+          "scope": "resource",
+          "description": "Idle delay before refreshing the optional split preview, in milliseconds."
+        },
+        "markda.editor.liveTableMaxCells": {
+          "type": "integer",
+          "default": 600,
+          "minimum": 100,
+          "maximum": 5000,
+          "scope": "resource",
+          "description": "Maximum number of table cells rendered as editable controls before falling back to source editing."
+        },
+        "markda.markdown.math": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource"
+        },
+        "markda.markdown.diagrams": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource"
+        },
+        "markda.markdown.html": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource"
+        },
+        "markda.markdown.breaks": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource"
+        },
+        "markda.image.folder": {
+          "type": "string",
+          "default": "${currentFileNameWithoutExt}.assets",
+          "scope": "resource"
+        },
+        "markda.image.useRelativePath": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource"
+        },
+        "markda.image.ensureDotSlash": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource"
+        },
+        "markda.theme.light": {
+          "type": "string",
+          "default": "paper",
+          "scope": "window"
+        },
+        "markda.theme.dark": {
+          "type": "string",
+          "default": "midnight",
+          "scope": "window"
+        },
+        "markda.export.defaultFolder": {
+          "type": "string",
+          "enum": [
+            "same",
+            "ask"
+          ],
+          "default": "ask",
+          "scope": "resource"
+        },
+        "markda.export.allowFrontMatterOverrides": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource"
+        },
+        "markda.security.allowRemoteResources": {
+          "type": "string",
+          "enum": [
+            "never",
+            "prompt",
+            "always"
+          ],
+          "default": "prompt",
+          "scope": "resource"
+        },
+        "markda.security.allowUnsafeHtml": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource"
+        }
       }
     }
   },
@@ -197,6 +603,7 @@
     "@types/vscode": "^1.100.0",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.5",
+    "happy-dom": "^18.0.1",
     "typescript": "^5.8.3",
     "vitest": "^3.2.3"
   }

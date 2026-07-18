@@ -25,6 +25,13 @@ describe('webview message validation', () => {
     expect(parseEditorToHostMessage({ type: 'ready', unexpected: 'discarded' })).toEqual({ type: 'ready' });
   });
 
+  it('accepts a bounded final synchronization snapshot', () => {
+    expect(parseEditorToHostMessage({
+      type: 'finalSync', uri: 'file:///document.md', expectedText: 'before', text: 'after',
+    })).toEqual({ type: 'finalSync', uri: 'file:///document.md', expectedText: 'before', text: 'after' });
+    expect(parseEditorToHostMessage({ type: 'finalSync', uri: 1, expectedText: '', text: '' })).toBeUndefined();
+  });
+
   it('accepts bounded pasted image data and rejects oversized batches', () => {
     expect(parseEditorToHostMessage({
       type: 'saveImages', selection: { anchor: 0, head: 0 },

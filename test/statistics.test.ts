@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getStatistics } from '../src/statistics.js';
+import { analyzeDocument, getStatistics } from '../src/statistics.js';
 
 describe('getStatistics', () => {
   it('counts Latin words without Markdown markers', () => {
@@ -30,5 +30,25 @@ describe('getStatistics', () => {
 
   it('counts CJK characters individually when adjacent to Latin text', () => {
     expect(getStatistics('abc日本def').words).toBe(4);
+  });
+
+  it('collects headings and statistics in one document analysis', () => {
+    const result = analyzeDocument('# One\r\ntext 日本\n## Two');
+    expect(result.headings).toEqual([
+      { level: 1, text: 'One', from: 0, to: 5 },
+      { level: 2, text: 'Two', from: 15, to: 21 },
+    ]);
+    expect(result.statistics.lines).toBe(3);
+    expect(result.statistics.words).toBe(5);
+  });
+
+  it('analyzes a long document without an input-path-sized pause', () => {
+    const source = Array.from({ length: 50_000 }, (_value, index) => index % 100 === 0 ? `## Section ${index}\n` : 'ordinary text 日本\n').join('');
+    const started = performance.now();
+    const result = analyzeDocument(source);
+    const elapsed = performance.now() - started;
+    expect(result.statistics.lines).toBe(50_001);
+    expect(result.headings).toHaveLength(500);
+    expect(elapsed).toBeLessThan(1_500);
   });
 });

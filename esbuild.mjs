@@ -1,6 +1,8 @@
 import * as esbuild from 'esbuild';
+import { rm } from 'node:fs/promises';
 
 const watch = process.argv.includes('--watch');
+if (!watch) await rm(new URL('./dist/chunks', import.meta.url), { recursive: true, force: true });
 const common = { bundle: true, sourcemap: true, minify: false, logLevel: 'info' };
 const builds = [
   {
@@ -16,9 +18,24 @@ const builds = [
     entryPoints: ['src/webview/main.ts'],
     outfile: 'dist/webview.js',
     platform: 'browser',
-    format: 'iife',
+    format: 'esm',
+    external: ['./katexLoader.js', './mermaidLoader.js'],
     loader: { '.ttf': 'file' },
     assetNames: '[name]',
+  },
+  {
+    ...common,
+    entryPoints: ['src/webview/katexLoader.ts'],
+    outfile: 'dist/katexLoader.js',
+    platform: 'browser',
+    format: 'esm',
+  },
+  {
+    ...common,
+    entryPoints: ['src/webview/mermaidLoader.ts'],
+    outfile: 'dist/mermaidLoader.js',
+    platform: 'browser',
+    format: 'esm',
   },
 ];
 

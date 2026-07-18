@@ -10,40 +10,43 @@ export interface MarkdownTable {
   rows: string[][];
 }
 
-export function findMarkdownTable(source: string, offset: number): MarkdownTable | undefined {
-  const lines = source.split(/\r\n|\r|\n/u);
-  const eol = source.includes('\r\n') ? '\r\n' : source.includes('\r') ? '\r' : '\n';
-  const offsets: number[] = [];
-  let position = 0;
-  for (const line of lines) {
-    offsets.push(position);
-    position += line.length + eol.length;
+export function findMarkdownTable(source: string, offset: number, activeLineNumber?: number): MarkdownTable | undefined {
+  const safeOffset = Math.max(0, Math.min(offset, source.length));
+  let active = lineAt(source, safeOffset);
+  if (!isTableLine(active.text)) return undefined;
+  const tableLines = [active];
+  let linesBeforeActive = 0;
+  let previous = previousLine(source, active.from);
+  while (previous && isTableLine(previous.text)) {
+    tableLines.unshift(previous);
+    linesBeforeActive++;
+    previous = previousLine(source, previous.from);
   }
-  let activeLine = offsets.findIndex((start, index) => offset >= start && offset <= start + (lines[index]?.length ?? 0));
-  if (activeLine < 0) activeLine = lines.length - 1;
-  let startLine = activeLine;
-  while (startLine > 0 && isTableLine(lines[startLine - 1] ?? '')) startLine--;
-  let endLine = activeLine;
-  while (endLine + 1 < lines.length && isTableLine(lines[endLine + 1] ?? '')) endLine++;
-  if (endLine - startLine < 1) return undefined;
+  let next = nextLine(source, active.to);
+  while (next && isTableLine(next.text)) {
+    tableLines.push(next);
+    next = nextLine(source, next.to);
+  }
+  if (tableLines.length < 2) return undefined;
 
   let separatorLine = -1;
-  for (let index = startLine + 1; index <= endLine; index++) {
-    const cells = splitTableRow(lines[index] ?? '');
+  for (let index = 1; index < tableLines.length; index++) {
+    const cells = splitTableRow(tableLines[index]?.text ?? '');
     if (cells.length > 0 && cells.every(isSeparatorCell)) {
       separatorLine = index;
       break;
     }
   }
-  if (separatorLine !== startLine + 1) return undefined;
-  const header = splitTableRow(lines[startLine] ?? '');
-  const separator = splitTableRow(lines[separatorLine] ?? '');
+  if (separatorLine !== 1) return undefined;
+  const header = splitTableRow(tableLines[0]?.text ?? '');
+  const separator = splitTableRow(tableLines[separatorLine]?.text ?? '');
   const columnCount = Math.max(header.length, separator.length);
   if (columnCount === 0) return undefined;
-  const rows = lines.slice(separatorLine + 1, endLine + 1).map((line) => normalizeRow(splitTableRow(line), columnCount));
-  const from = offsets[startLine] ?? 0;
-  const lastLine = lines[endLine] ?? '';
-  const to = (offsets[endLine] ?? source.length) + lastLine.length;
+  const rows = tableLines.slice(separatorLine + 1).map((line) => normalizeRow(splitTableRow(line.text), columnCount));
+  const from = tableLines[0]?.from ?? 0;
+  const to = tableLines.at(-1)?.to ?? from;
+  const startLine = activeLineNumber === undefined ? countLinesBefore(source, from) : activeLineNumber - linesBeforeActive;
+  const endLine = startLine + tableLines.length - 1;
   return {
     from,
     to,
@@ -53,6 +56,39 @@ export function findMarkdownTable(source: string, offset: number): MarkdownTable
     alignments: normalizeAlignments(separator.map(parseAlignment), columnCount),
     rows,
   };
+}
+
+interface SourceLine { from: number; to: number; text: string }
+
+function lineAt(source: string, offset: number): SourceLine {
+  const searchBefore = offset > 0 ? offset - 1 : -1;
+  const previousLf = searchBefore < 0 ? -1 : source.lastIndexOf('\n', searchBefore);
+  const previousCr = searchBefore < 0 ? -1 : source.lastIndexOf('\r', searchBefore);
+  const from = Math.max(previousLf, previousCr) + 1;
+  let to = from;
+  while (to < source.length && source[to] !== '\r' && source[to] !== '\n') to++;
+  return { from, to, text: source.slice(from, to) };
+}
+
+function previousLine(source: string, from: number): SourceLine | undefined {
+  if (from <= 0) return undefined;
+  let end = from - 1;
+  if (source[end] === '\n' && end > 0 && source[end - 1] === '\r') end--;
+  return lineAt(source, Math.max(0, end));
+}
+
+function nextLine(source: string, to: number): SourceLine | undefined {
+  if (to >= source.length) return undefined;
+  const from = to + (source[to] === '\r' && source[to + 1] === '\n' ? 2 : 1);
+  return from <= source.length ? lineAt(source, from) : undefined;
+}
+
+function countLinesBefore(source: string, offset: number): number {
+  let line = 0;
+  for (let index = 0; index < offset; index++) {
+    if (source[index] === '\n' || (source[index] === '\r' && source[index + 1] !== '\n')) line++;
+  }
+  return line;
 }
 
 export function serializeMarkdownTable(table: MarkdownTable, eol = '\n'): string {
@@ -151,7 +187,9 @@ function columnAt(line: string): number {
 }
 
 function isTableLine(line: string): boolean {
-  return line.trim().length > 0 && splitTableRow(line).length > 1;
+  const trimmed = line.trim();
+  const cells = splitTableRow(line);
+  return trimmed.length > 0 && (cells.length > 1 || (cells.length === 1 && trimmed.startsWith('|') && trimmed.endsWith('|')));
 }
 
 function isSeparatorCell(cell: string): boolean {
