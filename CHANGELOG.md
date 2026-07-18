@@ -2,6 +2,10 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.1 - 2026-07-19
+
+- Replaced the Marketplace icon with Markda's dark live-editor canvas and M/Markdown-arrow identity.
+
 ## 0.1.0 - 2026-07-19
 
 Initial preview release.

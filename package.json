@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "Edit Markdown in place with a source-preserving live preview, tables, diagrams, math, images, and HTML export.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "tetsuji16",
   "license": "MIT",
   "homepage": "https://github.com/tetsuji16/Markda#readme",
