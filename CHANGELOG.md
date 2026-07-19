@@ -2,6 +2,12 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.4 - 2026-07-19
+
+- Added unified undo and redo behavior for source text, editable tables, and code blocks.
+- Improved live Markdown marker rendering, list bullets, links, cursor visibility, and active-line highlighting.
+- Fixed duplicate plain-text paste handling and kept external document updates out of local undo history.
+
 ## 0.1.3 - 2026-07-19
 
 - Completed the Typora usability review and documented the prioritized editing plan.

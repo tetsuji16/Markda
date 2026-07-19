@@ -1,5 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CompositionCommitGate, domFragmentToMarkdown, liveEnterEdit } from '../src/webview/editorLogic.js';
+import { CompositionCommitGate, domFragmentToMarkdown, historyShortcut, liveEnterEdit } from '../src/webview/editorLogic.js';
+
+describe('historyShortcut', () => {
+  const shortcut = (key: string, overrides: Partial<KeyboardEvent> = {}) => historyShortcut({
+    key, ctrlKey: true, metaKey: false, shiftKey: false, altKey: false, isComposing: false, ...overrides,
+  });
+
+  it('maps platform undo and redo shortcuts', () => {
+    expect(shortcut('z')).toBe('undo');
+    expect(shortcut('Z', { shiftKey: true })).toBe('redo');
+    expect(shortcut('y')).toBe('redo');
+    expect(shortcut('z', { ctrlKey: false, metaKey: true })).toBe('undo');
+  });
+
+  it('leaves unrelated and composing keystrokes alone', () => {
+    expect(shortcut('z', { ctrlKey: false })).toBeUndefined();
+    expect(shortcut('z', { altKey: true })).toBeUndefined();
+    expect(shortcut('z', { isComposing: true })).toBeUndefined();
+  });
+});
 
 describe('liveEnterEdit', () => {
   it('creates a real paragraph break in prose', () => {

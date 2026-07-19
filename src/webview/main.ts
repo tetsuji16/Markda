@@ -1,10 +1,10 @@
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from '@codemirror/commands';
 import '@vscode/codicons/dist/codicon.css';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting, defaultHighlightStyle, syntaxTree } from '@codemirror/language';
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
-import { Annotation, ChangeSet, EditorSelection, EditorState, StateEffect, StateField } from '@codemirror/state';
-import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { Annotation, ChangeSet, EditorSelection, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
+import { Decoration, EditorView, highlightActiveLine, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import DOMPurify from 'dompurify';
 import MarkdownIt from 'markdown-it';
 import footnote from 'markdown-it-footnote';
@@ -20,7 +20,7 @@ import {
   addTableColumn, addTableRow, alignTableColumn, deleteTableColumn, deleteTableRow,
   findMarkdownTable, serializeMarkdownTable, tableCursor, type MarkdownTable, type TableAlignment,
 } from '../table.js';
-import { CompositionCommitGate, htmlFragmentToMarkdown, liveEnterEdit } from './editorLogic.js';
+import { CompositionCommitGate, historyShortcut, htmlFragmentToMarkdown, liveEnterEdit } from './editorLogic.js';
 
 declare function acquireVsCodeApi<T = unknown>(): {
   postMessage(message: EditorToHostMessage): void;
@@ -29,6 +29,7 @@ declare function acquireVsCodeApi<T = unknown>(): {
 };
 
 interface ViewState {
+  schemaVersion: 2;
   sourceMode: boolean;
   focusMode: boolean;
   typewriterMode: boolean;
@@ -40,8 +41,11 @@ const initialDocument = (globalThis as typeof globalThis & { __markdaInitial?: I
 
 const vscode = acquireVsCodeApi<ViewState>();
 const isJapanese = navigator.language.toLocaleLowerCase().startsWith('ja');
-const initialViewState: ViewState = vscode.getState() ?? {
-  sourceMode: false, focusMode: false, typewriterMode: false, previewVisible: false,
+const savedViewState = vscode.getState();
+// v1 could strand the editor in source mode without a clear visual indication.
+// Reset that legacy state once; states saved by this version remain persistent.
+const initialViewState: ViewState = savedViewState?.schemaVersion === 2 ? savedViewState : {
+  schemaVersion: 2, sourceMode: false, focusMode: false, typewriterMode: false, previewVisible: false,
 };
 const externalUpdate = Annotation.define<boolean>();
 const setMode = StateEffect.define<Partial<ViewState>>();
@@ -150,6 +154,7 @@ const view = new EditorView({
       ]),
       createMarkdownPairing(),
       EditorView.lineWrapping,
+      highlightActiveLine(),
       createLivePreviewPlugin(),
       EditorView.updateListener.of(onEditorUpdate),
       EditorView.domEventHandlers({
@@ -330,7 +335,10 @@ function replaceDocument(text: string): boolean {
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: text },
     selection: EditorSelection.cursor(position),
-    annotations: externalUpdate.of(true),
+    // Host-side edits belong to VS Code's document history. Mapping them
+    // through the local history keeps old positions valid without making
+    // Ctrl+Z revert somebody else's edit as though it were local typing.
+    annotations: [externalUpdate.of(true), Transaction.addToHistory.of(false)],
   });
   return true;
 }
@@ -595,7 +603,9 @@ async function receiveImageFiles(files: FileList | undefined, event: Event): Pro
 
 async function handlePaste(event: ClipboardEvent): Promise<void> {
   const editable = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[contenteditable="true"]') : null;
-  if (editable) {
+  // CodeMirror's own editing surface is contenteditable too. Treating it like a
+  // live table/code widget mutates its DOM behind the editor and duplicates text.
+  if (editable && !editable.classList.contains('cm-content')) {
     if (event.clipboardData?.files.length) {
       event.preventDefault();
       return;
@@ -1202,6 +1212,17 @@ class TaskWidget extends WidgetType {
   eq(other: TaskWidget): boolean { return other.from === this.from && other.checked === this.checked; }
 }
 
+class BulletWidget extends WidgetType {
+  toDOM(): HTMLElement {
+    const bullet = document.createElement('span');
+    bullet.className = 'markda-list-bullet';
+    bullet.textContent = '•';
+    bullet.setAttribute('aria-hidden', 'true');
+    return bullet;
+  }
+  eq(other: BulletWidget): boolean { return other instanceof BulletWidget; }
+}
+
 class ImageWidget extends WidgetType {
   constructor(private readonly editor: EditorView, private readonly from: number, private readonly alt: string, private readonly source: string) { super(); }
   toDOM(): HTMLElement {
@@ -1310,6 +1331,11 @@ class CodeBlockWidget extends WidgetType {
       code.addEventListener('compositionstart', () => gate.start());
       code.addEventListener('compositionend', () => gate.end(commit));
       code.addEventListener('keydown', (event) => {
+        if (runEditableHistoryShortcut(event, this.editor, () => {
+          window.clearTimeout(timer);
+          timer = undefined;
+          gate.flush(commit);
+        })) return;
         if (event.key !== 'Enter' && event.key !== 'Tab') return;
         event.preventDefault();
         insertTextIntoEditable(code, event.key === 'Enter' ? '\n' : '  ');
@@ -1425,7 +1451,14 @@ class TableWidget extends WidgetType {
           commitGate.flush(commit);
           if (activeTableFrom === this.table.from) activeTableFrom = undefined;
         });
-        element.addEventListener('keydown', (event) => navigateEditableCell(event, container));
+        element.addEventListener('keydown', (event) => {
+          if (runEditableHistoryShortcut(event, this.editor, () => {
+            window.clearTimeout(commitTimer);
+            commitTimer = undefined;
+            commitGate.flush(commit);
+          })) return;
+          navigateEditableCell(event, container);
+        });
         tr.append(element);
       });
       tr.addEventListener('dragstart', (event) => { if (rowIndex > 0) event.dataTransfer?.setData('application/x-markda-row', String(rowIndex - 1)); });
@@ -1493,6 +1526,20 @@ function navigateEditableCell(event: KeyboardEvent, container: HTMLElement): voi
   else if (event.key === 'Enter') event.preventDefault();
 }
 
+function runEditableHistoryShortcut(event: KeyboardEvent, editor: EditorView, flush: () => void): boolean {
+  const command = historyShortcut(event);
+  if (!command) return false;
+  event.preventDefault();
+  // Commit the latest DOM value before popping history. This also covers the
+  // debounce window immediately after a keystroke. Blurring makes the widget
+  // rebuild from the restored Markdown instead of retaining stale DOM text.
+  flush();
+  (event.currentTarget as HTMLElement | null)?.blur();
+  (command === 'undo' ? undo : redo)(editor);
+  editor.focus();
+  return true;
+}
+
 function formatEditableSelection(event: KeyboardEvent): boolean {
   const key = event.key.toLocaleLowerCase();
   const markers: readonly [string, string] | undefined = key === 'b' ? ['**', '**'] : key === 'i' ? ['*', '*']
@@ -1541,18 +1588,16 @@ class MathWidget extends WidgetType {
 function createLivePreviewPlugin() {
   return ViewPlugin.fromClass(class {
     decorations: DecorationSet;
-    private activeLine: number;
     constructor(editor: EditorView) {
-      this.activeLine = editor.state.doc.lineAt(editor.state.selection.main.head).number;
       this.decorations = buildDecorations(editor);
     }
     update(update: ViewUpdate): void {
-      const nextActiveLine = update.state.doc.lineAt(update.state.selection.main.head).number;
       const modeChanged = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(setMode)));
-      if (update.docChanged || update.viewportChanged || modeChanged || (update.selectionSet && nextActiveLine !== this.activeLine)) {
+      // Inline source markers are revealed only while the selection intersects
+      // them, so moving within one line must refresh the decorations as well.
+      if (update.docChanged || update.viewportChanged || modeChanged || update.selectionSet) {
         this.decorations = buildDecorations(update.view);
       }
-      this.activeLine = nextActiveLine;
     }
   }, { decorations: (plugin) => plugin.decorations });
 }
@@ -1571,10 +1616,13 @@ function buildDecorations(editor: EditorView): DecorationSet {
     for (let lineNumber = firstLine; lineNumber <= lastLine; lineNumber++) {
       const line = editor.state.doc.line(lineNumber);
       if (line.from < processedUntil) continue;
+      // visibleRanges can meet or overlap on a line boundary. Applying the same
+      // replacement twice duplicates the rendered text and exposes hidden syntax.
+      processedUntil = line.to + 1;
       const text = line.text;
       const heading = text.match(/^(#{1,6})([ \t]+)/u);
       const quote = text.match(/^(>[ \t]?)/u);
-      const list = text.match(/^(\s*)(?:[-+*]|\d+[.)])([ \t]+)/u);
+      const list = text.match(/^(\s*)([-+*]|\d+[.)])([ \t]+)/u);
       if (!state.sourceMode) {
         const table = text.includes('|') ? findMarkdownTable(documentSource ??= editor.state.doc.toString(), line.from, lineNumber - 1) : undefined;
         if (table && (selection.head < table.from || selection.head > table.to)) {
@@ -1612,18 +1660,50 @@ function buildDecorations(editor: EditorView): DecorationSet {
       if (heading) decorations.push({ from: line.from, decoration: Decoration.line({ class: `markda-h${heading[1]?.length ?? 1}` }) });
       if (quote) decorations.push({ from: line.from, decoration: Decoration.line({ class: 'markda-quote' }) });
       if (state.focusMode && (lineNumber < focusLines.from || lineNumber > focusLines.to)) decorations.push({ from: line.from, decoration: Decoration.line({ class: 'markda-unfocused' }) });
-      if (!state.sourceMode && lineNumber !== activeLine) {
-        if (heading) hide(decorations, line.from, line.from + heading[0].length);
-        if (quote) hide(decorations, line.from, line.from + quote[0].length);
+      if (!state.sourceMode) {
+        if (heading && !selectionIntersects(selection.from, selection.to, line.from, line.from + heading[0].length)) {
+          hide(decorations, line.from, line.from + heading[0].length);
+        }
+        if (quote && !selectionIntersects(selection.from, selection.to, line.from, line.from + quote[0].length)) {
+          hide(decorations, line.from, line.from + quote[0].length);
+        }
         if (list && !/^\s*[-+*]\s+\[[ xX]\]/u.test(text)) {
           const markerFrom = line.from + (list[1]?.length ?? 0);
-          decorations.push({ from: markerFrom, to: line.from + list[0].length, decoration: Decoration.mark({ class: 'markda-list-marker' }) });
+          const markerTo = markerFrom + (list[2]?.length ?? 0);
+          if (selectionIntersects(selection.from, selection.to, markerFrom, markerTo)) {
+            decorations.push({ from: markerFrom, to: markerTo, decoration: Decoration.mark({ class: 'markda-list-marker' }) });
+          } else if (/^[-+*]$/u.test(list[2] ?? '')) {
+            decorations.push({ from: markerFrom, to: markerTo, decoration: Decoration.replace({ widget: new BulletWidget() }) });
+          } else {
+            decorations.push({ from: markerFrom, to: markerTo, decoration: Decoration.mark({ class: 'markda-list-marker' }) });
+          }
         }
         addInlineDecorations(decorations, line.from, text, selection.from, selection.to);
+      } else {
+        addSourceLinkDecorations(decorations, line.from, text);
       }
     }
   }
   return Decoration.set(decorations.map((item) => item.decoration.range(item.from, item.to ?? item.from)), true);
+}
+
+function selectionIntersects(selectionFrom: number, selectionTo: number, from: number, to: number): boolean {
+  return selectionFrom === selectionTo
+    ? selectionFrom >= from && selectionFrom < to
+    : selectionTo > from && selectionFrom < to;
+}
+
+function addSourceLinkDecorations(
+  output: { from: number; to?: number; decoration: Decoration }[], lineFrom: number, text: string,
+): void {
+  for (const match of text.matchAll(/!?\[[^\]\n]*\]\([^)\n]+\)/gu)) {
+    const from = lineFrom + (match.index ?? 0);
+    output.push({
+      from,
+      to: from + match[0].length,
+      decoration: Decoration.mark({ class: 'markda-source-link' }),
+    });
+  }
 }
 
 function activeFocusLines(editor: EditorView, activeLine: number): { from: number; to: number } {
@@ -1644,7 +1724,7 @@ function addInlineDecorations(
   for (const match of text.matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/gu)) {
     const start = lineFrom + (match.index ?? 0);
     const end = start + match[0].length;
-    if (selectionTo >= start && selectionFrom <= end) continue;
+    if (selectionIntersects(selectionFrom, selectionTo, start, end)) continue;
     const rawHref = (match[2] ?? '').trim();
     const href = rawHref.match(/^<([^>]+)>/u)?.[1] ?? rawHref.match(/^\S+/u)?.[0] ?? rawHref;
     linkRanges.push({ start, end });
@@ -1652,7 +1732,7 @@ function addInlineDecorations(
   }
   const patterns: readonly [RegExp, string, number][] = [
     [/(\*\*|__)(?=\S)(.+?\S)\1/gu, 'markda-strong', 2],
-    [/(?<!\*)\*(?=\S)(.+?\S)\*(?!\*)/gu, 'markda-emphasis', 1],
+    [/(?<!\*)\*(?!\*)(?=\S)(.+?\S)(?<!\*)\*(?!\*)/gu, 'markda-emphasis', 1],
     [/~~(?=\S)(.+?\S)~~/gu, 'markda-strike', 2],
     [/==(?=\S)(.+?\S)==/gu, 'markda-highlight', 2],
     [/`([^`]+)`/gu, 'markda-code', 1],
@@ -1662,7 +1742,7 @@ function addInlineDecorations(
       const start = lineFrom + (match.index ?? 0);
       const end = start + match[0].length;
       if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
-      if (selectionTo >= start && selectionFrom <= end) continue;
+      if (selectionIntersects(selectionFrom, selectionTo, start, end)) continue;
       hide(output, start, start + markerLength);
       hide(output, end - markerLength, end);
       output.push({ from: start + markerLength, to: end - markerLength, decoration: Decoration.mark({ class: className }) });
@@ -1672,7 +1752,7 @@ function addInlineDecorations(
     const start = lineFrom + (match.index ?? 0);
     const end = start + match[0].length;
     if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
-    if (selectionTo >= start && selectionFrom <= end) continue;
+    if (selectionIntersects(selectionFrom, selectionTo, start, end)) continue;
     output.push({ from: start, to: end, decoration: Decoration.replace({ widget: new MathWidget(match[1] ?? '') }) });
   }
 }
@@ -1682,14 +1762,14 @@ function hide(output: { from: number; to?: number; decoration: Decoration }[], f
 }
 
 function getStyles(): string { return String.raw`
-  .markda-live-link a{color:var(--vscode-textLink-foreground);text-decoration:underline}.markda-link-edit{min-height:18px;padding:0 3px;margin-left:2px;opacity:0}.markda-live-link:hover .markda-link-edit,.markda-link-edit:focus{opacity:1}
+  .markda-live-link a,.markda-source-link,#preview a{color:var(--vscode-textLink-foreground,#4daafc);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}.markda-live-link a:hover,#preview a:hover{color:var(--vscode-textLink-activeForeground,#75beff)}.markda-link-edit{min-height:18px;padding:0 3px;margin-left:2px;opacity:0}.markda-live-link:hover .markda-link-edit,.markda-link-edit:focus{opacity:1}
   .markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}
 :root{--markda-content-width:860px}*{box-sizing:border-box}html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--vscode-editor-foreground);background:var(--vscode-editor-background);font-family:var(--vscode-font-family)}
   button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--vscode-toolbar-hoverBackground)}button.active{background:var(--vscode-toolbar-activeBackground,var(--vscode-list-activeSelectionBackground))}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:2px}
   .markda-shell{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.markda-toolbar{min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--vscode-panel-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--vscode-panel-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}.table-toolbar{display:none;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--vscode-panel-border);background:var(--vscode-sideBar-background);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0;overflow:auto}#preview{display:none;border-left:1px solid var(--vscode-panel-border);padding:30px;line-height:1.65}.preview-visible #preview{display:block}
-.cm-editor{min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px max(24px,calc((100% - var(--markda-content-width))/2)) 90px;line-height:1.7}.cm-content{max-width:var(--markda-content-width);margin:0 auto;caret-color:var(--vscode-editorCursor-foreground)}.cm-line{padding:2px 0;transition:opacity .12s}.cm-selectionBackground{background:var(--vscode-editor-selectionBackground)!important}
-.markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--vscode-panel-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-quote{border-left:4px solid var(--vscode-textBlockQuote-border);padding-left:14px!important;color:var(--vscode-descriptionForeground)}.markda-list-marker{color:var(--vscode-symbolIcon-arrayForeground)}
+.cm-editor{min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px max(24px,calc((100% - var(--markda-content-width))/2)) 90px;line-height:1.7}.cm-content{max-width:var(--markda-content-width);margin:0 auto;caret-color:var(--vscode-editorCursor-foreground,#f0f0f0)}.cm-line{padding:2px 0;transition:opacity .12s}.cm-activeLine{background:var(--vscode-editor-lineHighlightBackground,#ffffff0a)}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--vscode-editorCursor-foreground,#f0f0f0)!important;margin-left:-1px}.cm-selectionBackground{background:var(--vscode-editor-selectionBackground)!important}
+.markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--vscode-panel-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-quote{border-left:4px solid var(--vscode-textBlockQuote-border);padding-left:14px!important;color:var(--vscode-descriptionForeground)}.markda-list-marker{color:var(--vscode-symbolIcon-arrayForeground)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--vscode-editor-foreground);font-weight:700;text-align:center}
   .markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-highlight{background:var(--vscode-editor-findMatchHighlightBackground);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
   .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:middle}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--vscode-panel-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{text-align:center;color:var(--vscode-descriptionForeground);font-size:.9em}.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-code-controls{display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px}.markda-code-controls input{min-width:70px;width:110px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:3px 5px}.markda-code-controls button{font-size:12px;min-height:24px}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--vscode-textCodeBlock-background)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none}.markda-code-rendered{padding:10px}.markda-live-table-wrap{overflow:auto;margin:12px 0}.markda-inline-table-controls{display:flex;gap:4px;justify-content:flex-end;margin-bottom:4px}.markda-inline-table-controls button{font-size:12px;min-height:24px}.markda-live-table-wrap table{border-collapse:collapse;width:100%}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--vscode-panel-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto}.markda-live-table-wrap th{background:var(--vscode-sideBar-background)}
   .markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--vscode-panel-border);border-radius:5px;color:var(--vscode-descriptionForeground)}

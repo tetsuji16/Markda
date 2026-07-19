@@ -5,6 +5,21 @@ export interface TextEdit {
   cursor: number;
 }
 
+export type HistoryShortcut = 'undo' | 'redo';
+
+/**
+ * Recognizes document-history shortcuts used while focus is inside one of the
+ * live preview's contenteditable widgets. IME composition owns its keystrokes,
+ * and Alt-modified shortcuts are deliberately left to the platform.
+ */
+export function historyShortcut(event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'isComposing' | 'key' | 'metaKey' | 'shiftKey'>): HistoryShortcut | undefined {
+  if (event.isComposing || event.altKey || (!event.ctrlKey && !event.metaKey)) return undefined;
+  const key = event.key.toLocaleLowerCase();
+  if (key === 'z') return event.shiftKey ? 'redo' : 'undo';
+  if (key === 'y' && !event.shiftKey) return 'redo';
+  return undefined;
+}
+
 /**
  * Typora-style live-mode line breaks. Source mode and structural Markdown
  * blocks keep CodeMirror's native behavior; prose gets a real paragraph break.
