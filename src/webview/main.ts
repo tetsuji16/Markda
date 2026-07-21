@@ -49,6 +49,7 @@ const initialViewState: ViewState = savedViewState?.schemaVersion === 2 ? savedV
 };
 const externalUpdate = Annotation.define<boolean>();
 const setMode = StateEffect.define<Partial<ViewState>>();
+const refreshLivePreview = StateEffect.define<null>();
 const modeField = StateField.define<ViewState>({
   create: () => initialViewState,
   update(value, transaction) {
@@ -72,12 +73,14 @@ let previewRenderVersion = 0;
 let clientRenderer: MarkdownIt | undefined;
 let mermaidPromise: Promise<typeof import('mermaid')['default']> | undefined;
 let katexPromise: Promise<typeof import('katex')['default']> | undefined;
+let katexInstance: typeof import('katex')['default'] | undefined;
 let cachedDocumentText = '';
 let cachedTable: MarkdownTable | undefined;
 let activeTableFrom: number | undefined;
 let activeCodeFrom: number | undefined;
 let settings: EditorSettings = initialDocument?.settings ?? {
   contentWidth: 860, autoPairMarkdown: true, typewriterKeepCentered: true, previewUpdateDelay: 500, liveTableMaxCells: 600,
+  themeMode: 'auto',
   markdown: { math: true, diagrams: true, html: true, breaks: false },
   security: { allowRemoteResources: 'prompt', allowUnsafeHtml: false },
   theme: { light: 'paper', dark: 'midnight' },
@@ -101,6 +104,7 @@ document.body.innerHTML = `<style>${getStyles()}</style>
     <button data-command="insertImage" title="Insert Images" aria-label="Insert images"><i class="codicon codicon-file-media" aria-hidden="true"></i></button>
     <button data-command="insertMathBlock" title="Insert Math Block" aria-label="Insert math block"><span class="math-icon" aria-hidden="true">∑</span></button>
     <span class="toolbar-spacer"></span>
+    <button id="theme-toggle" title="Toggle theme (auto → light → dark)" aria-label="Toggle theme" aria-pressed="false"><i class="codicon codicon-color-mode" aria-hidden="true"></i><span>Theme</span></button>
     <button id="preview-button" title="Rendered Preview" aria-label="Toggle rendered preview" aria-pressed="false"><i class="codicon codicon-preview" aria-hidden="true"></i><span>Preview</span></button>
   </header>
   <div id="table-toolbar" class="table-toolbar" aria-label="Table controls">
@@ -134,6 +138,25 @@ document.querySelectorAll<HTMLButtonElement>('button[title]').forEach((button) =
 document.querySelectorAll<HTMLElement>('.toolbar-separator').forEach((separator) => separator.setAttribute('aria-hidden', 'true'));
 if (isJapanese) localizeStaticUi();
 
+const setBlockDecorations = StateEffect.define<DecorationSet>();
+
+/**
+ * Block-level live-preview widgets (tables, fenced code blocks, images) live here
+ * rather than in the view plugin: CodeMirror throws "Block decorations may not be
+ * specified via plugins" if a view plugin's `decorations` property returns block
+ * decorations, which corrupts editing (e.g. the cursor jumps to the top).
+ */
+const blockDecorationsField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setBlockDecorations)) return effect.value;
+    }
+    return value;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 const view = new EditorView({
   parent: document.querySelector<HTMLElement>('#editor')!,
   state: EditorState.create({
@@ -156,6 +179,7 @@ const view = new EditorView({
       EditorView.lineWrapping,
       highlightActiveLine(),
       createLivePreviewPlugin(),
+      blockDecorationsField,
       EditorView.updateListener.of(onEditorUpdate),
       EditorView.domEventHandlers({
         click(event) {
@@ -172,6 +196,12 @@ const view = new EditorView({
   }),
 });
 
+// Test-only accessor: lets integration tests reach the live EditorView instance
+// without relying on undocumented DOM symbols. No effect in production.
+export function __getEditorView(): EditorView {
+  return view;
+}
+
 document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((button) => {
   button.addEventListener('click', () => runCommand(button.dataset.command as EditorCommand));
 });
@@ -179,6 +209,23 @@ document.querySelectorAll<HTMLButtonElement>('[data-table-command]').forEach((bu
   button.addEventListener('click', () => runTableCommand(button.dataset.tableCommand ?? ''));
 });
 document.querySelector('#preview-button')?.addEventListener('click', () => togglePreview());
+const themeToggleButton = document.querySelector<HTMLButtonElement>('#theme-toggle');
+function updateThemeToggleLabel(): void {
+  if (!themeToggleButton) return;
+  const labels: Record<typeof settings.themeMode, string> = { auto: 'Auto', light: 'Light', dark: 'Dark' };
+  themeToggleButton.querySelector('span')?.replaceChildren(document.createTextNode(`Theme: ${labels[settings.themeMode]}`));
+  themeToggleButton.setAttribute('aria-pressed', String(settings.themeMode !== 'auto'));
+  themeToggleButton.title = `Theme: ${labels[settings.themeMode]} (click to change)`;
+}
+themeToggleButton?.addEventListener('click', () => {
+  const order: ('auto' | 'light' | 'dark')[] = ['auto', 'light', 'dark'];
+  const next = order[(order.indexOf(settings.themeMode) + 1) % order.length] as 'auto' | 'light' | 'dark';
+  settings.themeMode = next;
+  applySettings();
+  updateThemeToggleLabel();
+  vscode.postMessage({ type: 'updateThemeMode', mode: next });
+});
+updateThemeToggleLabel();
 statisticsButton.addEventListener('click', () => toggleStatistics());
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideStatistics(); });
 document.querySelector('#table-insert-confirm')?.addEventListener('click', () => insertTableFromDialog());
@@ -207,6 +254,9 @@ if (initialDocument) {
   scheduleDerivedStateUpdate();
 }
 vscode.postMessage({ type: 'ready' });
+loadKatex().then(() => {
+  view.dispatch({ effects: refreshLivePreview.of(null) });
+});
 
 function onHostMessage(message: HostToEditorMessage): void {
   switch (message.type) {
@@ -234,7 +284,7 @@ function onHostMessage(message: HostToEditorMessage): void {
         inFlightChanges = undefined;
         pendingChanges = undefined;
         replaceDocument(message.text);
-        syncState.textContent = 'Updated externally';
+        syncState.textContent = 'updated externally';
       }
       return;
     case 'configurationChanged':
@@ -286,7 +336,7 @@ function flushEdit(): void {
   const changes = changeSetToTextChanges(pendingChanges);
   pendingChanges = undefined;
   if (!changes.length) return;
-  inFlightTransaction = crypto.randomUUID();
+  inFlightTransaction = `${documentVersion}:${crypto.randomUUID()}`;
   inFlightChanges = changes;
   syncState.textContent = 'Syncing…';
   vscode.postMessage({
@@ -474,10 +524,27 @@ function applyViewState(state: ViewState): void {
 }
 
 function applySettings(): void {
-  document.documentElement.style.setProperty('--markda-content-width', `${settings.contentWidth}px`);
-  const dark = document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast');
+  // A contentWidth of 0 (or unset) means "fill the window" — the editor area
+  // grows with the window instead of being capped at a fixed measure.
+  const contentWidth = settings.contentWidth && settings.contentWidth > 0 ? `${settings.contentWidth}px` : 'none';
+  document.documentElement.style.setProperty('--markda-content-width', contentWidth);
+  // When capped, center the content; when filling the window, use a fixed gutter.
+  const paddingX = settings.contentWidth && settings.contentWidth > 0
+    ? `max(24px, calc((100% - ${settings.contentWidth}px) / 2))`
+    : '24px';
+  document.documentElement.style.setProperty('--markda-padding-x', paddingX);
+  const dark = settings.themeMode === 'dark'
+    || (settings.themeMode === 'auto'
+      && (document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')));
   const themeName = (dark ? settings.theme.dark : settings.theme.light).replace(/[^a-zA-Z0-9._-]/gu, '');
   document.body.dataset.markdaTheme = themeName;
+  // Reliable caret color fallback per theme (VS Code's editorCursor.foreground
+  // is often not injected into the webview, so we guarantee a visible color).
+  document.documentElement.style.setProperty('--markda-cursor-color', dark ? '#ffffff' : '#1a1a1a');
+  // Self-contained light/dark backgrounds so the editor area follows the chosen
+  // theme even when VS Code does not inject editor.background/foreground.
+  document.documentElement.style.setProperty('--markda-bg', dark ? '#1e1e1e' : '#ffffff');
+  document.documentElement.style.setProperty('--markda-fg', dark ? '#d4d4d4' : '#1a1a1a');
   let themeLink = document.querySelector<HTMLLinkElement>('#markda-user-theme');
   if (!themeLink) {
     themeLink = document.createElement('link');
@@ -763,10 +830,35 @@ function createMarkdownPairing() { return EditorView.inputHandler.of((editor, fr
   return true;
 }); }
 
+// Move the cursor exactly one line up/down, preserving the column. CodeMirror's
+// built-in vertical motion relies on layout coordinates which the live-preview
+// decorations can perturb (cursor jumps to the document top); this explicit
+// handler keeps motion deterministic regardless of decoration state. When Shift
+// is held the selection anchor is preserved so the range extends/contracts by one line.
+function moveCursorVertically(editor: EditorView, dir: 1 | -1, extend: boolean): boolean {
+  const selection = editor.state.selection.main;
+  const doc = editor.state.doc;
+  const line = doc.lineAt(selection.head);
+  const targetLineNumber = line.number + dir;
+  if (targetLineNumber < 1 || targetLineNumber > doc.lines) return false;
+  const targetLine = doc.line(targetLineNumber);
+  const column = Math.min(selection.head - line.from, targetLine.length);
+  const head = targetLine.from + column;
+  const next = extend
+    ? EditorSelection.range(selection.anchor, head)
+    : EditorSelection.cursor(head);
+  editor.dispatch({ selection: next });
+  return true;
+}
+
 function createMarkdaKeymap() {
   return [
     { key: 'Enter', run: (editor: EditorView) => insertLiveLineBreak(editor, false) },
     { key: 'Shift-Enter', run: (editor: EditorView) => insertLiveLineBreak(editor, true) },
+    { key: 'ArrowUp', run: (editor: EditorView) => moveCursorVertically(editor, -1, false) },
+    { key: 'ArrowDown', run: (editor: EditorView) => moveCursorVertically(editor, 1, false) },
+    { key: 'Shift-ArrowUp', run: (editor: EditorView) => moveCursorVertically(editor, -1, true) },
+    { key: 'Shift-ArrowDown', run: (editor: EditorView) => moveCursorVertically(editor, 1, true) },
     { key: 'Tab', run: (editor: EditorView) => navigateTableCell(editor, false) },
     { key: 'Shift-Tab', run: (editor: EditorView) => navigateTableCell(editor, true) },
     { key: 'Mod-b', run: (editor: EditorView) => wrapSelection(editor, '**', '**') },
@@ -1093,7 +1185,10 @@ function prepareMarkdownForPreview(source: string): string {
 }
 
 function loadKatex(): Promise<typeof import('katex')['default']> {
-  return katexPromise ??= import('./katexLoader.js').then((module) => module.api);
+  return katexPromise ??= import('./katexLoader.js').then((module) => {
+    katexInstance = module.api;
+    return module.api;
+  });
 }
 
 async function renderKatexInto(element: HTMLElement, source: string, displayMode: boolean): Promise<void> {
@@ -1145,8 +1240,35 @@ function loadMermaid(): Promise<typeof import('mermaid')['default']> {
   return mermaidPromise ??= import('./mermaidLoader.js').then((module) => module.api);
 }
 
+function isDarkMode(): boolean {
+  if (document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')) return true;
+  if (document.body.classList.contains('vscode-light')) return false;
+  const bg = getComputedStyle(document.body).getPropertyValue('--vscode-editor-background').trim();
+  if (bg) {
+    const hex = bg.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    if (hex) {
+      const luminance = (0.299 * parseInt(hex[1]!, 16) + 0.587 * parseInt(hex[2]!, 16) + 0.114 * parseInt(hex[3]!, 16)) / 255;
+      return luminance < 0.5;
+    }
+  }
+  return false;
+}
+
 function initializeMermaid(mermaid: typeof import('mermaid')['default']): void {
-  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: document.body.classList.contains('vscode-dark') ? 'dark' : 'default' });
+  const dark = isDarkMode();
+  const fg = getComputedStyle(document.body).getPropertyValue('--vscode-editor-foreground').trim() || (dark ? '#d4d4d4' : '#000000');
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: dark ? 'dark' : 'default',
+    themeVariables: {
+      primaryTextColor: fg,
+      lineColor: fg,
+      textColor: fg,
+      mainBkg: dark ? '#2d2d2d' : '#f0f0f0',
+      nodeBorder: dark ? '#888' : '#aaa',
+    },
+  });
 }
 
 async function renderLiveMermaid(container: HTMLElement, source: string): Promise<void> {
@@ -1574,35 +1696,71 @@ function commitWidgetTable(editor: EditorView, from: number, mutate: (table: Mar
 }
 
 class MathWidget extends WidgetType {
-  constructor(private readonly source: string) { super(); }
+  constructor(private readonly source: string, private readonly displayMode: boolean = false) { super(); }
   toDOM(): HTMLElement {
-    const element = document.createElement('span');
-    element.className = 'markda-inline-math';
-    element.textContent = this.source;
-    void renderKatexInto(element, this.source, false);
+    const element = document.createElement(this.displayMode ? 'div' : 'span');
+    element.className = this.displayMode ? 'markda-block-math' : 'markda-inline-math';
+    if (katexInstance) {
+      try {
+        katexInstance.render(this.source, element, { displayMode: this.displayMode, throwOnError: false, strict: 'warn', trust: false });
+      } catch (error) {
+        element.classList.add('markda-render-error');
+        element.textContent = String(error);
+      }
+    } else {
+      element.textContent = this.source;
+      void renderKatexInto(element, this.source, this.displayMode);
+    }
     return element;
   }
-  eq(other: MathWidget): boolean { return other.source === this.source; }
+  eq(other: MathWidget): boolean { return other.source === this.source && other.displayMode === this.displayMode; }
 }
 
 function createLivePreviewPlugin() {
   return ViewPlugin.fromClass(class {
     decorations: DecorationSet;
     constructor(editor: EditorView) {
-      this.decorations = buildDecorations(editor);
+      // Widget classes are declared later in this module and are still in their
+      // temporal dead zone while EditorView itself is being constructed. Build
+      // after module evaluation completes; otherwise CodeMirror catches the
+      // ReferenceError and permanently disables the whole live-preview plugin.
+      this.decorations = Decoration.none;
+      requestAnimationFrame(() => {
+        editor.dispatch({ effects: refreshLivePreview.of(null) });
+      });
     }
     update(update: ViewUpdate): void {
       const modeChanged = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(setMode)));
+      const refreshRequested = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(refreshLivePreview)));
       // Inline source markers are revealed only while the selection intersects
       // them, so moving within one line must refresh the decorations as well.
-      if (update.docChanged || update.viewportChanged || modeChanged || update.selectionSet) {
-        this.decorations = buildDecorations(update.view);
+      // Block decorations (table / code-block / image widgets) are written into
+      // `blockDecorationsField` here, because CodeMirror forbids exposing block
+      // decorations from a view plugin's `decorations` property —doing so throws
+      // "Block decorations may not be specified via plugins" and corrupts editing.
+      // The block update is deferred to a microtask so we never dispatch from
+      // inside CodeMirror's own update cycle (which would recurse / drop the
+      // inline decorations computed just above).
+      // IMPORTANT: block decorations are NOT rebuilt on selectionSet alone because
+      // an effects-only dispatch from a microtask after a cursor move can confuse
+      // CodeMirror's internal cursor tracking when block-element widgets toggle,
+      // causing the cursor to jump to position 0 on ArrowUp/ArrowDown.
+      // Inline decorations DO rebuild on selectionSet (see inlineNeedsUpdate) so
+      // that marker reveal/hide follows the caret as the user moves within a line.
+      const inlineNeedsUpdate = update.docChanged || update.viewportChanged || modeChanged || refreshRequested || update.selectionSet;
+      if (inlineNeedsUpdate) {
+        this.decorations = buildInlineDecorations(update.view);
+        if (update.docChanged || update.viewportChanged || modeChanged || refreshRequested) {
+          queueMicrotask(() => {
+            if (update.view.dom.isConnected) update.view.dispatch({ selection: update.view.state.selection, effects: setBlockDecorations.of(buildBlockDecorations(update.view)) });
+          });
+        }
       }
     }
   }, { decorations: (plugin) => plugin.decorations });
 }
 
-function buildDecorations(editor: EditorView): DecorationSet {
+function buildInlineDecorations(editor: EditorView): DecorationSet {
   const decorations: { from: number; to?: number; decoration: Decoration }[] = [];
   const state = editor.state.field(modeField);
   const selection = editor.state.selection.main;
@@ -1620,37 +1778,22 @@ function buildDecorations(editor: EditorView): DecorationSet {
       // replacement twice duplicates the rendered text and exposes hidden syntax.
       processedUntil = line.to + 1;
       const text = line.text;
-      const heading = text.match(/^(#{1,6})([ \t]+)/u);
+      // Skip block math ($$ ... $$) ranges: the block-decoration pass already
+      // replaces them with a widget, so the inline pass must not also touch them.
+      if (/^\s*\$\$\s*$/u.test(text)) {
+        let endLine = lineNumber + 1;
+        while (endLine <= editor.state.doc.lines && !/^\s*\$\$\s*$/u.test(editor.state.doc.line(endLine).text)) {
+          endLine++;
+        }
+        if (endLine <= editor.state.doc.lines) {
+          processedUntil = editor.state.doc.line(endLine).to + 1;
+          continue;
+        }
+      }
+      const heading = text.match(/^(#{1,6})([ \t]+)(?=\S)/u);
       const quote = text.match(/^(>[ \t]?)/u);
       const list = text.match(/^(\s*)([-+*]|\d+[.)])([ \t]+)/u);
       if (!state.sourceMode) {
-        const table = text.includes('|') ? findMarkdownTable(documentSource ??= editor.state.doc.toString(), line.from, lineNumber - 1) : undefined;
-        if (table && (selection.head < table.from || selection.head > table.to)) {
-          decorations.push({ from: table.from, to: table.to, decoration: Decoration.replace({ widget: new TableWidget(editor, table), block: true }) });
-          processedUntil = table.to;
-          continue;
-        }
-        const fence = text.match(/^\s*(```|~~~)\s*([^\s`~]*)/u);
-        if (fence) {
-          let endLine = lineNumber;
-          const closeFence = new RegExp(`^\\s*${fence[1]}\\s*$`, 'u');
-          while (endLine < editor.state.doc.lines && !closeFence.test(editor.state.doc.line(endLine + 1).text)) endLine++;
-          if (endLine < editor.state.doc.lines) endLine++;
-          const end = editor.state.doc.line(endLine).to;
-          if (selection.head < line.from || selection.head > end) {
-            const contentRange = codeContentRange(editor.state, line.to, editor.state.doc.line(endLine).from);
-            const contentFrom = contentRange.from;
-            const contentTo = contentRange.to;
-            decorations.push({ from: line.from, to: end, decoration: Decoration.replace({ widget: new CodeBlockWidget(editor, line.from, editor.state.sliceDoc(contentFrom, Math.max(contentFrom, contentTo)), fence[2] ?? ''), block: true }) });
-            processedUntil = end;
-            continue;
-          }
-        }
-        const image = text.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/u);
-        if (image && lineNumber !== activeLine) {
-          decorations.push({ from: line.from, to: line.to, decoration: Decoration.replace({ widget: new ImageWidget(editor, line.from, image[1] ?? '', image[2] ?? ''), block: true }) });
-          continue;
-        }
         const task = text.match(/^(\s*[-+*]\s+)\[([ xX])\](\s+)/u);
         if (task) {
           const from = line.from + (task[1]?.length ?? 0);
@@ -1678,12 +1821,84 @@ function buildDecorations(editor: EditorView): DecorationSet {
             decorations.push({ from: markerFrom, to: markerTo, decoration: Decoration.mark({ class: 'markda-list-marker' }) });
           }
         }
-        addInlineDecorations(decorations, line.from, text, selection.from, selection.to);
+        addInlineDecorations(decorations, editor, line.from, text, selection.from, selection.to);
       } else {
         addSourceLinkDecorations(decorations, line.from, text);
       }
     }
   }
+  return Decoration.set(decorations.map((item) => item.decoration.range(item.from, item.to ?? item.from)), true);
+}
+
+/**
+ * Block-level widgets (tables, fenced code blocks, images) for the live preview.
+ * Kept separate from `buildInlineDecorations` because these are block decorations,
+ * which CodeMirror only accepts from a state field (`blockDecorationsField`), not
+ * from a view plugin's `decorations` property.
+ */
+function buildBlockDecorations(editor: EditorView): DecorationSet {
+  const decorations: { from: number; to?: number; decoration: Decoration }[] = [];
+  const state = editor.state.field(modeField);
+  const selection = editor.state.selection.main;
+  let documentSource: string | undefined;
+  if (state.sourceMode) return Decoration.none;
+  let processedUntil = -1;
+  for (const range of editor.visibleRanges) {
+    const firstLine = editor.state.doc.lineAt(range.from).number;
+    const lastLine = editor.state.doc.lineAt(range.to).number;
+    for (let lineNumber = firstLine; lineNumber <= lastLine; lineNumber++) {
+      const line = editor.state.doc.line(lineNumber);
+      if (line.from < processedUntil) continue;
+      processedUntil = line.to + 1;
+      const text = line.text;
+      // Block math: a line that is exactly "$$" (or "$$" with trailing spaces)
+      // opens a multi-line math block that closes at the next "$$" line.
+      const blockMathOpen = /^\s*\$\$\s*$/u.test(text);
+      if (blockMathOpen) {
+        let endLine = lineNumber + 1;
+        while (endLine <= editor.state.doc.lines && !/^\s*\$\$\s*$/u.test(editor.state.doc.line(endLine).text)) {
+          endLine++;
+        }
+        if (endLine <= editor.state.doc.lines) {
+          const from = line.from;
+          const to = editor.state.doc.line(endLine).to;
+          // Always render the block math as a widget so the raw $$ delimiters
+          // and source are never shown alongside the rendered formula.
+          const source = editor.state.sliceDoc(line.to + 1, editor.state.doc.line(endLine).from);
+          decorations.push({ from, to, decoration: Decoration.replace({ widget: new MathWidget(source, true), block: true }) });
+          processedUntil = to + 1;
+          continue;
+        }
+      }
+      const table = text.includes('|') ? findMarkdownTable(documentSource ??= editor.state.doc.toString(), line.from, lineNumber - 1) : undefined;
+      if (table && (selection.head < table.from || selection.head > table.to)) {
+        decorations.push({ from: table.from, to: table.to, decoration: Decoration.replace({ widget: new TableWidget(editor, table), block: true }) });
+        processedUntil = table.to;
+        continue;
+      }
+      const fence = text.match(/^\s*(```|~~~)\s*([^\s`~]*)/u);
+      if (fence) {
+        let endLine = lineNumber;
+        const closeFence = new RegExp(`^\\s*${fence[1]}\\s*$`, 'u');
+        while (endLine < editor.state.doc.lines && !closeFence.test(editor.state.doc.line(endLine + 1).text)) endLine++;
+        if (endLine < editor.state.doc.lines) endLine++;
+        const end = editor.state.doc.line(endLine).to;
+        if (selection.head < line.from || selection.head > end) {
+          const contentRange = codeContentRange(editor.state, line.to, editor.state.doc.line(endLine).from);
+          const contentFrom = contentRange.from;
+          const contentTo = contentRange.to;
+          decorations.push({ from: line.from, to: end, decoration: Decoration.replace({ widget: new CodeBlockWidget(editor, line.from, editor.state.sliceDoc(contentFrom, Math.max(contentFrom, contentTo)), fence[2] ?? ''), block: true }) });
+          processedUntil = end;
+          continue;
+        }
+      }
+      const image = text.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/u);
+      if (image && lineNumber !== editor.state.doc.lineAt(selection.head).number) {
+        decorations.push({ from: line.from, to: line.to, decoration: Decoration.replace({ widget: new ImageWidget(editor, line.from, image[1] ?? '', image[2] ?? ''), block: true }) });
+      }
+    }
+  }
+  if (decorations.length === 0) return Decoration.none;
   return Decoration.set(decorations.map((item) => item.decoration.range(item.from, item.to ?? item.from)), true);
 }
 
@@ -1718,7 +1933,8 @@ function activeFocusLines(editor: EditorView, activeLine: number): { from: numbe
 }
 
 function addInlineDecorations(
-  output: { from: number; to?: number; decoration: Decoration }[], lineFrom: number, text: string, selectionFrom: number, selectionTo: number,
+  output: { from: number; to?: number; decoration: Decoration }[], editor: EditorView,
+  lineFrom: number, text: string, selectionFrom: number, selectionTo: number,
 ): void {
   const linkRanges: { start: number; end: number }[] = [];
   for (const match of text.matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/gu)) {
@@ -1728,7 +1944,7 @@ function addInlineDecorations(
     const rawHref = (match[2] ?? '').trim();
     const href = rawHref.match(/^<([^>]+)>/u)?.[1] ?? rawHref.match(/^\S+/u)?.[0] ?? rawHref;
     linkRanges.push({ start, end });
-    output.push({ from: start, to: end, decoration: Decoration.replace({ widget: new LinkWidget(view, start, match[1] ?? '', href) }) });
+    output.push({ from: start, to: end, decoration: Decoration.replace({ widget: new LinkWidget(editor, start, match[1] ?? '', href) }) });
   }
   const patterns: readonly [RegExp, string, number][] = [
     [/(\*\*|__)(?=\S)(.+?\S)\1/gu, 'markda-strong', 2],
@@ -1758,25 +1974,30 @@ function addInlineDecorations(
 }
 
 function hide(output: { from: number; to?: number; decoration: Decoration }[], from: number, to: number): void {
-  if (to > from) output.push({ from, to, decoration: Decoration.replace({}) });
+  // Use a mark (not a widget replacement) so the source markers keep their
+  // original width on screen. A replace widget would shift CodeMirror's
+  // coordinate mapping and make click/click-to-cursor offsets drift — worst
+  // further down the document. The markers are simply painted transparent.
+  if (to > from) output.push({ from, to, decoration: Decoration.mark({ class: 'markda-hide-marker' }) });
 }
 
 function getStyles(): string { return String.raw`
   .markda-live-link a,.markda-source-link,#preview a{color:var(--vscode-textLink-foreground,#4daafc);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}.markda-live-link a:hover,#preview a:hover{color:var(--vscode-textLink-activeForeground,#75beff)}.markda-link-edit{min-height:18px;padding:0 3px;margin-left:2px;opacity:0}.markda-live-link:hover .markda-link-edit,.markda-link-edit:focus{opacity:1}
   .markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}
-:root{--markda-content-width:860px}*{box-sizing:border-box}html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--vscode-editor-foreground);background:var(--vscode-editor-background);font-family:var(--vscode-font-family)}
+:root{--markda-content-width:860px}*{box-sizing:border-box}html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--markda-fg,var(--vscode-editor-foreground));background:var(--markda-bg,var(--vscode-editor-background));font-family:var(--vscode-font-family)}
   button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--vscode-toolbar-hoverBackground)}button.active{background:var(--vscode-toolbar-activeBackground,var(--vscode-list-activeSelectionBackground))}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:2px}
   .markda-shell{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.markda-toolbar{min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--vscode-panel-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--vscode-panel-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}.table-toolbar{display:none;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--vscode-panel-border);background:var(--vscode-sideBar-background);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0;overflow:auto}#preview{display:none;border-left:1px solid var(--vscode-panel-border);padding:30px;line-height:1.65}.preview-visible #preview{display:block}
-.cm-editor{min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px max(24px,calc((100% - var(--markda-content-width))/2)) 90px;line-height:1.7}.cm-content{max-width:var(--markda-content-width);margin:0 auto;caret-color:var(--vscode-editorCursor-foreground,#f0f0f0)}.cm-line{padding:2px 0;transition:opacity .12s}.cm-activeLine{background:var(--vscode-editor-lineHighlightBackground,#ffffff0a)}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--vscode-editorCursor-foreground,#f0f0f0)!important;margin-left:-1px}.cm-selectionBackground{background:var(--vscode-editor-selectionBackground)!important}
+.cm-editor{min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px var(--markda-padding-x,24px) 90px;line-height:1.7}.cm-content{max-width:none;margin:0;caret-color:var(--vscode-editorCursor-foreground,var(--markda-cursor-color,#000))}.cm-line{padding:2px 0;transition:opacity .12s}.cm-activeLine{background:var(--vscode-editor-lineHighlightBackground,#ffffff0a)}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color,#000)!important;margin-left:-1px}.cm-selectionBackground{background:var(--vscode-editor-selectionBackground)!important}
 .markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--vscode-panel-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-quote{border-left:4px solid var(--vscode-textBlockQuote-border);padding-left:14px!important;color:var(--vscode-descriptionForeground)}.markda-list-marker{color:var(--vscode-symbolIcon-arrayForeground)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--vscode-editor-foreground);font-weight:700;text-align:center}
   .markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-highlight{background:var(--vscode-editor-findMatchHighlightBackground);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
-  .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:middle}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--vscode-panel-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{text-align:center;color:var(--vscode-descriptionForeground);font-size:.9em}.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-code-controls{display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px}.markda-code-controls input{min-width:70px;width:110px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:3px 5px}.markda-code-controls button{font-size:12px;min-height:24px}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--vscode-textCodeBlock-background)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none}.markda-code-rendered{padding:10px}.markda-live-table-wrap{overflow:auto;margin:12px 0}.markda-inline-table-controls{display:flex;gap:4px;justify-content:flex-end;margin-bottom:4px}.markda-inline-table-controls button{font-size:12px;min-height:24px}.markda-live-table-wrap table{border-collapse:collapse;width:100%}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--vscode-panel-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto}.markda-live-table-wrap th{background:var(--vscode-sideBar-background)}
+  .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--vscode-panel-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{text-align:center;color:var(--vscode-descriptionForeground);font-size:.9em}.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-code-controls{display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px}.markda-code-controls input{min-width:70px;width:110px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:3px 5px}.markda-code-controls button{font-size:12px;min-height:24px}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--vscode-textCodeBlock-background)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none}.markda-code-rendered{padding:10px}.markda-live-table-wrap{overflow:auto;margin:12px 0}.markda-inline-table-controls{display:flex;gap:4px;justify-content:flex-end;margin-bottom:4px}.markda-inline-table-controls button{font-size:12px;min-height:24px}.markda-live-table-wrap table{border-collapse:collapse;width:100%}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--vscode-panel-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto}.markda-live-table-wrap th{background:var(--vscode-sideBar-background)}
   .markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--vscode-panel-border);border-radius:5px;color:var(--vscode-descriptionForeground)}
   .markda-footer{height:24px;padding:0 10px;display:flex;align-items:center;justify-content:flex-end;gap:12px;color:var(--vscode-statusBar-foreground);background:var(--vscode-statusBar-background);font-size:12px;position:relative}.markda-footer button{font-size:12px;min-height:20px;padding:0 4px}#statistics-panel{position:absolute;right:8px;bottom:28px;z-index:10;min-width:250px;padding:12px;color:var(--vscode-editorWidget-foreground);background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border);box-shadow:0 4px 14px #0005;border-radius:6px}#statistics-panel[hidden]{display:none}#statistics-panel dl{display:grid;grid-template-columns:1fr auto;gap:6px 16px;margin:0}#statistics-panel dt{color:var(--vscode-descriptionForeground)}#statistics-panel dd{margin:0;text-align:right}
   dialog{color:var(--vscode-editorWidget-foreground);background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:260px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:76px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:5px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
   body[data-markda-theme="paper"] .cm-content{font-family:Georgia,"Times New Roman",serif}body[data-markda-theme="midnight"]{--markda-accent:#7aa2f7}body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
 #preview h1,#preview h2,#preview h3{line-height:1.25;margin-top:1.5em}#preview h2{border-bottom:1px solid var(--vscode-panel-border);padding-bottom:.25em}#preview pre{overflow:auto;padding:14px;background:var(--vscode-textCodeBlock-background);border-radius:5px}#preview code{font-family:var(--vscode-editor-font-family)}#preview blockquote{margin-left:0;padding-left:1em;border-left:4px solid var(--vscode-textBlockQuote-border);color:var(--vscode-descriptionForeground)}#preview table{border-collapse:collapse;width:100%}#preview th,#preview td{border:1px solid var(--vscode-panel-border);padding:6px 10px}#preview img{max-width:100%}.markda-render-error{color:var(--vscode-errorForeground)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--vscode-panel-border);color:var(--vscode-descriptionForeground)}
   @media(max-width:760px){.markda-toolbar button span:not(.math-icon){display:none}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--vscode-panel-border)}.cm-scroller{padding-left:20px;padding-right:20px}}
+  .markda-hide-marker{color:transparent}.markda-hide-marker::selection{color:var(--vscode-editor-foreground)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 `; }
