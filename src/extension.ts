@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 import { ExportService } from './exportService.js';
 import { MarkdaEditorProvider } from './editorProvider.js';
 import { FileProvider } from './fileProvider.js';
@@ -105,9 +106,9 @@ async function createMarkdownFile(files: FileProvider): Promise<void> {
 
 async function duplicateDocument(document: vscode.TextDocument | undefined, files: FileProvider): Promise<void> {
   if (!document) return;
-  const parsed = document.uri.path.match(/^(.*?)(\.[^./]+)?$/u);
+  const parsed = path.parse(document.uri.fsPath);
   const target = await vscode.window.showSaveDialog({
-    defaultUri: document.uri.with({ path: `${parsed?.[1] ?? document.uri.path}-copy${parsed?.[2] ?? '.md'}` }),
+    defaultUri: document.uri.with({ path: path.join(parsed.dir, `${parsed.name}-copy${parsed.ext || '.md'}`) }),
     filters: { Markdown: ['md', 'markdown', 'txt'] },
     saveLabel: 'Duplicate',
   });

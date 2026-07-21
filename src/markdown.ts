@@ -7,6 +7,11 @@ import taskLists from 'markdown-it-task-lists';
 
 export interface RenderOptions {
   breaks?: boolean;
+  /**
+   * Allow raw HTML passthrough. Consistent with the live preview policy: raw HTML is
+   * emitted only when both `markdown.html` is enabled and `security.allowUnsafeHtml`
+   * is opted into. Otherwise HTML is stripped to avoid injecting untrusted markup.
+   */
   html?: boolean;
 }
 

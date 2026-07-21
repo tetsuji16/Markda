@@ -16,9 +16,10 @@ export class ExportService {
     const target = destination ?? await this.chooseDestination(document.uri);
     if (!target) return;
     const markdown = document.getText();
+    const documentConfig = vscode.workspace.getConfiguration('markda', document.uri);
     const renderer = createMarkdownRenderer({
-      breaks: vscode.workspace.getConfiguration('markda', document.uri).get('markdown.breaks', false),
-      html: false,
+      breaks: documentConfig.get('markdown.breaks', false),
+      html: documentConfig.get('markdown.html', true) && documentConfig.get('security.allowUnsafeHtml', false),
     });
     const body = renderer.render(markdown);
     const html = styled

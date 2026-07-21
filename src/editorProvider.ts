@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
-import { areValidTextChanges, parseEditorToHostMessage, type EditorCommand, type EditorToHostMessage, type HostToEditorMessage, type TextChange } from './protocol.js';
+import { areValidTextChanges, decodeImageSource, parseEditorToHostMessage, type EditorCommand, type EditorToHostMessage, type HostToEditorMessage, type TextChange } from './protocol.js';
 import { getEditorSettings } from './settings.js';
 import { getStatistics } from './statistics.js';
 import { findMinimalChange } from './textChange.js';
@@ -127,6 +127,9 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       case 'copyToClipboard':
         await vscode.env.clipboard.writeText(message.text);
         return;
+      case 'updateThemeMode':
+        await vscode.workspace.getConfiguration('markda').update('editor.themeMode', message.mode, vscode.ConfigurationTarget.Global);
+        return;
       case 'state':
         await vscode.commands.executeCommand('setContext', 'markda.sourceMode', message.sourceMode);
         if (message.cursor !== undefined && view === this.getActiveView()) this.outline.setCursor(message.cursor);
@@ -168,7 +171,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
   private onDocumentChanged(event: vscode.TextDocumentChangeEvent): void {
     for (const view of this.views) {
       if (view.document.uri.toString() !== event.document.uri.toString()) continue;
-      const sourceTransactionId = view.pendingTransactions.values().next().value as string | undefined;
+      const sourceTransactionId = event && (view.pendingTransactions.size > 0 ? this.matchPendingTransaction(view, event) : undefined);
       if (sourceTransactionId) view.pendingTransactions.delete(sourceTransactionId);
       // The originating webview already owns the submitted text. A lightweight
       // acknowledgement avoids serializing and transferring the complete document
@@ -177,6 +180,23 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
         ? { type: 'documentChanged', version: event.document.version, sourceTransactionId }
         : { type: 'documentChanged', version: event.document.version, text: event.document.getText() });
     }
+  }
+
+  /**
+   * Identifies which pending transaction (if any) produced `event`. When several
+   * webviews edit the same document at once, each acknowledgement must clear its own
+   * transaction id rather than the oldest one, otherwise edits from other views would
+   * be stranded and never confirmed. We correlate by document version: a transaction
+   * posted against `baseVersion` becomes authoritative at `baseVersion + 1`, so the
+   * transaction whose base matches the version just before this change is the owner.
+   */
+  private matchPendingTransaction(view: EditorView, event: vscode.TextDocumentChangeEvent): string | undefined {
+    const priorVersion = event.document.version - 1;
+    for (const transactionId of view.pendingTransactions) {
+      if (transactionId.startsWith(`${priorVersion}:`)) return transactionId;
+    }
+    // Fall back to the oldest pending transaction when a direct match is unavailable.
+    return view.pendingTransactions.values().next().value as string | undefined;
   }
 
   private async insertImage(view: EditorView): Promise<void> {
@@ -251,9 +271,11 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       void vscode.window.showWarningMessage('markda: Only local image files can be managed.');
       return;
     }
-    let decoded: string;
-    try { decoded = decodeURIComponent(sourceValue.split(/[?#]/u)[0] ?? sourceValue).replace(/^<|>$/gu, ''); }
-    catch { void vscode.window.showErrorMessage('markda: The image path is invalid.'); return; }
+    const decoded = decodeImageSource(sourceValue);
+    if (decoded === undefined) {
+      void vscode.window.showErrorMessage('markda: The image path is invalid.');
+      return;
+    }
     const documentFolder = path.dirname(view.document.uri.fsPath);
     const sourcePath = path.resolve(documentFolder, decoded);
     const workspace = vscode.workspace.getWorkspaceFolder(view.document.uri);
@@ -298,6 +320,16 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       return;
     }
     const target = vscode.Uri.joinPath(documentUri, '..', href.split('#')[0] ?? href);
+    if (target.scheme !== 'file') {
+      void vscode.window.showWarningMessage('markda: Only local file links can be opened.');
+      return;
+    }
+    const workspace = vscode.workspace.getWorkspaceFolder(documentUri);
+    const allowedRoot = workspace?.uri.fsPath ?? path.dirname(documentUri.fsPath);
+    if (!isInside(allowedRoot, target.fsPath)) {
+      void vscode.window.showWarningMessage('markda: Links outside the workspace cannot be opened.');
+      return;
+    }
     await vscode.commands.executeCommand('vscode.open', target);
   }
 

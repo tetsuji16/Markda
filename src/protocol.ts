@@ -9,6 +9,7 @@ export interface EditorSettings {
   typewriterKeepCentered: boolean;
   previewUpdateDelay: number;
   liveTableMaxCells: number;
+  themeMode: 'auto' | 'light' | 'dark';
   markdown: {
     math: boolean;
     diagrams: boolean;
@@ -74,7 +75,8 @@ export type EditorToHostMessage =
   | { type: 'requestImage'; selection: SelectionAnchor }
   | { type: 'saveImages'; selection: SelectionAnchor; images: readonly { name: string; dataUrl: string }[] }
   | { type: 'manageImage'; source: string; from: number; action: 'move' | 'copy' | 'delete' }
-  | { type: 'copyToClipboard'; text: string };
+  | { type: 'copyToClipboard'; text: string }
+  | { type: 'updateThemeMode'; mode: 'auto' | 'light' | 'dark' };
 
 export interface TextChange {
   from: number;
@@ -164,8 +166,29 @@ export function areValidTextChanges(changes: readonly TextChange[], documentLeng
   return true;
 }
 
+/**
+ * Decodes an image source received from the webview into a plain, relative-or-workspace
+ * path fragment suitable for `path.resolve`. Returns `undefined` for values that are not
+ * local image references or that cannot be safely decoded. Absolute paths, UNC shares
+ * (`\\host\share`), POSIX roots (`/abs`), and remote/data schemes are rejected rather than
+ * skipped, so callers must never trust a raw webview image path.
+ */
+export function decodeImageSource(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 8192) return undefined;
+  if (/^(?:https?:|data:|vscode-webview:|file:|\\\\|\/)/iu.test(value)) return undefined;
+  let decoded: string;
+  try { decoded = decodeURIComponent(value.split(/[?#]/u)[0] ?? value).replace(/^<|>$/gu, ''); }
+  catch { return undefined; }
+  if (decoded.length === 0 || pathIsAbsolute(decoded)) return undefined;
+  return decoded;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function pathIsAbsolute(value: string): boolean {
+  return /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/u.test(value);
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
