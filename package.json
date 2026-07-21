@@ -473,11 +473,23 @@
         },
         "markda.editor.contentWidth": {
           "type": "integer",
-          "default": 860,
-          "minimum": 480,
+          "default": 0,
+          "minimum": 0,
           "maximum": 1800,
           "scope": "resource",
-          "description": "Maximum editor content width in pixels."
+          "description": "Maximum editor content width in pixels. 0 fills the window."
+        },
+        "markda.editor.themeMode": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "light", "dark"],
+          "enumDescriptions": [
+            "Follow the VS Code color theme automatically.",
+            "Always use the light editor theme.",
+            "Always use the dark editor theme."
+          ],
+          "scope": "resource",
+          "description": "Editor theme: auto (follow VS Code), light, or dark."
         },
         "markda.editor.typewriterKeepCentered": {
           "type": "boolean",
