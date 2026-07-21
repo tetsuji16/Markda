@@ -123,14 +123,11 @@ document.body.innerHTML = `<style>${getStyles()}</style>
   </div>
   <div class="markda-workspace"><div id="editor"></div><aside id="preview" aria-label="Rendered preview"></aside></div>
   <dialog id="table-dialog" aria-labelledby="table-dialog-title"><form method="dialog"><h2 id="table-dialog-title">Insert table</h2><label>Columns <input id="table-columns" type="number" min="1" max="20" value="2"></label><label>Rows <input id="table-rows" type="number" min="1" max="100" value="2"></label><div><button value="cancel">Cancel</button><button id="table-insert-confirm" value="default">Insert</button></div></form></dialog>
-  <footer class="markda-footer"><div id="statistics-panel" role="dialog" aria-label="Document statistics" hidden></div><button id="statistics" title="Document statistics" aria-haspopup="dialog" aria-expanded="false"></button><span id="sync-state" aria-live="polite">Ready</span></footer>
 </div>`;
 
 const appRoot = document.querySelector<HTMLElement>('.markda-shell')!;
 const preview = document.querySelector<HTMLElement>('#preview')!;
-const statisticsButton = document.querySelector<HTMLButtonElement>('#statistics')!;
-const syncState = document.querySelector<HTMLElement>('#sync-state')!;
-const statisticsPanel = document.querySelector<HTMLElement>('#statistics-panel')!;
+
 const tableDialog = document.querySelector<HTMLDialogElement>('#table-dialog')!;
 document.querySelectorAll<HTMLButtonElement>('button[title]').forEach((button) => {
   if (!button.getAttribute('aria-label')) button.setAttribute('aria-label', button.title);
@@ -226,8 +223,7 @@ themeToggleButton?.addEventListener('click', () => {
   vscode.postMessage({ type: 'updateThemeMode', mode: next });
 });
 updateThemeToggleLabel();
-statisticsButton.addEventListener('click', () => toggleStatistics());
-document.addEventListener('keydown', (event) => { if (event.key === 'Escape') hideStatistics(); });
+
 document.querySelector('#table-insert-confirm')?.addEventListener('click', () => insertTableFromDialog());
 view.dom.addEventListener('paste', (event) => void handlePaste(event));
 view.dom.addEventListener('drop', (event) => void receiveImageFiles(event.dataTransfer?.files, event));
@@ -276,7 +272,6 @@ function onHostMessage(message: HostToEditorMessage): void {
         syncedText = applyTextChanges(syncedText, inFlightChanges ?? []);
         inFlightTransaction = undefined;
         inFlightChanges = undefined;
-        syncState.textContent = 'Saved in buffer';
         flushEdit();
       } else if ('text' in message) {
         syncedText = message.text;
@@ -284,7 +279,6 @@ function onHostMessage(message: HostToEditorMessage): void {
         inFlightChanges = undefined;
         pendingChanges = undefined;
         replaceDocument(message.text);
-        syncState.textContent = 'updated externally';
       }
       return;
     case 'configurationChanged':
@@ -312,7 +306,6 @@ function onEditorUpdate(update: ViewUpdate): void {
   }
   else if (update.selectionSet) {
     updateTableToolbar();
-    if (!statisticsPanel.hidden) updateStatistics();
     const state = update.state.field(modeField);
     vscode.postMessage({ type: 'state', sourceMode: state.sourceMode, focusMode: state.focusMode, typewriterMode: state.typewriterMode, cursor: update.state.selection.main.head });
   }
@@ -338,7 +331,6 @@ function flushEdit(): void {
   if (!changes.length) return;
   inFlightTransaction = `${documentVersion}:${crypto.randomUUID()}`;
   inFlightChanges = changes;
-  syncState.textContent = 'Syncing…';
   vscode.postMessage({
     type: 'edit', uri: documentUri, baseVersion: documentVersion, transactionId: inFlightTransaction,
     changes, selection: { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head },
@@ -425,7 +417,6 @@ function runCommand(command: EditorCommand, payload?: unknown): void {
     case 'showStatistics': {
       const stat = calculateStatistics();
       vscode.postMessage({ type: 'statistics', statistics: stat });
-      statisticsButton.title = `${stat.words} words · ${stat.characters} characters · ${stat.lines} lines · ${stat.readingMinutes} min read`;
       return;
     }
     case 'showSearch':
@@ -529,9 +520,7 @@ function applySettings(): void {
   const contentWidth = settings.contentWidth && settings.contentWidth > 0 ? `${settings.contentWidth}px` : 'none';
   document.documentElement.style.setProperty('--markda-content-width', contentWidth);
   // When capped, center the content; when filling the window, use a fixed gutter.
-  const paddingX = settings.contentWidth && settings.contentWidth > 0
-    ? `max(24px, calc((100% - ${settings.contentWidth}px) / 2))`
-    : '24px';
+  const paddingX = '24px';
   document.documentElement.style.setProperty('--markda-padding-x', paddingX);
   const dark = settings.themeMode === 'dark'
     || (settings.themeMode === 'auto'
@@ -723,17 +712,7 @@ function readDataUrl(file: File): Promise<string> {
   });
 }
 
-function updateStatistics(): void { renderStatistics(calculateStatistics()); }
 
-function renderStatistics(stat: DocumentStatistics): void {
-  const selected = stat.selectionCharacters > 0
-    ? `<dt>${isJapanese ? '選択範囲' : 'Selection'}</dt><dd>${stat.selectionWords} ${isJapanese ? '語' : 'words'} · ${stat.selectionCharacters} ${isJapanese ? '文字' : 'characters'}</dd>` : '';
-  statisticsPanel.innerHTML = `<dl>${selected}<dt>${isJapanese ? '単語数' : 'Words'}</dt><dd>${stat.words}</dd><dt>${isJapanese ? '文字数' : 'Characters'}</dt><dd>${stat.characters}</dd><dt>${isJapanese ? '空白を除く文字数' : 'Without spaces'}</dt><dd>${stat.charactersWithoutSpaces}</dd><dt>${isJapanese ? '行数' : 'Lines'}</dt><dd>${stat.lines}</dd><dt>${isJapanese ? '読了時間' : 'Reading time'}</dt><dd>${stat.readingMinutes} ${isJapanese ? '分' : 'min'}</dd></dl>`;
-  statisticsButton.textContent = stat.selectionCharacters > 0 ? `${stat.selectionWords} ${isJapanese ? '語を選択' : 'selected'}` : `${stat.words} ${isJapanese ? '語' : 'words'}`;
-  statisticsButton.title = isJapanese
-    ? `${stat.words}語・${stat.characters}文字・${stat.lines}行・読了${stat.readingMinutes}分`
-    : `${stat.words} words · ${stat.characters} characters · ${stat.lines} lines · ${stat.readingMinutes} min read`;
-}
 
 function localizeStaticUi(): void {
   document.documentElement.lang = 'ja';
@@ -754,16 +733,6 @@ function localizeStaticUi(): void {
   document.querySelectorAll<HTMLLabelElement>('#table-dialog label').forEach((label, index) => { label.firstChild!.textContent = index === 0 ? '列数 ' : '行数 '; });
 }
 
-function toggleStatistics(): void {
-  statisticsPanel.hidden = !statisticsPanel.hidden;
-  statisticsButton.setAttribute('aria-expanded', String(!statisticsPanel.hidden));
-}
-
-function hideStatistics(): void {
-  statisticsPanel.hidden = true;
-  statisticsButton.setAttribute('aria-expanded', 'false');
-}
-
 let syncingScroll = false;
 function syncScroll(source: HTMLElement, target: HTMLElement): void {
   if (syncingScroll || !view.state.field(modeField).previewVisible) return;
@@ -780,7 +749,6 @@ function updateDocumentDerivedState(): void {
   cachedDocumentText = source;
   cachedTable = undefined;
   const { headings, statistics: stat } = analyzeDocument(source);
-  renderStatistics(stat);
   vscode.postMessage({ type: 'outline', headings });
   vscode.postMessage({ type: 'statistics', statistics: stat });
   const mode = view.state.field(modeField);
@@ -1988,12 +1956,12 @@ function getStyles(): string { return String.raw`
   button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--vscode-toolbar-hoverBackground)}button.active{background:var(--vscode-toolbar-activeBackground,var(--vscode-list-activeSelectionBackground))}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:2px}
   .markda-shell{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.markda-toolbar{min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--vscode-panel-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--vscode-panel-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}.table-toolbar{display:none;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--vscode-panel-border);background:var(--vscode-sideBar-background);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0;overflow:auto}#preview{display:none;border-left:1px solid var(--vscode-panel-border);padding:30px;line-height:1.65}.preview-visible #preview{display:block}
-.cm-editor{min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px var(--markda-padding-x,24px) 90px;line-height:1.7}.cm-content{max-width:none;margin:0;caret-color:var(--vscode-editorCursor-foreground,var(--markda-cursor-color,#000))}.cm-line{padding:2px 0;transition:opacity .12s}.cm-activeLine{background:var(--vscode-editor-lineHighlightBackground,#ffffff0a)}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color,#000)!important;margin-left:-1px}.cm-selectionBackground{background:var(--vscode-editor-selectionBackground)!important}
+.cm-editor{min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px var(--markda-padding-x,24px) 90px;line-height:1.7}.cm-content{max-width:var(--markda-content-width);margin:0;caret-color:var(--vscode-editorCursor-foreground,var(--markda-cursor-color,#000))}.cm-line{padding:2px 0;transition:opacity .12s}.cm-activeLine{background:var(--vscode-editor-lineHighlightBackground,#ffffff0a)}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color,#000)!important;margin-left:-1px}.cm-selectionBackground{background:var(--vscode-editor-selectionBackground)!important}
 .markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--vscode-panel-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-quote{border-left:4px solid var(--vscode-textBlockQuote-border);padding-left:14px!important;color:var(--vscode-descriptionForeground)}.markda-list-marker{color:var(--vscode-symbolIcon-arrayForeground)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--vscode-editor-foreground);font-weight:700;text-align:center}
   .markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-highlight{background:var(--vscode-editor-findMatchHighlightBackground);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
   .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--vscode-panel-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{text-align:center;color:var(--vscode-descriptionForeground);font-size:.9em}.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-code-controls{display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px}.markda-code-controls input{min-width:70px;width:110px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:3px 5px}.markda-code-controls button{font-size:12px;min-height:24px}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--vscode-textCodeBlock-background)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none}.markda-code-rendered{padding:10px}.markda-live-table-wrap{overflow:auto;margin:12px 0}.markda-inline-table-controls{display:flex;gap:4px;justify-content:flex-end;margin-bottom:4px}.markda-inline-table-controls button{font-size:12px;min-height:24px}.markda-live-table-wrap table{border-collapse:collapse;width:100%}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--vscode-panel-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto}.markda-live-table-wrap th{background:var(--vscode-sideBar-background)}
   .markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--vscode-panel-border);border-radius:5px;color:var(--vscode-descriptionForeground)}
-  .markda-footer{height:24px;padding:0 10px;display:flex;align-items:center;justify-content:flex-end;gap:12px;color:var(--vscode-statusBar-foreground);background:var(--vscode-statusBar-background);font-size:12px;position:relative}.markda-footer button{font-size:12px;min-height:20px;padding:0 4px}#statistics-panel{position:absolute;right:8px;bottom:28px;z-index:10;min-width:250px;padding:12px;color:var(--vscode-editorWidget-foreground);background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border);box-shadow:0 4px 14px #0005;border-radius:6px}#statistics-panel[hidden]{display:none}#statistics-panel dl{display:grid;grid-template-columns:1fr auto;gap:6px 16px;margin:0}#statistics-panel dt{color:var(--vscode-descriptionForeground)}#statistics-panel dd{margin:0;text-align:right}
+
   dialog{color:var(--vscode-editorWidget-foreground);background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:260px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:76px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:5px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
   body[data-markda-theme="paper"] .cm-content{font-family:Georgia,"Times New Roman",serif}body[data-markda-theme="midnight"]{--markda-accent:#7aa2f7}body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
 #preview h1,#preview h2,#preview h3{line-height:1.25;margin-top:1.5em}#preview h2{border-bottom:1px solid var(--vscode-panel-border);padding-bottom:.25em}#preview pre{overflow:auto;padding:14px;background:var(--vscode-textCodeBlock-background);border-radius:5px}#preview code{font-family:var(--vscode-editor-font-family)}#preview blockquote{margin-left:0;padding-left:1em;border-left:4px solid var(--vscode-textBlockQuote-border);color:var(--vscode-descriptionForeground)}#preview table{border-collapse:collapse;width:100%}#preview th,#preview td{border:1px solid var(--vscode-panel-border);padding:6px 10px}#preview img{max-width:100%}.markda-render-error{color:var(--vscode-errorForeground)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--vscode-panel-border);color:var(--vscode-descriptionForeground)}
