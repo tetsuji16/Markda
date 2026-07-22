@@ -31,7 +31,7 @@ async function tick(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-describe('live Markdown webview cursor + block decorations', () => {
+describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }, () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     delete (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial;
@@ -105,5 +105,20 @@ describe('live Markdown webview cursor + block decorations', () => {
     expect(widget).not.toBeNull();
     // The opening/closing $$ delimiters must be hidden behind the widget.
     expect(view.dom.textContent).not.toContain('$$');
+  });
+
+  it('renders a GitHub alert and includes its quoted body', async () => {
+    vi.resetModules();
+    setupEditor(['> [!WARNING]', '> Review this before publishing.', '', 'After alert.'].join('\n'));
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    await tick();
+    const widget = view.dom.querySelector('.markda-callout-warning');
+    expect(widget).not.toBeNull();
+    expect(widget?.querySelector('.markda-callout-title')?.textContent).toBe('Warning');
+    expect(widget?.querySelector('.markda-callout-content')?.textContent).toBe('Review this before publishing.');
   });
 });

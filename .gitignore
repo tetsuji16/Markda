@@ -4,4 +4,3 @@ dist/
 .vscode-test/
 coverage/
 sim.cjs
-

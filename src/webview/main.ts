@@ -1721,6 +1721,8 @@ class CalloutWidget extends WidgetType {
 function createLivePreviewPlugin() {
   return ViewPlugin.fromClass(class {
     decorations: DecorationSet;
+    private applyingBlockRefresh = false;
+    private blockRefreshQueued = false;
     constructor(editor: EditorView) {
       // Widget classes are declared later in this module and are still in their
       // temporal dead zone while EditorView itself is being constructed. Build
@@ -1743,18 +1745,27 @@ function createLivePreviewPlugin() {
       // The block update is deferred to a microtask so we never dispatch from
       // inside CodeMirror's own update cycle (which would recurse / drop the
       // inline decorations computed just above).
-      // IMPORTANT: block decorations are NOT rebuilt on selectionSet alone because
-      // an effects-only dispatch from a microtask after a cursor move can confuse
-      // CodeMirror's internal cursor tracking when block-element widgets toggle,
-      // causing the cursor to jump to position 0 on ArrowUp/ArrowDown.
-      // Inline decorations DO rebuild on selectionSet (see inlineNeedsUpdate) so
-      // that marker reveal/hide follows the caret as the user moves within a line.
+      // Rebuild block widgets only when the caret crosses a line boundary. Doing it
+      // for every selection update needlessly toggles block DOM while moving within
+      // a line, but never rebuilding leaves an edited block permanently as source.
+      const selectionLineChanged = update.selectionSet
+        && update.startState.doc.lineAt(update.startState.selection.main.head).number
+          !== update.state.doc.lineAt(update.state.selection.main.head).number;
       const inlineNeedsUpdate = update.docChanged || update.viewportChanged || modeChanged || refreshRequested || update.selectionSet;
       if (inlineNeedsUpdate) {
         this.decorations = buildInlineDecorations(update.view);
-        if (update.docChanged || update.viewportChanged || modeChanged || refreshRequested) {
+        if ((update.docChanged || update.viewportChanged || modeChanged || refreshRequested || selectionLineChanged)
+          && !this.applyingBlockRefresh && !this.blockRefreshQueued) {
+          this.blockRefreshQueued = true;
           queueMicrotask(() => {
-            if (update.view.dom.isConnected) update.view.dispatch({ selection: update.view.state.selection, effects: setBlockDecorations.of(buildBlockDecorations(update.view)) });
+            this.blockRefreshQueued = false;
+            if (!update.view.dom.isConnected) return;
+            this.applyingBlockRefresh = true;
+            try {
+              update.view.dispatch({ effects: setBlockDecorations.of(buildBlockDecorations(update.view)) });
+            } finally {
+              this.applyingBlockRefresh = false;
+            }
           });
         }
       }
@@ -1896,13 +1907,14 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
       if (image && lineNumber !== editor.state.doc.lineAt(selection.head).number) {
         decorations.push({ from: line.from, to: line.to, decoration: Decoration.replace({ widget: new ImageWidget(editor, line.from, image[1] ?? '', image[2] ?? ''), block: true }) });
       }
-      // GitHub Alert (Callout): > **Note**, > **Tip**, > **Important**, > **Warning**, > **Caution**
-      const calloutMatch = text.match(/^>\s*\*\*(Note|Tip|Important|Warning|Caution)\*\*\s*$/i);
+      // GitHub Alert (Callout), with the older bold-label form retained for compatibility.
+      const calloutMatch = text.match(/^>\s*(?:\[!(Note|Tip|Important|Warning|Caution)\]|\*\*(Note|Tip|Important|Warning|Caution)\*\*)\s*$/iu);
       if (calloutMatch && (selection.head < line.from || selection.head > line.to)) {
-        const calloutType = calloutMatch[1]!;
+        const rawCalloutType = (calloutMatch[1] ?? calloutMatch[2])!;
+        const calloutType = `${rawCalloutType[0]?.toUpperCase() ?? ''}${rawCalloutType.slice(1).toLowerCase()}`;
         let endLine = lineNumber;
         // Include subsequent blockquote lines as part of the callout
-        while (endLine + 1 <= editor.state.doc.lines && /^>\s/.u.test(editor.state.doc.line(endLine + 1).text)) {
+        while (endLine + 1 <= editor.state.doc.lines && /^>(?:\s|$)/u.test(editor.state.doc.line(endLine + 1).text)) {
           endLine++;
         }
         const end = editor.state.doc.line(endLine).to;
