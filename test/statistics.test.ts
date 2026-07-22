@@ -28,6 +28,12 @@ describe('getStatistics', () => {
     expect(result.words).toBe(5);
   });
 
+  it('handles ECMAScript Unicode whitespace without counting surrogate halves', () => {
+    const result = getStatistics(`a\u00a0b\u3000😀\ufeffc`);
+    expect(result.characters).toBe(7);
+    expect(result.charactersWithoutSpaces).toBe(4);
+  });
+
   it('counts CJK characters individually when adjacent to Latin text', () => {
     expect(getStatistics('abc\u65e5\u672cdef').words).toBe(4);
   });

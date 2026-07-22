@@ -2130,10 +2130,11 @@ function createLivePreviewPlugin() {
         this.decorations = buildInlineDecorations(update.view);
       }
 
-      // Block widgets never depend on the outer selection. A single coordinator
-      // owns their refresh and only runs for document/layout inputs.
+      // Block widget contents do not depend on the outer selection. CodeMirror
+      // still needs a refresh when the caret enters or leaves a replaceable
+      // block, but ordinary paragraph cursor movement must stay on the cheap path.
       if ((update.docChanged || update.viewportChanged || modeChanged || refreshRequested
-        || (update.selectionSet && !this.pointerActive))
+        || (update.selectionSet && !this.pointerActive && selectionTouchesBlockCandidate(update)))
         && !this.applyingBlockRefresh && !this.blockRefreshQueued) {
         this.blockRefreshQueued = true;
         queueMicrotask(() => {
@@ -2150,6 +2151,16 @@ function createLivePreviewPlugin() {
       }
     }
   }, { decorations: (plugin) => plugin.decorations });
+}
+
+function selectionTouchesBlockCandidate(update: ViewUpdate): boolean {
+  const before = update.startState.doc.lineAt(update.startState.selection.main.head).text;
+  const after = update.state.doc.lineAt(update.state.selection.main.head).text;
+  return isBlockCandidateLine(before) || isBlockCandidateLine(after);
+}
+
+function isBlockCandidateLine(line: string): boolean {
+  return line.includes('|') || /^\s*(?:```|~~~|\$\$\s*$|!\[[^\]]*\]\([^)]+\)\s*$|>\s*(?:\[!|\*\*))/u.test(line);
 }
 
 function buildInlineDecorations(editor: EditorView): DecorationSet {

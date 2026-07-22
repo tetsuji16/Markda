@@ -56,6 +56,13 @@ describe('webview message validation', () => {
     expect(parseEditorToHostMessage({ type: 'manageImage', source: 'assets/photo.png', from: -1, action: 'erase' })).toBeUndefined();
   });
 
+  it('accepts only supported theme modes', () => {
+    expect(parseEditorToHostMessage({ type: 'updateThemeMode', mode: 'light' }))
+      .toEqual({ type: 'updateThemeMode', mode: 'light' });
+    expect(parseEditorToHostMessage({ type: 'updateThemeMode', mode: 'system' })).toBeUndefined();
+    expect(parseEditorToHostMessage({ type: 'updateThemeMode' })).toBeUndefined();
+  });
+
   it('rejects overlapping, duplicate and out-of-bounds edit ranges', () => {
     expect(areValidTextChanges([{ from: 1, to: 3, insert: '' }, { from: 2, to: 4, insert: '' }], 10)).toBe(false);
     expect(areValidTextChanges([{ from: 1, to: 1, insert: 'a' }, { from: 1, to: 1, insert: 'b' }], 10)).toBe(false);

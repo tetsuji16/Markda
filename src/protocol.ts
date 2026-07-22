@@ -154,6 +154,10 @@ export function parseEditorToHostMessage(value: unknown): EditorToHostMessage | 
       return { type: 'manageImage', source: value.source, from: value.from, action: value.action as 'move' | 'copy' | 'delete' };
     case 'copyToClipboard':
       return typeof value.text === 'string' ? { type: 'copyToClipboard', text: value.text } : undefined;
+    case 'updateThemeMode':
+      return value.mode === 'auto' || value.mode === 'light' || value.mode === 'dark'
+        ? { type: 'updateThemeMode', mode: value.mode }
+        : undefined;
     default:
       return undefined;
   }

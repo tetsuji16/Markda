@@ -29,7 +29,22 @@ export class OutlineProvider implements vscode.TreeDataProvider<HeadingItem> {
   getChildren(element?: HeadingItem): HeadingItem[] { return element?.children ?? this.roots; }
 
   private activeHeading(cursor: number): Heading | undefined {
-    return [...this.headings].reverse().find((heading) => heading.from <= cursor);
+    // Headings arrive in source order. Binary search avoids copying and
+    // reversing the complete outline on every cursor movement.
+    let low = 0;
+    let high = this.headings.length - 1;
+    let active: Heading | undefined;
+    while (low <= high) {
+      const middle = (low + high) >>> 1;
+      const heading = this.headings[middle];
+      if (heading && heading.from <= cursor) {
+        active = heading;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return active;
   }
 
   private rebuild(): void {

@@ -2,6 +2,13 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.7 - 2026-07-23
+
+- Improved cursor responsiveness by avoiding unnecessary block-widget refreshes on ordinary paragraph movement.
+- Optimized outline tracking and document statistics for large Markdown files.
+- Validated toolbar theme changes before synchronizing and persisting them.
+- Added regression coverage for theme persistence, message validation, and Unicode statistics.
+
 ## 0.1.6 - 2026-07-23
 
 - Standardized all user-facing text and public documentation on English.
