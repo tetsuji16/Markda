@@ -19,6 +19,7 @@ Write Markdown as a formatted document without giving up the source file. Markda
 - Export a styled standalone HTML document or bare HTML.
 - Keep split editors synchronized through the underlying VS Code text document.
 - Keep the selected editor theme synchronized across open Markdown tabs.
+- Stay responsive in long documents with optimized statistics, outline tracking, and live-view cursor updates.
 
 ## Getting started
 

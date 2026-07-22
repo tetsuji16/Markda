@@ -16,12 +16,22 @@ export function getStatistics(text: string, selection = ''): DocumentStatistics 
 
 export function analyzeDocument(text: string): { statistics: DocumentStatistics; headings: Heading[] } {
   const headings: Heading[] = [];
-  let words = 0;
   let characters = 0;
   let charactersWithoutSpaces = 0;
-  for (const character of text) {
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
     characters++;
-    if (!/\s/u.test(character)) charactersWithoutSpaces++;
+    // A valid surrogate pair is one Unicode character. All ECMAScript
+    // whitespace code points are in the BMP, so supplementary characters can
+    // take the non-whitespace fast path without allocating a one-character
+    // string and running a regular expression for every code point.
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) index++;
+      charactersWithoutSpaces++;
+    } else if (!isWhitespaceCodeUnit(code)) {
+      charactersWithoutSpaces++;
+    }
   }
 
   let lineStart = 0;
@@ -37,11 +47,15 @@ export function analyzeDocument(text: string): { statistics: DocumentStatistics;
       from: lineStart,
       to: lineEnd,
     });
-    words += countWords(line.replace(syntaxPattern, ' '));
     lines++;
     if (lineEnd >= text.length) break;
     lineStart = lineEnd + (text[lineEnd] === '\r' && text[lineEnd + 1] === '\n' ? 2 : 1);
   }
+
+  // Strip Markdown and scan for words once for the complete document. Doing
+  // both operations per line creates several short-lived strings and match
+  // arrays for every line, which becomes the dominant cost on large files.
+  const words = countWords(text.replace(syntaxPattern, ' '));
 
   return {
     headings,
@@ -55,6 +69,12 @@ export function analyzeDocument(text: string): { statistics: DocumentStatistics;
       selectionCharacters: 0,
     },
   };
+}
+
+function isWhitespaceCodeUnit(code: number): boolean {
+  return (code >= 0x09 && code <= 0x0d) || code === 0x20 || code === 0xa0 || code === 0x1680
+    || (code >= 0x2000 && code <= 0x200a) || code === 0x2028 || code === 0x2029
+    || code === 0x202f || code === 0x205f || code === 0x3000 || code === 0xfeff;
 }
 
 function countWords(text: string): number {
