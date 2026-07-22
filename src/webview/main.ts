@@ -1,10 +1,11 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from '@codemirror/commands';
 import '@vscode/codicons/dist/codicon.css';
 import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
-import { syntaxHighlighting, defaultHighlightStyle, syntaxTree } from '@codemirror/language';
+import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language';
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
-import { Annotation, ChangeSet, EditorSelection, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
+import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { Decoration, EditorView, highlightActiveLine, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { tags } from '@lezer/highlight';
 import DOMPurify from 'dompurify';
 import MarkdownIt from 'markdown-it';
 import footnote from 'markdown-it-footnote';
@@ -50,6 +51,7 @@ const initialViewState: ViewState = savedViewState?.schemaVersion === 2 ? savedV
 const externalUpdate = Annotation.define<boolean>();
 const setMode = StateEffect.define<Partial<ViewState>>();
 const refreshLivePreview = StateEffect.define<null>();
+const settleLivePreview = StateEffect.define<number>();
 const modeField = StateField.define<ViewState>({
   create: () => initialViewState,
   update(value, transaction) {
@@ -78,6 +80,12 @@ let cachedDocumentText = '';
 let cachedTable: MarkdownTable | undefined;
 let activeTableFrom: number | undefined;
 let activeCodeFrom: number | undefined;
+let activeImageFrom: number | undefined;
+let activeMathFrom: number | undefined;
+let activeCalloutFrom: number | undefined;
+let beginLivePreviewFreeze: ((editor: EditorView) => void) | undefined;
+let colorThemeRevision = 0;
+
 let settings: EditorSettings = initialDocument?.settings ?? {
   contentWidth: 860, autoPairMarkdown: true, typewriterKeepCentered: true, previewUpdateDelay: 500, liveTableMaxCells: 600,
   themeMode: 'auto',
@@ -85,6 +93,29 @@ let settings: EditorSettings = initialDocument?.settings ?? {
   security: { allowRemoteResources: 'prompt', allowUnsafeHtml: false },
   theme: { light: 'paper', dark: 'midnight' },
 };
+const syntaxThemeCompartment = new Compartment();
+
+function usesDarkColors(): boolean {
+  return settings.themeMode === 'dark'
+    || (settings.themeMode === 'auto'
+      && (document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')));
+}
+
+function createSyntaxHighlightStyle(dark: boolean): HighlightStyle {
+  return HighlightStyle.define([
+    { tag: [tags.meta, tags.comment], color: dark ? '#9da5b4' : '#57606a' },
+    { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: dark ? '#c586c0' : '#7f0055' },
+    { tag: [tags.string, tags.special(tags.string), tags.regexp], color: dark ? '#ce9178' : '#a31515' },
+    { tag: [tags.number, tags.bool, tags.null], color: dark ? '#b5cea8' : '#067d17' },
+    { tag: [tags.typeName, tags.className, tags.namespace], color: dark ? '#4ec9b0' : '#1f6f85' },
+    { tag: [tags.variableName, tags.propertyName, tags.labelName], color: dark ? '#9cdcfe' : '#001080' },
+    { tag: [tags.definition(tags.variableName), tags.function(tags.variableName)], color: dark ? '#dcdcaa' : '#795e26' },
+    { tag: [tags.heading, tags.strong], color: dark ? '#569cd6' : '#0550ae', fontWeight: '700' },
+    { tag: tags.emphasis, fontStyle: 'italic' },
+    { tag: [tags.link, tags.url], color: dark ? '#75beff' : '#0969da', textDecoration: 'underline' },
+    { tag: tags.invalid, color: dark ? '#f48771' : '#cf222e' },
+  ]);
+}
 
 document.body.innerHTML = `<style>${getStyles()}</style>
 <div class="markda-shell">
@@ -149,7 +180,7 @@ const blockDecorationsField = StateField.define<DecorationSet>({
     for (const effect of transaction.effects) {
       if (effect.is(setBlockDecorations)) return effect.value;
     }
-    return value;
+    return transaction.docChanged ? value.map(transaction.changes) : value;
   },
   provide: (field) => EditorView.decorations.from(field),
 });
@@ -162,7 +193,7 @@ const view = new EditorView({
       modeField,
       history(),
       markdown({ base: markdownLanguage }),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      syntaxThemeCompartment.of(syntaxHighlighting(createSyntaxHighlightStyle(usesDarkColors()), { fallback: true })),
       search(),
       keymap.of([
         ...createMarkdaKeymap(),
@@ -178,17 +209,24 @@ const view = new EditorView({
       createLivePreviewPlugin(),
       blockDecorationsField,
       EditorView.updateListener.of(onEditorUpdate),
-      EditorView.domEventHandlers({
-        click(event) {
-          const target = event.target as HTMLElement;
-          const link = target.closest<HTMLAnchorElement>('a[data-href]');
-          if (link?.dataset.href) {
+      Prec.high(EditorView.domEventHandlers({
+        mousedown(event, editor) {
+          if (event.button !== 0 || !(event.target instanceof Element)) return false;
+          const interactive = event.target.closest('button,input,textarea,select,[contenteditable="true"]');
+          if (interactive && interactive !== editor.contentDOM) return false;
+          return beginLivePreviewPointer(event, editor);
+        },
+        click(event, editor) {
+          const target = event.target;
+          const link = target instanceof Element ? target.closest<HTMLElement>('.markda-link-text[data-href]') : null;
+          if (link?.dataset.href && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
             vscode.postMessage({ type: 'openLink', href: link.dataset.href });
             return true;
           }
           return false;
         },
-      }),
+      })),
     ],
   }),
 });
@@ -236,6 +274,12 @@ preview.addEventListener('keydown', (event) => {
   }
 });
 window.addEventListener('message', (event: MessageEvent<HostToEditorMessage>) => onHostMessage(event.data));
+window.addEventListener('keydown', (event) => {
+  if (event.key.toLocaleLowerCase() !== 's' || (!event.ctrlKey && !event.metaKey) || event.altKey || event.shiftKey) return;
+  event.preventDefault();
+  event.stopPropagation();
+  synchronizeAndSave();
+}, true);
 window.addEventListener('beforeunload', () => {
   synchronizeBeforeSuspend();
   window.clearTimeout(sendTimer);
@@ -355,7 +399,10 @@ function applyTextChanges(text: string, changes: readonly TextChange[]): string 
 
 function flushActiveEditable(): void {
   const active = document.activeElement;
-  if (active instanceof HTMLElement && active.isContentEditable) active.blur();
+  // Keep the main CodeMirror surface focused across Ctrl+S. Only nested live
+  // editors need a blur so their final DOM value is committed to Markdown.
+  if (!(active instanceof HTMLElement) || active === view.contentDOM) return;
+  if (active.isContentEditable || active.matches('input, textarea, select')) active.blur();
 }
 
 function synchronizeBeforeSuspend(): void {
@@ -369,6 +416,18 @@ function synchronizeBeforeSuspend(): void {
     pendingChanges = undefined;
     vscode.postMessage({ type: 'finalSync', uri: documentUri, expectedText, text });
   }
+}
+
+function synchronizeAndSave(): void {
+  flushActiveEditable();
+  flushEdit();
+  const expectedText = applyTextChanges(syncedText, inFlightChanges ?? []);
+  const text = view.state.doc.toString();
+  // This snapshot includes any tail that could not be posted while another
+  // transaction was in flight. The host processes messages serially, applies
+  // that tail if its expected base still matches, and only then writes to disk.
+  pendingChanges = undefined;
+  vscode.postMessage({ type: 'save', uri: documentUri, expectedText, text });
 }
 
 function replaceDocument(text: string): boolean {
@@ -522,18 +581,13 @@ function applySettings(): void {
   // When capped, center the content; when filling the window, use a fixed gutter.
   const paddingX = '24px';
   document.documentElement.style.setProperty('--markda-padding-x', paddingX);
-  const dark = settings.themeMode === 'dark'
-    || (settings.themeMode === 'auto'
-      && (document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')));
+  const dark = usesDarkColors();
+  const colorMode = dark ? 'dark' : 'light';
+  const previousColorMode = document.documentElement.dataset.markdaColorMode;
   const themeName = (dark ? settings.theme.dark : settings.theme.light).replace(/[^a-zA-Z0-9._-]/gu, '');
   document.body.dataset.markdaTheme = themeName;
-  // Reliable caret color fallback per theme (VS Code's editorCursor.foreground
-  // is often not injected into the webview, so we guarantee a visible color).
-  document.documentElement.style.setProperty('--markda-cursor-color', dark ? '#ffffff' : '#1a1a1a');
-  // Self-contained light/dark backgrounds so the editor area follows the chosen
-  // theme even when VS Code does not inject editor.background/foreground.
-  document.documentElement.style.setProperty('--markda-bg', dark ? '#1e1e1e' : '#ffffff');
-  document.documentElement.style.setProperty('--markda-fg', dark ? '#d4d4d4' : '#1a1a1a');
+  document.documentElement.dataset.markdaColorMode = colorMode;
+  document.documentElement.style.colorScheme = colorMode;
   let themeLink = document.querySelector<HTMLLinkElement>('#markda-user-theme');
   if (!themeLink) {
     themeLink = document.createElement('link');
@@ -542,6 +596,22 @@ function applySettings(): void {
     document.head.append(themeLink);
   }
   themeLink.href = themeBaseUri && themeName ? `${themeBaseUri}${encodeURIComponent(themeName)}.css` : '';
+  const colorModeChanged = previousColorMode !== colorMode;
+  if (colorModeChanged) colorThemeRevision++;
+  view.dispatch({
+    effects: [
+      syntaxThemeCompartment.reconfigure(syntaxHighlighting(createSyntaxHighlightStyle(dark), { fallback: true })),
+      ...(colorModeChanged ? [refreshLivePreview.of(null)] : []),
+    ],
+  });
+  if (colorModeChanged) {
+    queueMicrotask(() => {
+      document.querySelectorAll<HTMLElement>('[data-markda-renderer="mermaid"]').forEach((element) => {
+        void renderLiveMermaid(element, element.dataset.markdaSource ?? '');
+      });
+    });
+    renderPreview();
+  }
 }
 
 function insertAtSelection(value: string): void {
@@ -1208,23 +1278,13 @@ function loadMermaid(): Promise<typeof import('mermaid')['default']> {
   return mermaidPromise ??= import('./mermaidLoader.js').then((module) => module.api);
 }
 
-function isDarkMode(): boolean {
-  if (document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')) return true;
-  if (document.body.classList.contains('vscode-light')) return false;
-  const bg = getComputedStyle(document.body).getPropertyValue('--vscode-editor-background').trim();
-  if (bg) {
-    const hex = bg.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-    if (hex) {
-      const luminance = (0.299 * parseInt(hex[1]!, 16) + 0.587 * parseInt(hex[2]!, 16) + 0.114 * parseInt(hex[3]!, 16)) / 255;
-      return luminance < 0.5;
-    }
-  }
-  return false;
+function markdaColor(name: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
 function initializeMermaid(mermaid: typeof import('mermaid')['default']): void {
-  const dark = isDarkMode();
-  const fg = getComputedStyle(document.body).getPropertyValue('--vscode-editor-foreground').trim() || (dark ? '#d4d4d4' : '#000000');
+  const dark = usesDarkColors();
+  const fg = markdaColor('--markda-fg', dark ? '#d4d4d4' : '#1a1a1a');
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
@@ -1233,58 +1293,29 @@ function initializeMermaid(mermaid: typeof import('mermaid')['default']): void {
       primaryTextColor: fg,
       lineColor: fg,
       textColor: fg,
-      mainBkg: dark ? '#2d2d2d' : '#f0f0f0',
-      nodeBorder: dark ? '#888' : '#aaa',
+      primaryColor: markdaColor('--markda-surface-secondary', dark ? '#2d2d30' : '#eef2f6'),
+      primaryBorderColor: markdaColor('--markda-border', dark ? '#5a5a5a' : '#afb8c1'),
+      mainBkg: markdaColor('--markda-surface-secondary', dark ? '#2d2d30' : '#eef2f6'),
+      nodeBorder: markdaColor('--markda-border', dark ? '#5a5a5a' : '#afb8c1'),
     },
   });
 }
 
 async function renderLiveMermaid(container: HTMLElement, source: string): Promise<void> {
+  const renderThemeRevision = colorThemeRevision;
   try {
     const mermaid = await loadMermaid();
     if (!container.isConnected) return;
     initializeMermaid(mermaid);
     const result = await mermaid.render(`markda-live-${crypto.randomUUID()}`, source);
-    if (container.isConnected) container.innerHTML = DOMPurify.sanitize(result.svg, { USE_PROFILES: { svg: true, svgFilters: true } });
+    if (container.isConnected && renderThemeRevision === colorThemeRevision) {
+      container.innerHTML = DOMPurify.sanitize(result.svg, { USE_PROFILES: { svg: true, svgFilters: true } });
+    } else if (container.isConnected) {
+      void renderLiveMermaid(container, source);
+    }
   } catch {
     if (container.isConnected) container.textContent = source;
   }
-}
-
-function focusSourcePosition(editor: EditorView, position: number): void {
-  editor.dispatch({ selection: EditorSelection.cursor(position), effects: EditorView.scrollIntoView(position, { y: 'center' }) });
-  editor.focus();
-  // Block widgets and their source often have different heights. Re-anchor once
-  // after CodeMirror has measured the replacement to avoid a viewport jump.
-  requestAnimationFrame(() => editor.dispatch({ effects: EditorView.scrollIntoView(position, { y: 'center' }) }));
-}
-
-class LinkWidget extends WidgetType {
-  constructor(private readonly editor: EditorView, private readonly from: number, private readonly label: string, private readonly href: string) { super(); }
-  toDOM(): HTMLElement {
-    const wrapper = document.createElement('span');
-    wrapper.className = 'markda-live-link';
-    const link = document.createElement('a');
-    link.href = '#';
-    link.textContent = this.label;
-    link.title = isJapanese ? 'クリックで編集、Ctrl/Cmd+クリックで開く' : 'Click to edit; Ctrl/Cmd+click to open';
-    link.addEventListener('click', (event) => {
-      event.preventDefault();
-      if (event.ctrlKey || event.metaKey) vscode.postMessage({ type: 'openLink', href: this.href });
-      else focusSourcePosition(this.editor, this.from);
-    });
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'markda-link-edit';
-    edit.ariaLabel = 'Edit link source';
-    edit.title = 'Edit link source';
-    edit.textContent = '✎';
-    edit.addEventListener('click', () => focusSourcePosition(this.editor, this.from));
-    wrapper.append(link, edit);
-    return wrapper;
-  }
-  ignoreEvent(): boolean { return true; }
-  eq(other: LinkWidget): boolean { return other.label === this.label && other.href === this.href && other.from === this.from; }
 }
 
 class TaskWidget extends WidgetType {
@@ -1300,17 +1331,6 @@ class TaskWidget extends WidgetType {
   }
   ignoreEvent(): boolean { return true; }
   eq(other: TaskWidget): boolean { return other.from === this.from && other.checked === this.checked; }
-}
-
-class BulletWidget extends WidgetType {
-  toDOM(): HTMLElement {
-    const bullet = document.createElement('span');
-    bullet.className = 'markda-list-bullet';
-    bullet.textContent = '•';
-    bullet.setAttribute('aria-hidden', 'true');
-    return bullet;
-  }
-  eq(other: BulletWidget): boolean { return other instanceof BulletWidget; }
 }
 
 class ImageWidget extends WidgetType {
@@ -1351,17 +1371,55 @@ class ImageWidget extends WidgetType {
       }
       figure.append(controls);
     }
-    const edit = () => focusSourcePosition(this.editor, this.from);
+    const editorPanel = document.createElement('div');
+    editorPanel.className = 'markda-image-editor';
+    editorPanel.hidden = true;
+    const altInput = document.createElement('input');
+    altInput.value = this.alt;
+    altInput.placeholder = isJapanese ? '代替テキスト' : 'Alt text';
+    const sourceInput = document.createElement('input');
+    sourceInput.value = this.source;
+    sourceInput.placeholder = isJapanese ? '画像パスまたはURL' : 'Image path or URL';
+    const commit = () => commitImage(this.editor, this.from, altInput.value, sourceInput.value);
+    altInput.addEventListener('change', commit);
+    sourceInput.addEventListener('change', commit);
+    editorPanel.append(altInput, sourceInput);
+    editorPanel.addEventListener('focusin', () => { activeImageFrom = this.from; });
+    editorPanel.addEventListener('focusout', () => queueMicrotask(() => {
+      if (editorPanel.contains(document.activeElement)) return;
+      if (activeImageFrom === this.from) activeImageFrom = undefined;
+      this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+    }));
+    figure.append(editorPanel);
+    const edit = () => toggleWidgetEditor(this.editor, editorPanel, image.isConnected ? image : caption);
     figure.addEventListener('dblclick', edit);
     figure.addEventListener('keydown', (event) => { if (event.key === 'Enter') edit(); });
     return figure;
   }
   ignoreEvent(): boolean { return true; }
-  eq(other: ImageWidget): boolean { return other.source === this.source && other.alt === this.alt && other.from === this.from; }
+  eq(other: ImageWidget): boolean {
+    return other.from === this.from && (activeImageFrom === this.from
+      || (other.source === this.source && other.alt === this.alt));
+  }
+}
+
+function commitImage(editor: EditorView, from: number, alt: string, source: string): void {
+  const line = editor.state.doc.lineAt(Math.min(from, editor.state.doc.length));
+  if (!/^\s*!\[[^\]]*\]\([^)]+\)\s*$/u.test(line.text)) return;
+  const indentation = line.text.match(/^\s*/u)?.[0] ?? '';
+  const safeAlt = alt.replaceAll(']', '\\]');
+  const safeSource = source.replaceAll(')', '\\)');
+  editor.dispatch({ changes: { from: line.from, to: line.to, insert: `${indentation}![${safeAlt}](${safeSource})` } });
 }
 
 class CodeBlockWidget extends WidgetType {
-  constructor(private readonly editor: EditorView, private readonly from: number, private readonly source: string, private readonly language: string) { super(); }
+  constructor(
+    private readonly editor: EditorView,
+    private readonly from: number,
+    private readonly source: string,
+    private readonly language: string,
+    private readonly themeRevision: number,
+  ) { super(); }
   toDOM(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'markda-live-code';
@@ -1380,8 +1438,6 @@ class CodeBlockWidget extends WidgetType {
     const editSource = document.createElement('button');
     editSource.type = 'button';
     editSource.textContent = isJapanese ? 'ソース' : 'Source';
-    const edit = () => focusSourcePosition(this.editor, this.from);
-    editSource.addEventListener('click', edit);
     controls.append(language, copy, editSource);
     container.append(controls);
     if (this.language === 'math' || this.language === 'latex') {
@@ -1389,20 +1445,33 @@ class CodeBlockWidget extends WidgetType {
       rendered.className = 'markda-code-rendered';
       rendered.textContent = this.source;
       rendered.tabIndex = 0;
-      rendered.addEventListener('dblclick', edit);
-      rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') edit(); });
-      container.append(rendered);
+      const sourceEditor = createBlockSourceEditor(this.editor, this.source,
+        (value) => commitCodeBlock(this.editor, this.from, value, undefined));
+      sourceEditor.hidden = true;
+      const toggle = () => toggleWidgetEditor(this.editor, sourceEditor, rendered);
+      editSource.addEventListener('click', toggle);
+      rendered.addEventListener('dblclick', toggle);
+      rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') toggle(); });
+      container.append(rendered, sourceEditor);
       void renderKatexInto(rendered, this.source, true);
     } else if (this.language === 'mermaid' && settings.markdown.diagrams) {
       const rendered = document.createElement('div');
       rendered.className = 'markda-code-rendered';
       rendered.textContent = this.source;
+      rendered.dataset.markdaRenderer = 'mermaid';
+      rendered.dataset.markdaSource = this.source;
       rendered.tabIndex = 0;
-      rendered.addEventListener('dblclick', edit);
-      rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') edit(); });
-      container.append(rendered);
+      const sourceEditor = createBlockSourceEditor(this.editor, this.source,
+        (value) => commitCodeBlock(this.editor, this.from, value, undefined));
+      sourceEditor.hidden = true;
+      const toggle = () => toggleWidgetEditor(this.editor, sourceEditor, rendered);
+      editSource.addEventListener('click', toggle);
+      rendered.addEventListener('dblclick', toggle);
+      rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') toggle(); });
+      container.append(rendered, sourceEditor);
       void renderLiveMermaid(rendered, this.source);
     } else {
+      editSource.hidden = true;
       const pre = document.createElement('pre');
       const code = document.createElement('code');
       code.className = this.language ? `language-${this.language}` : '';
@@ -1442,7 +1511,8 @@ class CodeBlockWidget extends WidgetType {
   }
   ignoreEvent(): boolean { return true; }
   eq(other: CodeBlockWidget): boolean {
-    return other.from === this.from && (activeCodeFrom === this.from || (other.source === this.source && other.language === this.language));
+    return other.from === this.from && other.themeRevision === this.themeRevision
+      && (activeCodeFrom === this.from || (other.source === this.source && other.language === this.language));
   }
 }
 
@@ -1491,11 +1561,15 @@ class TableWidget extends WidgetType {
         : `Large table (${this.table.rows.length + 1} rows × ${this.table.header.length} columns)`;
       const edit = document.createElement('button');
       edit.type = 'button';
-      edit.textContent = isJapanese ? 'ソースで編集' : 'Edit source';
-      edit.addEventListener('click', () => {
-        focusSourcePosition(this.editor, this.table.from);
+      edit.textContent = isJapanese ? 'ここで編集' : 'Edit here';
+      const sourceEditor = createBlockSourceEditor(this.editor, serializeMarkdownTable(this.table), (value) => {
+        const current = findMarkdownTable(this.editor.state.doc.toString(), this.table.from,
+          this.editor.state.doc.lineAt(this.table.from).number - 1);
+        if (current) this.editor.dispatch({ changes: { from: current.from, to: current.to, insert: value } });
       });
-      container.append(summary, edit);
+      sourceEditor.hidden = true;
+      edit.addEventListener('click', () => toggleWidgetEditor(this.editor, sourceEditor, summary));
+      container.append(summary, edit, sourceEditor);
       return container;
     }
     const controls = document.createElement('div');
@@ -1505,7 +1579,6 @@ class TableWidget extends WidgetType {
       [isJapanese ? '− 行' : '− Row', () => commitWidgetTable(this.editor, this.table.from, (table) => { if (table.rows.length > 1) table.rows.pop(); })],
       [isJapanese ? '+ 列' : '+ Column', () => commitWidgetTable(this.editor, this.table.from, (table) => { table.header.push(''); table.alignments.push('default'); for (const row of table.rows) row.push(''); })],
       [isJapanese ? '− 列' : '− Column', () => commitWidgetTable(this.editor, this.table.from, (table) => { if (table.header.length > 1) { table.header.pop(); table.alignments.pop(); for (const row of table.rows) row.pop(); } })],
-      [isJapanese ? 'ソースを編集' : 'Edit source', () => focusSourcePosition(this.editor, this.table.from)],
     ];
     for (const [label, action] of actions) { const button = document.createElement('button'); button.textContent = label; button.type = 'button'; button.addEventListener('click', action); controls.append(button); }
     container.append(controls);
@@ -1664,7 +1737,12 @@ function commitWidgetTable(editor: EditorView, from: number, mutate: (table: Mar
 }
 
 class MathWidget extends WidgetType {
-  constructor(private readonly source: string, private readonly displayMode: boolean = false) { super(); }
+  constructor(
+    private readonly source: string,
+    private readonly displayMode: boolean = false,
+    private readonly editor?: EditorView,
+    private readonly from?: number,
+  ) { super(); }
   toDOM(): HTMLElement {
     const element = document.createElement(this.displayMode ? 'div' : 'span');
     element.className = this.displayMode ? 'markda-block-math' : 'markda-inline-math';
@@ -1679,9 +1757,39 @@ class MathWidget extends WidgetType {
       element.textContent = this.source;
       void renderKatexInto(element, this.source, this.displayMode);
     }
+    if (this.displayMode && this.editor && this.from !== undefined) {
+      element.tabIndex = 0;
+      const sourceEditor = createBlockSourceEditor(this.editor, this.source,
+        (value) => commitBlockMath(this.editor!, this.from!, value));
+      sourceEditor.hidden = true;
+      sourceEditor.addEventListener('focus', () => { activeMathFrom = this.from; });
+      sourceEditor.addEventListener('blur', () => {
+        if (activeMathFrom === this.from) activeMathFrom = undefined;
+        this.editor?.dispatch({ effects: refreshLivePreview.of(null) });
+      });
+      element.addEventListener('dblclick', () => toggleWidgetEditor(this.editor!, sourceEditor, element));
+      const wrapper = document.createElement('div');
+      wrapper.className = 'markda-block-math-wrap';
+      wrapper.append(element, sourceEditor);
+      return wrapper;
+    }
     return element;
   }
-  eq(other: MathWidget): boolean { return other.source === this.source && other.displayMode === this.displayMode; }
+  eq(other: MathWidget): boolean {
+    return other.from === this.from && (activeMathFrom === this.from
+      || (other.source === this.source && other.displayMode === this.displayMode));
+  }
+}
+
+function commitBlockMath(editor: EditorView, from: number, source: string): void {
+  const opening = editor.state.doc.lineAt(Math.min(from, editor.state.doc.length));
+  if (!/^\s*\$\$\s*$/u.test(opening.text)) return;
+  let closing = opening.number + 1;
+  while (closing <= editor.state.doc.lines && !/^\s*\$\$\s*$/u.test(editor.state.doc.line(closing).text)) closing++;
+  if (closing > editor.state.doc.lines) return;
+  const closingLine = editor.state.doc.line(closing);
+  const range = codeContentRange(editor.state, opening.to, closingLine.from);
+  editor.dispatch({ changes: { from: range.from, to: range.to, insert: source.replace(/\r?\n$/u, '') } });
 }
 
 class CalloutWidget extends WidgetType {
@@ -1703,24 +1811,149 @@ class CalloutWidget extends WidgetType {
     const content = document.createElement('div');
     content.className = 'markda-callout-content';
     content.textContent = this.content;
+    content.contentEditable = 'true';
+    content.spellcheck = true;
+    const gate = new CompositionCommitGate();
+    let timer: number | undefined;
+    const commit = () => commitCallout(this.editor, this.from, this.type, content.textContent ?? '');
+    content.addEventListener('focus', () => { activeCalloutFrom = this.from; });
+    content.addEventListener('input', () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { timer = undefined; gate.request(commit); }, 80);
+    });
+    content.addEventListener('compositionstart', () => gate.start());
+    content.addEventListener('compositionend', () => gate.end(commit));
+    content.addEventListener('keydown', (event) => {
+      runEditableHistoryShortcut(event, this.editor, () => { window.clearTimeout(timer); gate.flush(commit); });
+    });
+    content.addEventListener('blur', () => {
+      window.clearTimeout(timer);
+      gate.flush(commit);
+      if (activeCalloutFrom === this.from) activeCalloutFrom = undefined;
+      this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+    });
     container.append(content);
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'markda-callout-edit';
-    edit.textContent = isJapanese ? '編集' : 'Edit';
-    edit.addEventListener('click', () => focusSourcePosition(this.editor, this.from));
-    container.append(edit);
     return container;
   }
   ignoreEvent(): boolean { return true; }
   eq(other: CalloutWidget): boolean {
-    return other.from === this.from && other.type === this.type && other.content === this.content;
+    return other.from === this.from && (activeCalloutFrom === this.from
+      || (other.type === this.type && other.content === this.content));
   }
+}
+
+function createBlockSourceEditor(editor: EditorView, source: string, commit: (value: string) => void): HTMLTextAreaElement {
+  const input = document.createElement('textarea');
+  input.className = 'markda-block-source-editor';
+  input.value = source;
+  input.spellcheck = false;
+  input.setAttribute('aria-label', isJapanese ? 'ブロックのMarkdownソース' : 'Block Markdown source');
+  const gate = new CompositionCommitGate();
+  let timer: number | undefined;
+  const save = () => commit(input.value);
+  input.addEventListener('input', () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => { timer = undefined; gate.request(save); }, 80);
+  });
+  input.addEventListener('compositionstart', () => gate.start());
+  input.addEventListener('compositionend', () => gate.end(save));
+  input.addEventListener('blur', () => { window.clearTimeout(timer); gate.flush(save); });
+  input.addEventListener('keydown', (event) => {
+    if (runEditableHistoryShortcut(event, editor, () => { window.clearTimeout(timer); gate.flush(save); })) return;
+  });
+  return input;
+}
+
+function toggleWidgetEditor(editor: EditorView, input: HTMLElement, rendered: HTMLElement): void {
+  const opening = input.hidden;
+  input.hidden = !opening;
+  rendered.hidden = opening;
+  if (opening) input.focus();
+  editor.requestMeasure();
+}
+
+let livePreviewPointerGeneration = 0;
+
+function browserPositionAtPointer(event: MouseEvent, editor: EditorView): number | null {
+  const ownerDocument = editor.dom.ownerDocument;
+  const modern = ownerDocument.caretPositionFromPoint?.(event.clientX, event.clientY);
+  if (modern) {
+    try { return editor.posAtDOM(modern.offsetNode, modern.offset); } catch { return null; }
+  }
+  const legacy = (ownerDocument as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  }).caretRangeFromPoint?.(event.clientX, event.clientY);
+  if (!legacy) return null;
+  try { return editor.posAtDOM(legacy.startContainer, legacy.startOffset); } catch { return null; }
+}
+
+function syncNativeSelection(editor: EditorView): void {
+  if (!editor.hasFocus) return;
+  const main = editor.state.selection.main;
+  const anchor = editor.domAtPos(main.anchor);
+  const head = editor.domAtPos(main.head);
+  const selection = editor.dom.ownerDocument.getSelection();
+  if (!selection) return;
+  selection.setBaseAndExtent(anchor.node, anchor.offset, head.node, head.offset);
+}
+
+function beginLivePreviewPointer(event: MouseEvent, editor: EditorView): boolean {
+  if (event.detail > 1 || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
+  const anchor = browserPositionAtPointer(event, editor);
+  const ownerWindow = editor.dom.ownerDocument.defaultView;
+  if (anchor === null || !ownerWindow) return false;
+
+  const generation = ++livePreviewPointerGeneration;
+  const documentAtStart = editor.state.doc;
+  let dragged = false;
+  event.preventDefault();
+  beginLivePreviewFreeze?.(editor);
+  editor.contentDOM.focus({ preventScroll: true });
+  editor.dispatch({ selection: EditorSelection.cursor(anchor), userEvent: 'select.pointer' });
+  syncNativeSelection(editor);
+
+  const move = (moveEvent: MouseEvent) => {
+    if (generation !== livePreviewPointerGeneration || editor.state.doc !== documentAtStart || moveEvent.buttons === 0) return;
+    if (!dragged && Math.hypot(moveEvent.clientX - event.clientX, moveEvent.clientY - event.clientY) <= 3) return;
+    dragged = true;
+    const head = browserPositionAtPointer(moveEvent, editor);
+    if (head === null || head === editor.state.selection.main.head) return;
+    moveEvent.preventDefault();
+    editor.dispatch({ selection: EditorSelection.range(anchor, head), userEvent: 'select.pointer' });
+    syncNativeSelection(editor);
+  };
+  const finish = (finishEvent: Event) => {
+    ownerWindow.removeEventListener('mousemove', move, true);
+    ownerWindow.removeEventListener('mouseup', finish, true);
+    ownerWindow.removeEventListener('pointercancel', finish, true);
+    ownerWindow.removeEventListener('blur', finish, true);
+    queueMicrotask(() => {
+      if (generation !== livePreviewPointerGeneration || !editor.dom.isConnected) return;
+      if (dragged && finishEvent.type === 'mouseup' && finishEvent instanceof MouseEvent && editor.state.doc === documentAtStart) {
+        const head = browserPositionAtPointer(finishEvent, editor);
+        if (head !== null && head !== editor.state.selection.main.head) {
+          editor.dispatch({ selection: EditorSelection.range(anchor, head), userEvent: 'select.pointer' });
+        }
+      }
+      syncNativeSelection(editor);
+      ownerWindow.requestAnimationFrame(() => {
+        if (generation !== livePreviewPointerGeneration || !editor.dom.isConnected) return;
+        editor.dispatch({ effects: settleLivePreview.of(generation) });
+        ownerWindow.requestAnimationFrame(() => syncNativeSelection(editor));
+      });
+    });
+  };
+  ownerWindow.addEventListener('mousemove', move, true);
+  ownerWindow.addEventListener('mouseup', finish, true);
+  ownerWindow.addEventListener('pointercancel', finish, true);
+  ownerWindow.addEventListener('blur', finish, true);
+  return true;
 }
 
 function createLivePreviewPlugin() {
   return ViewPlugin.fromClass(class {
     decorations: DecorationSet;
+    private pointerActive = false;
     private applyingBlockRefresh = false;
     private blockRefreshQueued = false;
     constructor(editor: EditorView) {
@@ -1729,6 +1962,9 @@ function createLivePreviewPlugin() {
       // after module evaluation completes; otherwise CodeMirror catches the
       // ReferenceError and permanently disables the whole live-preview plugin.
       this.decorations = Decoration.none;
+      beginLivePreviewFreeze = (target) => {
+        if (target === editor) this.pointerActive = true;
+      };
       requestAnimationFrame(() => {
         editor.dispatch({ effects: refreshLivePreview.of(null) });
       });
@@ -1736,38 +1972,37 @@ function createLivePreviewPlugin() {
     update(update: ViewUpdate): void {
       const modeChanged = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(setMode)));
       const refreshRequested = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(refreshLivePreview)));
-      // Inline source markers are revealed only while the selection intersects
-      // them, so moving within one line must refresh the decorations as well.
-      // Block decorations (table / code-block / image widgets) are written into
-      // `blockDecorationsField` here, because CodeMirror forbids exposing block
-      // decorations from a view plugin's `decorations` property —doing so throws
-      // "Block decorations may not be specified via plugins" and corrupts editing.
-      // The block update is deferred to a microtask so we never dispatch from
-      // inside CodeMirror's own update cycle (which would recurse / drop the
-      // inline decorations computed just above).
-      // Rebuild block widgets only when the caret crosses a line boundary. Doing it
-      // for every selection update needlessly toggles block DOM while moving within
-      // a line, but never rebuilding leaves an edited block permanently as source.
-      const selectionLineChanged = update.selectionSet
-        && update.startState.doc.lineAt(update.startState.selection.main.head).number
-          !== update.state.doc.lineAt(update.state.selection.main.head).number;
-      const inlineNeedsUpdate = update.docChanged || update.viewportChanged || modeChanged || refreshRequested || update.selectionSet;
-      if (inlineNeedsUpdate) {
+      const settleRequested = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(settleLivePreview)));
+      if (settleRequested) this.pointerActive = false;
+
+      // Keep the exact DOM geometry that CodeMirror used for its pointer hit-test
+      // until the gesture has ended. Document edits are mapped through the frozen
+      // set, so composition and externally delivered changes cannot leave stale
+      // ranges behind.
+      if (this.pointerActive && !settleRequested) {
+        if (update.docChanged) this.decorations = this.decorations.map(update.changes);
+      } else if (update.docChanged || update.viewportChanged || modeChanged || refreshRequested
+        || settleRequested || update.selectionSet) {
         this.decorations = buildInlineDecorations(update.view);
-        if ((update.docChanged || update.viewportChanged || modeChanged || refreshRequested || selectionLineChanged)
-          && !this.applyingBlockRefresh && !this.blockRefreshQueued) {
-          this.blockRefreshQueued = true;
-          queueMicrotask(() => {
-            this.blockRefreshQueued = false;
-            if (!update.view.dom.isConnected) return;
-            this.applyingBlockRefresh = true;
-            try {
-              update.view.dispatch({ effects: setBlockDecorations.of(buildBlockDecorations(update.view)) });
-            } finally {
-              this.applyingBlockRefresh = false;
-            }
-          });
-        }
+      }
+
+      // Block widgets never depend on the outer selection. A single coordinator
+      // owns their refresh and only runs for document/layout inputs.
+      if ((update.docChanged || update.viewportChanged || modeChanged || refreshRequested
+        || (update.selectionSet && !this.pointerActive))
+        && !this.applyingBlockRefresh && !this.blockRefreshQueued) {
+        this.blockRefreshQueued = true;
+        queueMicrotask(() => {
+          this.blockRefreshQueued = false;
+          if (!update.view.dom.isConnected) return;
+          this.applyingBlockRefresh = true;
+          try {
+            update.view.dispatch({ effects: setBlockDecorations.of(buildBlockDecorations(update.view)) });
+            update.view.requestMeasure();
+          } finally {
+            this.applyingBlockRefresh = false;
+          }
+        });
       }
     }
   }, { decorations: (plugin) => plugin.decorations });
@@ -1815,22 +2050,22 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
           const from = line.from + (task[1]?.length ?? 0);
           decorations.push({ from, to: from + 3, decoration: Decoration.replace({ widget: new TaskWidget(editor, from, (task[2] ?? ' ') !== ' ') }) });
         }
-        if (heading && !selectionIntersects(selection.from, selection.to, line.from, line.from + heading[0].length)) {
-          hide(decorations, line.from, line.from + heading[0].length);
-        }
-        if (quote && !selectionIntersects(selection.from, selection.to, line.from, line.from + quote[0].length)) {
-          hide(decorations, line.from, line.from + quote[0].length);
-        }
+        if (heading) addMetaDecoration(decorations, line.from, line.from + heading[0].length,
+          selectionIntersects(selection.from, selection.to, line.from, line.to));
+        if (quote) addMetaDecoration(decorations, line.from, line.from + quote[0].length,
+          selectionIntersects(selection.from, selection.to, line.from, line.to));
         if (list && !/^\s*[-+*]\s+\[[ xX]\]/u.test(text)) {
           const markerFrom = line.from + (list[1]?.length ?? 0);
           const markerTo = markerFrom + (list[2]?.length ?? 0);
-          if (selectionIntersects(selection.from, selection.to, markerFrom, markerTo)) {
-            decorations.push({ from: markerFrom, to: markerTo, decoration: Decoration.mark({ class: 'markda-list-marker' }) });
-          } else if (/^[-+*]$/u.test(list[2] ?? '')) {
-            decorations.push({ from: markerFrom, to: markerTo, decoration: Decoration.replace({ widget: new BulletWidget() }) });
-          } else {
-            decorations.push({ from: markerFrom, to: markerTo, decoration: Decoration.mark({ class: 'markda-list-marker' }) });
-          }
+          const expanded = selectionIntersects(selection.from, selection.to, line.from, line.to);
+          const bullet = /^[-+*]$/u.test(list[2] ?? '');
+          decorations.push({
+            from: markerFrom,
+            to: markerTo,
+            decoration: Decoration.mark({
+              class: `${bullet ? 'markda-list-bullet-source' : 'markda-list-marker'}${expanded ? ' markda-meta-expanded' : ''}`,
+            }),
+          });
         }
         addInlineDecorations(decorations, editor, line.from, text, selection.from, selection.to);
       } else {
@@ -1850,7 +2085,6 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
 function buildBlockDecorations(editor: EditorView): DecorationSet {
   const decorations: { from: number; to?: number; decoration: Decoration }[] = [];
   const state = editor.state.field(modeField);
-  const selection = editor.state.selection.main;
   let documentSource: string | undefined;
   if (state.sourceMode) return Decoration.none;
   let processedUntil = -1;
@@ -1876,14 +2110,14 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
           // Always render the block math as a widget so the raw $$ delimiters
           // and source are never shown alongside the rendered formula.
           const source = editor.state.sliceDoc(line.to + 1, editor.state.doc.line(endLine).from);
-          decorations.push({ from, to, decoration: Decoration.replace({ widget: new MathWidget(source, true), block: true }) });
+          decorations.push({ from, to: blockDecorationTo(editor.state, to), decoration: Decoration.replace({ widget: new MathWidget(source, true, editor, from), block: true }) });
           processedUntil = to + 1;
           continue;
         }
       }
       const table = text.includes('|') ? findMarkdownTable(documentSource ??= editor.state.doc.toString(), line.from, lineNumber - 1) : undefined;
-      if (table && (selection.head < table.from || selection.head > table.to)) {
-        decorations.push({ from: table.from, to: table.to, decoration: Decoration.replace({ widget: new TableWidget(editor, table), block: true }) });
+      if (table) {
+        decorations.push({ from: table.from, to: blockDecorationTo(editor.state, table.to), decoration: Decoration.replace({ widget: new TableWidget(editor, table), block: true }) });
         processedUntil = table.to;
         continue;
       }
@@ -1894,22 +2128,24 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
         while (endLine < editor.state.doc.lines && !closeFence.test(editor.state.doc.line(endLine + 1).text)) endLine++;
         if (endLine < editor.state.doc.lines) endLine++;
         const end = editor.state.doc.line(endLine).to;
-        if (selection.head < line.from || selection.head > end) {
-          const contentRange = codeContentRange(editor.state, line.to, editor.state.doc.line(endLine).from);
-          const contentFrom = contentRange.from;
-          const contentTo = contentRange.to;
-          decorations.push({ from: line.from, to: end, decoration: Decoration.replace({ widget: new CodeBlockWidget(editor, line.from, editor.state.sliceDoc(contentFrom, Math.max(contentFrom, contentTo)), fence[2] ?? ''), block: true }) });
-          processedUntil = end;
-          continue;
-        }
+        const contentRange = codeContentRange(editor.state, line.to, editor.state.doc.line(endLine).from);
+        const contentFrom = contentRange.from;
+        const contentTo = contentRange.to;
+        decorations.push({ from: line.from, to: blockDecorationTo(editor.state, end), decoration: Decoration.replace({ widget: new CodeBlockWidget(editor, line.from, editor.state.sliceDoc(contentFrom, Math.max(contentFrom, contentTo)), fence[2] ?? '', colorThemeRevision), block: true }) });
+        // Even while this block is exposed as source, its closing fence belongs
+        // to the opening fence above. Without skipping the full range here, the
+        // closing fence is parsed again as a new opener and can absorb every
+        // ordinary paragraph that follows into a giant code widget.
+        processedUntil = end + 1;
+        continue;
       }
       const image = text.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/u);
-      if (image && lineNumber !== editor.state.doc.lineAt(selection.head).number) {
-        decorations.push({ from: line.from, to: line.to, decoration: Decoration.replace({ widget: new ImageWidget(editor, line.from, image[1] ?? '', image[2] ?? ''), block: true }) });
+      if (image) {
+        decorations.push({ from: line.from, to: blockDecorationTo(editor.state, line.to), decoration: Decoration.replace({ widget: new ImageWidget(editor, line.from, image[1] ?? '', image[2] ?? ''), block: true }) });
       }
       // GitHub Alert (Callout), with the older bold-label form retained for compatibility.
       const calloutMatch = text.match(/^>\s*(?:\[!(Note|Tip|Important|Warning|Caution)\]|\*\*(Note|Tip|Important|Warning|Caution)\*\*)\s*$/iu);
-      if (calloutMatch && (selection.head < line.from || selection.head > line.to)) {
+      if (calloutMatch) {
         const rawCalloutType = (calloutMatch[1] ?? calloutMatch[2])!;
         const calloutType = `${rawCalloutType[0]?.toUpperCase() ?? ''}${rawCalloutType.slice(1).toLowerCase()}`;
         let endLine = lineNumber;
@@ -1924,7 +2160,7 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
           contentLines.push(l.text.replace(/^>\s?/u, ''));
         }
         const content = contentLines.join('\n').trim();
-        decorations.push({ from: line.from, to: end, decoration: Decoration.replace({ widget: new CalloutWidget(editor, line.from, calloutType, content), block: true }) });
+        decorations.push({ from: line.from, to: blockDecorationTo(editor.state, end), decoration: Decoration.replace({ widget: new CalloutWidget(editor, line.from, calloutType, content), block: true }) });
         processedUntil = end;
         continue;
       }
@@ -1936,8 +2172,18 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
 
 function selectionIntersects(selectionFrom: number, selectionTo: number, from: number, to: number): boolean {
   return selectionFrom === selectionTo
-    ? selectionFrom >= from && selectionFrom < to
+    // A caret on a range boundary is outside the marker. In particular, the
+    // editor starts at position 0, which is also the start of a leading "# ".
+    // Treating that boundary as an intersection exposes the heading marker as
+    // soon as a document opens, before the user has attempted to edit it.
+    ? selectionFrom > from && selectionFrom < to
     : selectionTo > from && selectionFrom < to;
+}
+
+function blockDecorationTo(state: EditorState, sourceTo: number): number {
+  if (sourceTo >= state.doc.length) return sourceTo;
+  const line = state.doc.lineAt(sourceTo);
+  return line.to === sourceTo && line.number < state.doc.lines ? state.doc.line(line.number + 1).from : sourceTo;
 }
 
 function addSourceLinkDecorations(
@@ -1972,11 +2218,26 @@ function addInlineDecorations(
   for (const match of text.matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/gu)) {
     const start = lineFrom + (match.index ?? 0);
     const end = start + match[0].length;
-    if (selectionIntersects(selectionFrom, selectionTo, start, end)) continue;
+    if ((match.index ?? 0) > 0 && text[(match.index ?? 0) - 1] === '!') continue;
     const rawHref = (match[2] ?? '').trim();
     const href = rawHref.match(/^<([^>]+)>/u)?.[1] ?? rawHref.match(/^\S+/u)?.[0] ?? rawHref;
     linkRanges.push({ start, end });
-    output.push({ from: start, to: end, decoration: Decoration.replace({ widget: new LinkWidget(editor, start, match[1] ?? '', href) }) });
+    const labelFrom = start + 1;
+    const labelTo = labelFrom + (match[1]?.length ?? 0);
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    addMetaDecoration(output, start, labelFrom, expanded);
+    output.push({
+      from: labelFrom,
+      to: labelTo,
+      decoration: Decoration.mark({
+        class: 'markda-link-text',
+        attributes: {
+          'data-href': href,
+          title: isJapanese ? 'クリックで編集、Ctrl/Cmd+クリックで開く' : 'Click to edit; Ctrl/Cmd+click to open',
+        },
+      }),
+    });
+    addMetaDecoration(output, labelTo, end, expanded);
   }
   const patterns: readonly [RegExp, string, number][] = [
     [/(\*\*|__)(?=\S)(.+?\S)\1/gu, 'markda-strong', 2],
@@ -1990,9 +2251,9 @@ function addInlineDecorations(
       const start = lineFrom + (match.index ?? 0);
       const end = start + match[0].length;
       if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
-      if (selectionIntersects(selectionFrom, selectionTo, start, end)) continue;
-      hide(output, start, start + markerLength);
-      hide(output, end - markerLength, end);
+      const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+      addMetaDecoration(output, start, start + markerLength, expanded);
+      addMetaDecoration(output, end - markerLength, end, expanded);
       output.push({ from: start + markerLength, to: end - markerLength, decoration: Decoration.mark({ class: className }) });
     }
   }
@@ -2000,42 +2261,93 @@ function addInlineDecorations(
     const start = lineFrom + (match.index ?? 0);
     const end = start + match[0].length;
     if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
-    if (selectionIntersects(selectionFrom, selectionTo, start, end)) continue;
-    output.push({ from: start, to: end, decoration: Decoration.replace({ widget: new MathWidget(match[1] ?? '') }) });
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    if (expanded) {
+      // Keep the source positions stable while the user edits the expression.
+      // Once the selection leaves the range, rebuild this as the KaTeX widget
+      // below so live preview returns to its WYSIWYG representation.
+      addMetaDecoration(output, start, start + 1, true);
+      output.push({ from: start + 1, to: end - 1, decoration: Decoration.mark({ class: 'markda-inline-math-source' }) });
+      addMetaDecoration(output, end - 1, end, true);
+    } else {
+      output.push({ from: start, to: end, decoration: Decoration.replace({ widget: new MathWidget(match[1] ?? '') }) });
+    }
   }
 }
 
-function hide(output: { from: number; to?: number; decoration: Decoration }[], from: number, to: number): void {
-  // Use a mark (not a widget replacement) so the source markers keep their
-  // original width on screen. A replace widget would shift CodeMirror's
-  // coordinate mapping and make click/click-to-cursor offsets drift — worst
-  // further down the document. The markers are simply painted transparent.
-  if (to > from) output.push({ from, to, decoration: Decoration.mark({ class: 'markda-hide-marker' }) });
+function commitCallout(editor: EditorView, from: number, type: string, content: string): void {
+  const opening = editor.state.doc.lineAt(Math.min(from, editor.state.doc.length));
+  if (!/^>\s*(?:\[!(?:Note|Tip|Important|Warning|Caution)\]|\*\*(?:Note|Tip|Important|Warning|Caution)\*\*)\s*$/iu.test(opening.text)) return;
+  let endLine = opening.number;
+  while (endLine < editor.state.doc.lines && /^>(?:\s|$)/u.test(editor.state.doc.line(endLine + 1).text)) endLine++;
+  const to = editor.state.doc.line(endLine).to;
+  const newline = editor.state.doc.toString().includes('\r\n') ? '\r\n' : '\n';
+  const body = content.split(/\r?\n/u).map((line) => `> ${line}`).join(newline);
+  const replacement = `> [!${type.toUpperCase()}]${body ? `${newline}${body}` : ''}`;
+  editor.dispatch({ changes: { from: opening.from, to, insert: replacement } });
+}
+
+function addMetaDecoration(
+  output: { from: number; to?: number; decoration: Decoration }[], from: number, to: number, expanded: boolean,
+): void {
+  if (to > from) output.push({
+    from,
+    to,
+    decoration: Decoration.mark({ class: `markda-meta${expanded ? ' markda-meta-expanded' : ''}` }),
+  });
 }
 
 function getStyles(): string { return String.raw`
-  .markda-live-link a,.markda-source-link,#preview a{color:var(--vscode-textLink-foreground,#4daafc);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}.markda-live-link a:hover,#preview a:hover{color:var(--vscode-textLink-activeForeground,#75beff)}.markda-link-edit{min-height:18px;padding:0 3px;margin-left:2px;opacity:0}.markda-live-link:hover .markda-link-edit,.markda-link-edit:focus{opacity:1}
-  .markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}
-:root{--markda-content-width:860px}*{box-sizing:border-box}html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--markda-fg,var(--vscode-editor-foreground));background:var(--markda-bg,var(--vscode-editor-background));font-family:var(--vscode-font-family)}
-  button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--vscode-toolbar-hoverBackground)}button.active{background:var(--vscode-toolbar-activeBackground,var(--vscode-list-activeSelectionBackground))}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:2px}
-  .markda-shell{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.markda-toolbar{min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--vscode-panel-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--vscode-panel-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}.table-toolbar{display:none;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--vscode-panel-border);background:var(--vscode-sideBar-background);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
-.markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0;overflow:auto}#preview{display:none;border-left:1px solid var(--vscode-panel-border);padding:30px;line-height:1.65}.preview-visible #preview{display:block}
-.cm-editor{min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px var(--markda-padding-x,24px) 90px;line-height:1.7}.cm-content{max-width:var(--markda-content-width);margin:0;caret-color:var(--vscode-editorCursor-foreground,var(--markda-cursor-color,#000))}.cm-line{padding:2px 0;transition:opacity .12s}.cm-activeLine{background:var(--vscode-editor-lineHighlightBackground,#ffffff0a)}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color,#000)!important;margin-left:-1px}.cm-selectionBackground{background:var(--vscode-editor-selectionBackground)!important}
-.markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--vscode-panel-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-quote{border-left:4px solid var(--vscode-textBlockQuote-border);padding-left:14px!important;color:var(--vscode-descriptionForeground)}.markda-list-marker{color:var(--vscode-symbolIcon-arrayForeground)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--vscode-editor-foreground);font-weight:700;text-align:center}
-  .markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-highlight{background:var(--vscode-editor-findMatchHighlightBackground);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
-  .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--vscode-panel-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{text-align:center;color:var(--vscode-descriptionForeground);font-size:.9em}.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-code-controls{display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px}.markda-code-controls input{min-width:70px;width:110px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:3px 5px}.markda-code-controls button{font-size:12px;min-height:24px}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--vscode-textCodeBlock-background)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none}.markda-code-rendered{padding:10px}.markda-live-table-wrap{overflow:auto;margin:12px 0}.markda-inline-table-controls{display:flex;gap:4px;justify-content:flex-end;margin-bottom:4px}.markda-inline-table-controls button{font-size:12px;min-height:24px}.markda-live-table-wrap table{border-collapse:collapse;width:100%}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--vscode-panel-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto}.markda-live-table-wrap th{background:var(--vscode-sideBar-background)}
-  .markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--vscode-panel-border);border-radius:5px;color:var(--vscode-descriptionForeground)}
-  .markda-callout{margin:12px 0;padding:12px 16px;border-radius:6px;border-left:4px solid;background:var(--vscode-editor-background)}.markda-callout-title{font-weight:600;margin-bottom:4px}.markda-callout-content{color:var(--vscode-editor-foreground)}.markda-callout-edit{margin-top:8px;font-size:11px;padding:2px 8px;opacity:0}.markda-callout:hover .markda-callout-edit{opacity:1}
-  .markda-callout-note{border-color:var(--vscode-editorInfo-border,#007acc);background:var(--vscode-editorInfo-background,#e8f4fd)}.markda-callout-note .markda-callout-title{color:var(--vscode-editorInfo-foreground,#007acc)}
-  .markda-callout-tip{border-color:var(--vscode-editorInfo-border,#89d185);background:var(--vscode-editorInfo-background,#e8f8e8)}.markda-callout-tip .markda-callout-title{color:var(--vscode-editorInfo-foreground,#89d185)}
-  .markda-callout-important{border-color:var(--vscode-editorWarning-border,#cca700);background:var(--vscode-editorWarning-background,#fff8e8)}.markda-callout-important .markda-callout-title{color:var(--vscode-editorWarning-foreground,#cca700)}
-  .markda-callout-warning{border-color:var(--vscode-editorWarning-border,#e8a000);background:var(--vscode-editorWarning-background,#fff3e0)}.markda-callout-warning .markda-callout-title{color:var(--vscode-editorWarning-foreground,#e8a000)}
-  .markda-callout-caution{border-color:var(--vscode-editorError-border,#f14c4c);background:var(--vscode-editorError-background,#fde8e8)}.markda-callout-caution .markda-callout-title{color:var(--vscode-editorError-foreground,#f14c4c)}
-
-  dialog{color:var(--vscode-editorWidget-foreground);background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:260px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:76px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:5px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
-  body[data-markda-theme="paper"] .cm-content{font-family:Georgia,"Times New Roman",serif}body[data-markda-theme="midnight"]{--markda-accent:#7aa2f7}body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
-#preview h1,#preview h2,#preview h3{line-height:1.25;margin-top:1.5em}#preview h2{border-bottom:1px solid var(--vscode-panel-border);padding-bottom:.25em}#preview pre{overflow:auto;padding:14px;background:var(--vscode-textCodeBlock-background);border-radius:5px}#preview code{font-family:var(--vscode-editor-font-family)}#preview blockquote{margin-left:0;padding-left:1em;border-left:4px solid var(--vscode-textBlockQuote-border);color:var(--vscode-descriptionForeground)}#preview table{border-collapse:collapse;width:100%}#preview th,#preview td{border:1px solid var(--vscode-panel-border);padding:6px 10px}#preview img{max-width:100%}.markda-render-error{color:var(--vscode-errorForeground)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--vscode-panel-border);color:var(--vscode-descriptionForeground)}
-  @media(max-width:760px){.markda-toolbar button span:not(.math-icon){display:none}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--vscode-panel-border)}.cm-scroller{padding-left:20px;padding-right:20px}}
-  .markda-hide-marker{color:transparent}.markda-hide-marker::selection{color:var(--vscode-editor-foreground)}
-@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+:root{
+  --markda-content-width:860px;--markda-bg:#fff;--markda-fg:#1a1a1a;--markda-muted:#57606a;
+  --markda-link:#0969da;--markda-link-hover:#0550ae;--markda-border:#d0d7de;
+  --markda-surface:#f6f8fa;--markda-surface-secondary:#eef2f6;--markda-elevated:#fff;
+  --markda-hover:#eaeef2;--markda-active:#dbeafe;--markda-selection:#add6ff;
+  --markda-line-highlight:#0969da14;--markda-find-highlight:#fff8c5;--markda-focus:#0969da;
+  --markda-cursor-color:#1a1a1a;--markda-accent:#0969da;--markda-error:#cf222e;
+  --markda-error-bg:#ffebe9;--markda-info:#0969da;--markda-info-bg:#ddf4ff;
+  --markda-tip:#1a7f37;--markda-tip-bg:#dafbe1;--markda-warning:#9a6700;--markda-warning-bg:#fff8c5;
+  --markda-scrollbar-track:transparent;--markda-scrollbar-thumb:#1f232847;
+  --markda-scrollbar-thumb-hover:#1f23286b;--markda-scrollbar-thumb-active:#1f23288c;
+}
+:root[data-markda-color-mode="dark"]{
+  --markda-bg:#1e1e1e;--markda-fg:#d4d4d4;--markda-muted:#a8a8a8;
+  --markda-link:#75beff;--markda-link-hover:#a6d5ff;--markda-border:#4a4a4a;
+  --markda-surface:#252526;--markda-surface-secondary:#2d2d30;--markda-elevated:#252526;
+  --markda-hover:#2a2d2e;--markda-active:#37373d;--markda-selection:#264f78;
+  --markda-line-highlight:#ffffff0f;--markda-find-highlight:#515c6a;--markda-focus:#007fd4;
+  --markda-cursor-color:#fff;--markda-accent:#7aa2f7;--markda-error:#f48771;
+  --markda-error-bg:#3b1f23;--markda-info:#75beff;--markda-info-bg:#152b3c;
+  --markda-tip:#89d185;--markda-tip-bg:#17351f;--markda-warning:#e2c08d;--markda-warning-bg:#352f15;
+  --markda-scrollbar-thumb:#c8c8c866;--markda-scrollbar-thumb-hover:#c8c8c88c;--markda-scrollbar-thumb-active:#c8c8c8b3;
+}
+*{box-sizing:border-box;scrollbar-color:var(--markda-scrollbar-thumb) var(--markda-scrollbar-track);scrollbar-width:thin}
+*::-webkit-scrollbar{width:10px;height:10px}*::-webkit-scrollbar-track{background:var(--markda-scrollbar-track)}
+*::-webkit-scrollbar-thumb{background:var(--markda-scrollbar-thumb);border:2px solid transparent;border-radius:8px;background-clip:padding-box}
+*::-webkit-scrollbar-thumb:hover{background-color:var(--markda-scrollbar-thumb-hover)}*::-webkit-scrollbar-thumb:active{background-color:var(--markda-scrollbar-thumb-active)}
+*::-webkit-scrollbar-corner{background:var(--markda-bg)}
+html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--markda-fg);background:var(--markda-bg);font-family:var(--vscode-font-family)}
+.markda-link-text,.markda-source-link,#preview a{color:var(--markda-link);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}.markda-link-text:hover,#preview a:hover{color:var(--markda-link-hover)}
+.markda-meta{font-size:0!important;line-height:0!important;letter-spacing:0!important;color:transparent!important}.markda-meta.markda-meta-expanded{font-size:inherit!important;line-height:inherit!important;letter-spacing:inherit!important;color:var(--markda-muted)!important}
+.markda-list-bullet-source{font-size:0;color:var(--markda-muted)}.markda-list-bullet-source::after{content:'•';display:inline-block;min-width:.8em;font-size:var(--vscode-editor-font-size);font-weight:700;text-align:center}.markda-list-bullet-source.markda-meta-expanded{font-size:inherit;color:inherit}.markda-list-bullet-source.markda-meta-expanded::after{content:none}
+button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--markda-hover)}button.active{background:var(--markda-active)}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--markda-focus);outline-offset:2px}
+.markda-shell{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.markda-toolbar{min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--markda-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
+.table-toolbar{display:none;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
+.markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;line-height:1.65}.preview-visible #preview{display:block}
+.cm-editor{height:100%;min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px var(--markda-padding-x,24px) 90px;line-height:1.7}.cm-content{max-width:var(--markda-content-width);margin:0;caret-color:var(--markda-cursor-color)}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-activeLine{background:var(--markda-line-highlight)}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px}.cm-selectionBackground{background:var(--markda-selection)!important}
+.markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--markda-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-quote{border-left:4px solid var(--markda-border);padding-left:14px!important;color:var(--markda-muted)}.markda-list-marker{color:var(--markda-muted)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--markda-fg);font-weight:700;text-align:center}
+.markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--markda-surface);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
+.markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em;accent-color:var(--markda-accent)}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--markda-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{color:var(--markda-muted);text-align:center;font-size:.9em}
+.markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button,.markda-code-controls button,.markda-inline-table-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
+.markda-image-editor input,.markda-block-source-editor,.markda-code-controls input,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-source-editor{display:block;width:100%;min-height:120px;resize:vertical;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
+.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-code-controls{display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px}.markda-code-controls input{min-width:70px;width:110px;padding:3px 5px}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none}.markda-code-rendered{padding:10px}
+.markda-live-table-wrap{overflow:auto;margin:12px 0}.markda-inline-table-controls{display:flex;gap:4px;justify-content:flex-end;margin-bottom:4px}.markda-live-table-wrap table{border-collapse:collapse;width:100%}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto}.markda-live-table-wrap th{background:var(--markda-surface)}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
+.markda-callout{margin:12px 0;padding:12px 16px;border-radius:6px;border-left:4px solid;background:var(--markda-surface)}.markda-callout-title{font-weight:600;margin-bottom:4px}.markda-callout-content{color:var(--markda-fg)}.markda-callout-edit{margin-top:8px;font-size:11px;padding:2px 8px;opacity:0}.markda-callout:hover .markda-callout-edit{opacity:1}
+.markda-callout-note{border-color:var(--markda-info);background:var(--markda-info-bg)}.markda-callout-note .markda-callout-title{color:var(--markda-info)}.markda-callout-tip{border-color:var(--markda-tip);background:var(--markda-tip-bg)}.markda-callout-tip .markda-callout-title{color:var(--markda-tip)}
+.markda-callout-important,.markda-callout-warning{border-color:var(--markda-warning);background:var(--markda-warning-bg)}.markda-callout-important .markda-callout-title,.markda-callout-warning .markda-callout-title{color:var(--markda-warning)}.markda-callout-caution{border-color:var(--markda-error);background:var(--markda-error-bg)}.markda-callout-caution .markda-callout-title{color:var(--markda-error)}
+dialog{color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:260px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:76px;padding:5px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
+body[data-markda-theme="paper"] .cm-content{font-family:Georgia,"Times New Roman",serif}body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
+#preview h1,#preview h2,#preview h3{line-height:1.25;margin-top:1.5em}#preview h2{border-bottom:1px solid var(--markda-border);padding-bottom:.25em}#preview pre{overflow:auto;padding:14px;background:var(--markda-surface);border-radius:5px}#preview code{font-family:var(--vscode-editor-font-family)}#preview blockquote{margin-left:0;padding-left:1em;border-left:4px solid var(--markda-border);color:var(--markda-muted)}#preview table{border-collapse:collapse;width:100%}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 10px}#preview th{background:var(--markda-surface)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
+@media(max-width:760px){.markda-toolbar button span:not(.math-icon){display:none}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 `; }

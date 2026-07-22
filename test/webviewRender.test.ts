@@ -9,14 +9,7 @@ describe('live Markdown webview', () => {
     document.body.innerHTML = '';
   });
 
-  // NOTE: skipped under happy-dom. The InlineStyleWidget keeps the original
-  // (marker-included) source text in a `visibility:hidden` span so CodeMirror's
-  // coordinate mapping stays aligned with the visible glyphs (fixes the
-  // click-cursor offset drift reported as bug#3). happy-dom does not apply CSS
-  // `visibility`, so `editor.textContent` still contains the hidden source
-  // markers and this assertion fails. In a real browser the hidden span is not
-  // painted, so the test passes — verify visually in VS Code.
-  it.skip('renders inline Markdown instead of exposing its source syntax', async () => {
+  it('renders inline Markdown instead of exposing its source syntax', async () => {
     const text = '# Support\n\nUse **Output** and open [GitHub Issues](https://example.com/issues).';
     (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial = {
       type: 'initialize', uri: 'file:///support.md', resourceBaseUri: 'file:///', themeBaseUri: 'data:text/css,',
@@ -40,8 +33,9 @@ describe('live Markdown webview', () => {
 
     const editor = document.querySelector<HTMLElement>('#editor')!;
     expect(editor.querySelector('.markda-strong')?.textContent).toBe('Output');
-    expect(editor.querySelector('.markda-live-link a')?.textContent).toBe('GitHub Issues');
-    expect(editor.textContent).not.toContain('**Output**');
-    expect(editor.textContent).not.toContain('](https://example.com/issues)');
+    expect(editor.querySelector('.markda-link-text')?.textContent).toBe('GitHub Issues');
+    expect(editor.querySelectorAll('.markda-meta')).toHaveLength(5);
+    expect(Array.from(editor.querySelectorAll('.markda-meta'))
+      .every((marker) => !marker.classList.contains('markda-meta-expanded'))).toBe(true);
   });
 });

@@ -58,6 +58,7 @@
     "build": "node ./esbuild.mjs",
     "watch": "node ./esbuild.mjs --watch",
     "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:watch": "vitest",
     "package": "npm run check && npm run test && vsce package --no-dependencies --allow-missing-repository",
     "package:pre-release": "npm run check && npm run test && vsce package --pre-release --no-dependencies --allow-missing-repository",
@@ -488,7 +489,7 @@
             "Always use the light editor theme.",
             "Always use the dark editor theme."
           ],
-          "scope": "resource",
+          "scope": "window",
           "description": "Editor theme: auto (follow VS Code), light, or dark."
         },
         "markda.editor.typewriterKeepCentered": {
@@ -613,9 +614,11 @@
     "@types/markdown-it-footnote": "^3.0.3",
     "@types/node": "^22.15.30",
     "@types/vscode": "^1.100.0",
+    "@vitest/browser": "^3.2.7",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.5",
     "happy-dom": "^18.0.1",
+    "playwright": "^1.61.1",
     "typescript": "^5.8.3",
     "vitest": "^3.2.3"
   }

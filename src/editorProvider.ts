@@ -106,6 +106,9 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       case 'finalSync':
         await this.applyFinalSync(view, message.uri, message.expectedText, message.text);
         return;
+      case 'save':
+        await this.saveDocument(view, message.uri, message.expectedText, message.text);
+        return;
       case 'outline':
         if (view === this.getActiveView()) this.outline.update(message.headings);
         return;
@@ -166,6 +169,32 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const edit = new vscode.WorkspaceEdit();
     edit.replace(view.document.uri, new vscode.Range(view.document.positionAt(change.from), view.document.positionAt(change.to)), change.insert);
     await vscode.workspace.applyEdit(edit);
+  }
+
+  private async saveDocument(view: EditorView, uri: string, expectedText: string, text: string): Promise<void> {
+    if (uri !== view.document.uri.toString()) return;
+    if (text !== view.document.getText()) {
+      // The save snapshot is queued after any edits already posted by the
+      // webview. It may therefore fill only the local, not-yet-posted tail. If
+      // something else changed the document first, preserve that change and
+      // ask the webview to reconcile instead of overwriting it.
+      if (view.document.getText() !== expectedText) {
+        this.resync(view);
+        void vscode.window.showWarningMessage('markda: The document changed while saving. Review the latest contents and save again.');
+        return;
+      }
+      const change = findMinimalChange(expectedText, text);
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(view.document.uri, new vscode.Range(view.document.positionAt(change.from), view.document.positionAt(change.to)), change.insert);
+      if (!await vscode.workspace.applyEdit(edit)) {
+        this.resync(view);
+        void vscode.window.showErrorMessage('markda: Could not synchronize the latest edit before saving.');
+        return;
+      }
+    }
+    if (!await view.document.save()) {
+      void vscode.window.showErrorMessage('markda: The document could not be saved.');
+    }
   }
 
   private onDocumentChanged(event: vscode.TextDocumentChangeEvent): void {

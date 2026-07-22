@@ -67,6 +67,7 @@ export type EditorToHostMessage =
       selection: SelectionAnchor;
     }
   | { type: 'finalSync'; uri: string; expectedText: string; text: string }
+  | { type: 'save'; uri: string; expectedText: string; text: string }
   | { type: 'ready' }
   | { type: 'state'; sourceMode: boolean; focusMode: boolean; typewriterMode: boolean; cursor?: number }
   | { type: 'statistics'; statistics: DocumentStatistics }
@@ -125,6 +126,10 @@ export function parseEditorToHostMessage(value: unknown): EditorToHostMessage | 
       if (typeof value.uri !== 'string' || typeof value.expectedText !== 'string' || typeof value.text !== 'string'
         || value.expectedText.length > 25_000_000 || value.text.length > 25_000_000) return undefined;
       return { type: 'finalSync', uri: value.uri, expectedText: value.expectedText, text: value.text };
+    case 'save':
+      if (typeof value.uri !== 'string' || typeof value.expectedText !== 'string' || typeof value.text !== 'string'
+        || value.expectedText.length > 25_000_000 || value.text.length > 25_000_000) return undefined;
+      return { type: 'save', uri: value.uri, expectedText: value.expectedText, text: value.text };
     case 'state':
       if (typeof value.sourceMode !== 'boolean' || typeof value.focusMode !== 'boolean' || typeof value.typewriterMode !== 'boolean') return undefined;
       if (value.cursor !== undefined && !isNonNegativeInteger(value.cursor)) return undefined;
