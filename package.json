@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "Edit Markdown in place with a source-preserving live preview, tables, diagrams, math, images, and HTML export.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "tetsuji16",
   "license": "MIT",
   "homepage": "https://github.com/tetsuji16/Markda#readme",
@@ -12,6 +12,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/tetsuji16/Markda.git"
+  },
+  "sponsor": {
+    "url": "https://github.com/sponsors/tetsuji16"
   },
   "engines": {
     "vscode": "^1.100.0"
@@ -23,7 +26,6 @@
   "keywords": [
     "markdown",
     "wysiwym",
-    "typora",
     "editor"
   ],
   "icon": "media/icon.png",

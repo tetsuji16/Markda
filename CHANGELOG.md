@@ -2,6 +2,13 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.6 - 2026-07-23
+
+- Standardized all user-facing text and public documentation on English.
+- Removed product-comparison copy and related Marketplace metadata.
+- Added a GitHub Sponsors link to the README and Marketplace metadata.
+- Excluded development-only documents from the published extension package.
+
 ## 0.1.5 - 2026-07-23
 
 - Fixed live Markdown initialization so math, tables, code blocks, and inline formatting render correctly on first open.
@@ -19,7 +26,7 @@ All notable changes to Markda are documented in this file.
 
 ## 0.1.3 - 2026-07-19
 
-- Completed the Typora usability review and documented the prioritized editing plan.
+- Documented and completed the prioritized editing plan.
 - Hardened final edit synchronization and IME-aware editable widgets.
 - Added regression coverage and verified the optimized production package before publishing.
 
@@ -30,7 +37,7 @@ All notable changes to Markda are documented in this file.
 - Reduced the initial webview bundle from about 8.9 MB to 1.3 MB by loading Mermaid only when a diagram is rendered.
 - Improved initial document rendering and avoided unnecessary full-document work for live decorations and tables.
 - Prevented pending edits and IME table-cell text from being stranded when an editor is hidden or closed.
-- Added Typora-style paragraph breaks, smart HTML paste, safer link editing, and direct code-block editing.
+- Added document-style paragraph breaks, smart HTML paste, safer link editing, and direct code-block editing.
 - Added numbered-list, block-quote, code-block, strikethrough, and clear-formatting commands.
 - Deferred KaTeX as well as Mermaid, delayed optional preview refreshes, and added a lightweight fallback for very large tables.
 

@@ -21,7 +21,7 @@ export function historyShortcut(event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' 
 }
 
 /**
- * Typora-style live-mode line breaks. Source mode and structural Markdown
+ * Document-style live-mode line breaks. Source mode and structural Markdown
  * blocks keep CodeMirror's native behavior; prose gets a real paragraph break.
  */
 export function liveEnterEdit(text: string, position: number, shiftKey: boolean, insideFence = false): TextEdit | undefined {

@@ -20,3 +20,4 @@ dist/*.map
 dist/**/*.map
 docs/DEMO.md
 docs/PUBLISHING.md
+docs/undo-redo.md

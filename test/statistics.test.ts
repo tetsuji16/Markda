@@ -9,7 +9,7 @@ describe('getStatistics', () => {
   });
 
   it('counts each CJK character as one word', () => {
-    const result = getStatistics('日本語 test');
+    const result = getStatistics('\u65e5\u672c\u8a9e test');
     expect(result.words).toBe(4);
   });
 
@@ -21,7 +21,7 @@ describe('getStatistics', () => {
   });
 
   it('counts Unicode code points and mixed line endings', () => {
-    const result = getStatistics('😀 a\r\n日本\rb\nc');
+    const result = getStatistics('😀 a\r\n\u65e5\u672c\rb\nc');
     expect(result.characters).toBe(11);
     expect(result.charactersWithoutSpaces).toBe(6);
     expect(result.lines).toBe(4);
@@ -29,11 +29,11 @@ describe('getStatistics', () => {
   });
 
   it('counts CJK characters individually when adjacent to Latin text', () => {
-    expect(getStatistics('abc日本def').words).toBe(4);
+    expect(getStatistics('abc\u65e5\u672cdef').words).toBe(4);
   });
 
   it('collects headings and statistics in one document analysis', () => {
-    const result = analyzeDocument('# One\r\ntext 日本\n## Two');
+    const result = analyzeDocument('# One\r\ntext \u65e5\u672c\n## Two');
     expect(result.headings).toEqual([
       { level: 1, text: 'One', from: 0, to: 5 },
       { level: 2, text: 'Two', from: 15, to: 21 },
@@ -43,7 +43,7 @@ describe('getStatistics', () => {
   });
 
   it('analyzes a long document without an input-path-sized pause', () => {
-    const source = Array.from({ length: 50_000 }, (_value, index) => index % 100 === 0 ? `## Section ${index}\n` : 'ordinary text 日本\n').join('');
+    const source = Array.from({ length: 50_000 }, (_value, index) => index % 100 === 0 ? `## Section ${index}\n` : 'ordinary text \u65e5\u672c\n').join('');
     const started = performance.now();
     const result = analyzeDocument(source);
     const elapsed = performance.now() - started;

@@ -42,7 +42,6 @@ type InitializationMessage = Extract<HostToEditorMessage, { type: 'initialize' }
 const initialDocument = (globalThis as typeof globalThis & { __markdaInitial?: InitializationMessage }).__markdaInitial;
 
 const vscode = acquireVsCodeApi<ViewState>();
-const isJapanese = navigator.language.toLocaleLowerCase().startsWith('ja');
 const savedViewState = vscode.getState();
 // v1 could strand the editor in source mode without a clear visual indication.
 // Reset that legacy state once; states saved by this version remain persistent.
@@ -166,7 +165,6 @@ document.querySelectorAll<HTMLButtonElement>('button[title]').forEach((button) =
   if (!button.getAttribute('aria-label')) button.setAttribute('aria-label', button.title);
 });
 document.querySelectorAll<HTMLElement>('.toolbar-separator').forEach((separator) => separator.setAttribute('aria-hidden', 'true'));
-if (isJapanese) localizeStaticUi();
 
 const setBlockDecorations = StateEffect.define<DecorationSet>();
 
@@ -793,25 +791,6 @@ function readDataUrl(file: File): Promise<string> {
 
 
 
-function localizeStaticUi(): void {
-  document.documentElement.lang = 'ja';
-  const labels: Partial<Record<EditorCommand, string>> = {
-    toggleSourceMode: 'ソース表示 (Ctrl+/)', toggleFocusMode: 'フォーカスモード (F8)', toggleTypewriterMode: 'タイプライターモード (F9)',
-    toggleBold: '太字 (Ctrl+B)', toggleItalic: '斜体 (Ctrl+I)', toggleInlineCode: 'インラインコード', insertLink: 'リンク (Ctrl+K)',
-    toggleBulletList: '箇条書き', toggleTaskList: 'タスクリスト', insertTable: '表を挿入', insertImage: '画像を挿入', insertMathBlock: '数式ブロックを挿入',
-  };
-  document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((button) => {
-    const label = labels[button.dataset.command as EditorCommand];
-    if (label) { button.title = label; button.ariaLabel = label; }
-  });
-  const visible: Record<string, string> = { Source: 'ソース', Focus: 'フォーカス', Typewriter: 'タイプライター', Preview: 'プレビュー', Table: '表' };
-  document.querySelectorAll<HTMLElement>('button span,.table-toolbar>span:first-child').forEach((element) => { if (visible[element.textContent ?? '']) element.textContent = visible[element.textContent ?? ''] ?? ''; });
-  const previewButton = document.querySelector<HTMLButtonElement>('#preview-button');
-  if (previewButton) { previewButton.title = 'レンダリングプレビュー'; previewButton.ariaLabel = 'レンダリングプレビューを切り替え'; }
-  document.querySelector('#table-dialog-title')!.textContent = '表を挿入';
-  document.querySelectorAll<HTMLLabelElement>('#table-dialog label').forEach((label, index) => { label.firstChild!.textContent = index === 0 ? '列数 ' : '行数 '; });
-}
-
 let syncingScroll = false;
 function syncScroll(source: HTMLElement, target: HTMLElement): void {
   if (syncingScroll || !view.state.field(modeField).previewVisible) return;
@@ -1436,9 +1415,9 @@ class ImageWidget extends WidgetType {
       const controls = document.createElement('div');
       controls.className = 'markda-image-controls';
       const actions: readonly ['move' | 'copy' | 'delete', string][] = [
-        ['move', isJapanese ? '移動・名前変更' : 'Move / Rename'],
-        ['copy', isJapanese ? 'コピー' : 'Copy'],
-        ['delete', isJapanese ? '削除' : 'Delete'],
+        ['move', 'Move / Rename'],
+        ['copy', 'Copy'],
+        ['delete', 'Delete'],
       ];
       for (const [action, label] of actions) {
         const button = document.createElement('button');
@@ -1454,10 +1433,10 @@ class ImageWidget extends WidgetType {
     editorPanel.hidden = true;
     const altInput = document.createElement('input');
     altInput.value = this.alt;
-    altInput.placeholder = isJapanese ? '代替テキスト' : 'Alt text';
+    altInput.placeholder = 'Alt text';
     const sourceInput = document.createElement('input');
     sourceInput.value = this.source;
-    sourceInput.placeholder = isJapanese ? '画像パスまたはURL' : 'Image path or URL';
+    sourceInput.placeholder = 'Image path or URL';
     const commit = () => commitImage(this.editor, this.from, altInput.value, sourceInput.value);
     altInput.addEventListener('change', commit);
     sourceInput.addEventListener('change', commit);
@@ -1555,7 +1534,7 @@ class CodeBlockWidget extends WidgetType {
       code.textContent = this.source;
       code.contentEditable = 'true';
       code.spellcheck = false;
-      code.setAttribute('aria-label', isJapanese ? 'コード内容' : 'Code content');
+      code.setAttribute('aria-label', 'Code content');
       const gate = new CompositionCommitGate();
       let timer: number | undefined;
       const commit = () => commitCodeBlock(this.editor, this.from, code.textContent ?? '', undefined);
@@ -1637,12 +1616,10 @@ class TableWidget extends WidgetType {
     if (cellCount > settings.liveTableMaxCells) {
       container.classList.add('markda-large-table');
       const summary = document.createElement('span');
-      summary.textContent = isJapanese
-        ? `大きな表（${this.table.rows.length + 1}行 × ${this.table.header.length}列）`
-        : `Large table (${this.table.rows.length + 1} rows × ${this.table.header.length} columns)`;
+      summary.textContent = `Large table (${this.table.rows.length + 1} rows × ${this.table.header.length} columns)`;
       const edit = document.createElement('button');
       edit.type = 'button';
-      edit.textContent = isJapanese ? 'ここで編集' : 'Edit here';
+      edit.textContent = 'Edit here';
       const sourceEditor = createBlockSourceEditor(this.editor, serializeMarkdownTable(this.table), (value) => {
         const current = findMarkdownTable(this.editor.state.doc.toString(), this.table.from,
           this.editor.state.doc.lineAt(this.table.from).number - 1);
@@ -1975,7 +1952,7 @@ function createBlockSourceEditor(editor: EditorView, source: string, commit: (va
   input.className = 'markda-block-source-editor';
   input.value = source;
   input.spellcheck = false;
-  input.setAttribute('aria-label', isJapanese ? 'ブロックのMarkdownソース' : 'Block Markdown source');
+  input.setAttribute('aria-label', 'Block Markdown source');
   const gate = new CompositionCommitGate();
   let timer: number | undefined;
   const save = () => commit(input.value);
@@ -2404,7 +2381,7 @@ function addInlineDecorations(
         class: 'markda-link-text',
         attributes: {
           'data-href': href,
-          title: isJapanese ? 'クリックで編集、Ctrl/Cmd+クリックで開く' : 'Click to edit; Ctrl/Cmd+click to open',
+          title: 'Click to edit; Ctrl/Cmd+click to open',
         },
       }),
     });

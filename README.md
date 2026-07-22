@@ -4,12 +4,12 @@ Write Markdown as a formatted document without giving up the source file. Markda
 
 > Markda 0.1 is a preview release. Keep important work under version control and report reproducible editing issues.
 
-[Report a bug](https://github.com/tetsuji16/Markda/issues) · [Release history](https://github.com/tetsuji16/Markda/blob/main/CHANGELOG.md)
+[Report a bug](https://github.com/tetsuji16/Markda/issues) · [Release history](https://github.com/tetsuji16/Markda/blob/main/CHANGELOG.md) · [Sponsor Markda](https://github.com/sponsors/tetsuji16)
 
 ## Highlights
 
 - Edit rendered Markdown in place or switch to the full source view.
-- Use Typora-style paragraph breaks, smart HTML-to-Markdown paste, and modifier-click link opening.
+- Use document-style paragraph breaks, smart HTML-to-Markdown paste, and modifier-click link opening.
 - Work with tables using direct cell editing, row and column controls, drag reordering, resizing, alignment, and Tab navigation.
 - Edit code blocks directly without opening source mode, with unified undo and redo behavior.
 - Render KaTeX math and Mermaid diagrams without sending document content to an online rendering service.
@@ -74,9 +74,7 @@ npm test
 npm run build
 ```
 
-Press `F5` in VS Code to open the Extension Development Host with `docs/DEMO.md`. See `docs/SPECIFICATION.ja.md` for the compatibility contract and implementation status, and `docs/PUBLISHING.md` for the release checklist.
-
-The editing rationale and completed plan are recorded in [TyporaとのMarkdown編集ユーザビリティ比較](docs/TYPORA_USABILITY_REVIEW.ja.md).
+Press `F5` in VS Code to open the Extension Development Host with `docs/DEMO.md`. See `docs/SPECIFICATION.md` for the compatibility contract and implementation status, and `docs/PUBLISHING.md` for the release checklist.
 
 Bug reports and focused feature requests are welcome in [GitHub Issues](https://github.com/tetsuji16/Markda/issues).
 

@@ -7,7 +7,7 @@ describe('decodeImageSource', () => {
   });
 
   it('accepts a decoded percent-encoded path', () => {
-    expect(decodeImageSource('images/%E7%94%BB%E5%83%8F.png')).toBe('images/画像.png');
+    expect(decodeImageSource('images/%E7%94%BB%E5%83%8F.png')).toBe('images/\u753b\u50cf.png');
   });
 
   it('strips a leading angle bracket wrapper', () => {

@@ -14,7 +14,7 @@ async function waitForMermaid(selector: string): Promise<HTMLElement> {
 }
 
 function expectVisibleLabels(rendered: HTMLElement): void {
-  for (const label of ['Markdownを編集', 'プレビュー更新', 'ファイルを保存']) {
+  for (const label of ['Edit Markdown', 'Update preview', 'Save file']) {
     const text = Array.from(rendered.querySelectorAll<SVGTextElement>('text'))
       .find((element) => element.textContent?.includes(label));
     expect(text, `missing SVG text label: ${label}`).toBeDefined();
@@ -28,8 +28,8 @@ describe('Mermaid rendering in Chromium', () => {
     document.body.innerHTML = '<div id="app"></div>';
     const source = [
       'flowchart LR',
-      '  Edit[Markdownを編集] --> Preview[プレビュー更新]',
-      '  Preview --> Save[ファイルを保存]',
+      '  Edit[Edit Markdown] --> Preview[Update preview]',
+      '  Preview --> Save[Save file]',
     ].join('\n');
     (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial = {
       type: 'initialize', uri: 'file:///mermaid.md', resourceBaseUri: 'http://localhost/', themeBaseUri: '',
@@ -48,16 +48,16 @@ describe('Mermaid rendering in Chromium', () => {
     const rendered = await waitForMermaid('[data-markda-renderer="mermaid"]');
 
     expect(rendered.querySelector('foreignObject')).toBeNull();
-    expect(rendered.textContent).toContain('Markdownを編集');
-    expect(rendered.textContent).toContain('プレビュー更新');
-    expect(rendered.textContent).toContain('ファイルを保存');
+    expect(rendered.textContent).toContain('Edit Markdown');
+    expect(rendered.textContent).toContain('Update preview');
+    expect(rendered.textContent).toContain('Save file');
     expectVisibleLabels(rendered);
 
     document.querySelector<HTMLButtonElement>('#preview-button')!.click();
     const previewDiagram = await waitForMermaid('#preview .markda-diagram');
-    expect(previewDiagram.textContent).toContain('Markdownを編集');
-    expect(previewDiagram.textContent).toContain('プレビュー更新');
-    expect(previewDiagram.textContent).toContain('ファイルを保存');
+    expect(previewDiagram.textContent).toContain('Edit Markdown');
+    expect(previewDiagram.textContent).toContain('Update preview');
+    expect(previewDiagram.textContent).toContain('Save file');
     expectVisibleLabels(previewDiagram);
   });
 });

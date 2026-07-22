@@ -1,35 +1,35 @@
-# markda 動作確認
+# Markda Smoke Test
 
-このファイルは、拡張機能開発ホストを `F5` で起動すると自動的に開きます。
+This file opens automatically when the Extension Development Host starts with `F5`.
 
-## 基本編集
+## Basic editing
 
-この文章を編集し、入力内容がそのまま保持されることを確認してください。
+Edit this paragraph and confirm that the text is preserved exactly.
 
-- **太字**、*斜体*、~~取り消し線~~、`inline code`
-- [x] 完了したタスク
-- [ ] 未完了のタスク
+- **Bold**, *italic*, ~~strikethrough~~, and `inline code`
+- [x] Completed task
+- [ ] Incomplete task
 - [OpenAI](https://openai.com/)
 
-> 引用ブロックの表示確認です。
+> This block quote verifies rendered quote styling.
 
-## 表
+## Table
 
-| 項目 | 状態 | メモ |
+| Item | Status | Notes |
 | --- | :---: | --- |
-| プレビュー | OK | 編集と同時に反映 |
-| ソース表示 | 確認 | `Ctrl+/` で切り替え |
+| Preview | OK | Updates with edits |
+| Source view | Check | Toggle with `Ctrl+/` |
 
-## コード
+## Code
 
 ```ts
-const greeting = "Hello, markda!";
+const greeting = "Hello, Markda!";
 console.log(greeting);
 ```
 
-## 数式
+## Math
 
-インライン数式: $E = mc^2$
+Inline math: $E = mc^2$
 
 $$
 \int_0^1 x^2\,dx = \frac{1}{3}
@@ -39,21 +39,21 @@ $$
 
 ```mermaid
 flowchart LR
-  Edit[Markdownを編集] --> Preview[プレビュー更新]
-  Preview --> Save[ファイルを保存]
+  Edit[Edit Markdown] --> Preview[Update preview]
+  Preview --> Save[Save file]
 ```
 
-## 操作チェック
+## Verification checklist
 
-1. 上の文章を編集して保存する
-2. `Ctrl+/` でソース表示を切り替える
-3. `F8` でフォーカスモードを切り替える
-4. `F9` でタイプライターモードを切り替える
-5. コマンドパレットで `markda: Show Document Statistics` を実行する
-6. コマンドパレットで `markda: Export: HTML` を実行する
-7. 表からキャレットを外し、セル直接編集、Tab移動、行列ボタン、ドラッグ並べ替えを確認する
-8. 画像を複数選択し、クリップボード画像とドラッグ＆ドロップでも挿入する
-9. タスクのチェックボックスを編集面とプレビューの両方から切り替える
-10. テキスト選択時にフッターの選択語数と統計ポップアップを確認する
-11. Outlineの階層・現在位置・フィルターとFilesの階層・Recent・検索ボタンを確認する
-12. キーボードだけでツールバー、リンク、表、プレビュー見出しを操作する
+1. Edit and save the text above.
+2. Toggle source view with `Ctrl+/`.
+3. Toggle Focus Mode with `F8`.
+4. Toggle Typewriter Mode with `F9`.
+5. Run `Markda: Show Document Statistics` from the Command Palette.
+6. Run `Markda: Export: HTML` from the Command Palette.
+7. Move the caret outside the table, then verify cell editing, Tab navigation, row and column controls, and drag reordering.
+8. Insert multiple images and verify clipboard paste and drag-and-drop insertion.
+9. Toggle task checkboxes from both the editor and preview.
+10. Select text and verify the selection count and statistics popover in the footer.
+11. Verify Outline hierarchy, current location, filters, Files hierarchy, recent files, and search.
+12. Operate the toolbar, links, table, and preview headings using only the keyboard.
