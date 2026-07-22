@@ -1684,6 +1684,40 @@ class MathWidget extends WidgetType {
   eq(other: MathWidget): boolean { return other.source === this.source && other.displayMode === this.displayMode; }
 }
 
+class CalloutWidget extends WidgetType {
+  constructor(
+    private readonly editor: EditorView,
+    private readonly from: number,
+    private readonly type: string,
+    private readonly content: string,
+  ) { super(); }
+  toDOM(): HTMLElement {
+    const container = document.createElement('div');
+    container.className = `markda-callout markda-callout-${this.type.toLowerCase()}`;
+    container.setAttribute('role', 'note');
+    container.setAttribute('aria-label', this.type.charAt(0).toUpperCase() + this.type.slice(1));
+    const title = document.createElement('div');
+    title.className = 'markda-callout-title';
+    title.textContent = this.type.charAt(0).toUpperCase() + this.type.slice(1);
+    container.append(title);
+    const content = document.createElement('div');
+    content.className = 'markda-callout-content';
+    content.textContent = this.content;
+    container.append(content);
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'markda-callout-edit';
+    edit.textContent = isJapanese ? '編集' : 'Edit';
+    edit.addEventListener('click', () => focusSourcePosition(this.editor, this.from));
+    container.append(edit);
+    return container;
+  }
+  ignoreEvent(): boolean { return true; }
+  eq(other: CalloutWidget): boolean {
+    return other.from === this.from && other.type === this.type && other.content === this.content;
+  }
+}
+
 function createLivePreviewPlugin() {
   return ViewPlugin.fromClass(class {
     decorations: DecorationSet;
@@ -1760,18 +1794,16 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
       }
       const heading = text.match(/^(#{1,6})([ \t]+)(?=\S)/u);
       const quote = text.match(/^(>[ \t]?)/u);
-      const list = text.match(/^(\s*)([-+*]|\d+[.)])([ \t]+)/u);
+      const list = text.match(/^(\s*)([-+*]|\d+[.)])(\s+)/u);
+      if (heading) decorations.push({ from: line.from, decoration: Decoration.line({ class: `markda-h${heading[1]?.length ?? 1}` }) });
+      if (quote) decorations.push({ from: line.from, decoration: Decoration.line({ class: 'markda-quote' }) });
+      if (state.focusMode && (lineNumber < focusLines.from || lineNumber > focusLines.to)) decorations.push({ from: line.from, decoration: Decoration.line({ class: 'markda-unfocused' }) });
       if (!state.sourceMode) {
         const task = text.match(/^(\s*[-+*]\s+)\[([ xX])\](\s+)/u);
         if (task) {
           const from = line.from + (task[1]?.length ?? 0);
           decorations.push({ from, to: from + 3, decoration: Decoration.replace({ widget: new TaskWidget(editor, from, (task[2] ?? ' ') !== ' ') }) });
         }
-      }
-      if (heading) decorations.push({ from: line.from, decoration: Decoration.line({ class: `markda-h${heading[1]?.length ?? 1}` }) });
-      if (quote) decorations.push({ from: line.from, decoration: Decoration.line({ class: 'markda-quote' }) });
-      if (state.focusMode && (lineNumber < focusLines.from || lineNumber > focusLines.to)) decorations.push({ from: line.from, decoration: Decoration.line({ class: 'markda-unfocused' }) });
-      if (!state.sourceMode) {
         if (heading && !selectionIntersects(selection.from, selection.to, line.from, line.from + heading[0].length)) {
           hide(decorations, line.from, line.from + heading[0].length);
         }
@@ -1863,6 +1895,26 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
       const image = text.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/u);
       if (image && lineNumber !== editor.state.doc.lineAt(selection.head).number) {
         decorations.push({ from: line.from, to: line.to, decoration: Decoration.replace({ widget: new ImageWidget(editor, line.from, image[1] ?? '', image[2] ?? ''), block: true }) });
+      }
+      // GitHub Alert (Callout): > **Note**, > **Tip**, > **Important**, > **Warning**, > **Caution**
+      const calloutMatch = text.match(/^>\s*\*\*(Note|Tip|Important|Warning|Caution)\*\*\s*$/i);
+      if (calloutMatch && (selection.head < line.from || selection.head > line.to)) {
+        const calloutType = calloutMatch[1]!;
+        let endLine = lineNumber;
+        // Include subsequent blockquote lines as part of the callout
+        while (endLine + 1 <= editor.state.doc.lines && /^>\s/.u.test(editor.state.doc.line(endLine + 1).text)) {
+          endLine++;
+        }
+        const end = editor.state.doc.line(endLine).to;
+        const contentLines: string[] = [];
+        for (let i = lineNumber + 1; i <= endLine; i++) {
+          const l = editor.state.doc.line(i);
+          contentLines.push(l.text.replace(/^>\s?/u, ''));
+        }
+        const content = contentLines.join('\n').trim();
+        decorations.push({ from: line.from, to: end, decoration: Decoration.replace({ widget: new CalloutWidget(editor, line.from, calloutType, content), block: true }) });
+        processedUntil = end;
+        continue;
       }
     }
   }
@@ -1961,6 +2013,12 @@ function getStyles(): string { return String.raw`
   .markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-highlight{background:var(--vscode-editor-findMatchHighlightBackground);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--vscode-textCodeBlock-background);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
   .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--vscode-panel-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{text-align:center;color:var(--vscode-descriptionForeground);font-size:.9em}.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-code-controls{display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px}.markda-code-controls input{min-width:70px;width:110px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:3px 5px}.markda-code-controls button{font-size:12px;min-height:24px}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--vscode-textCodeBlock-background)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none}.markda-code-rendered{padding:10px}.markda-live-table-wrap{overflow:auto;margin:12px 0}.markda-inline-table-controls{display:flex;gap:4px;justify-content:flex-end;margin-bottom:4px}.markda-inline-table-controls button{font-size:12px;min-height:24px}.markda-live-table-wrap table{border-collapse:collapse;width:100%}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--vscode-panel-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto}.markda-live-table-wrap th{background:var(--vscode-sideBar-background)}
   .markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--vscode-panel-border);border-radius:5px;color:var(--vscode-descriptionForeground)}
+  .markda-callout{margin:12px 0;padding:12px 16px;border-radius:6px;border-left:4px solid;background:var(--vscode-editor-background)}.markda-callout-title{font-weight:600;margin-bottom:4px}.markda-callout-content{color:var(--vscode-editor-foreground)}.markda-callout-edit{margin-top:8px;font-size:11px;padding:2px 8px;opacity:0}.markda-callout:hover .markda-callout-edit{opacity:1}
+  .markda-callout-note{border-color:var(--vscode-editorInfo-border,#007acc);background:var(--vscode-editorInfo-background,#e8f4fd)}.markda-callout-note .markda-callout-title{color:var(--vscode-editorInfo-foreground,#007acc)}
+  .markda-callout-tip{border-color:var(--vscode-editorInfo-border,#89d185);background:var(--vscode-editorInfo-background,#e8f8e8)}.markda-callout-tip .markda-callout-title{color:var(--vscode-editorInfo-foreground,#89d185)}
+  .markda-callout-important{border-color:var(--vscode-editorWarning-border,#cca700);background:var(--vscode-editorWarning-background,#fff8e8)}.markda-callout-important .markda-callout-title{color:var(--vscode-editorWarning-foreground,#cca700)}
+  .markda-callout-warning{border-color:var(--vscode-editorWarning-border,#e8a000);background:var(--vscode-editorWarning-background,#fff3e0)}.markda-callout-warning .markda-callout-title{color:var(--vscode-editorWarning-foreground,#e8a000)}
+  .markda-callout-caution{border-color:var(--vscode-editorError-border,#f14c4c);background:var(--vscode-editorError-background,#fde8e8)}.markda-callout-caution .markda-callout-title{color:var(--vscode-editorError-foreground,#f14c4c)}
 
   dialog{color:var(--vscode-editorWidget-foreground);background:var(--vscode-editorWidget-background);border:1px solid var(--vscode-widget-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:260px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:76px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:5px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
   body[data-markda-theme="paper"] .cm-content{font-family:Georgia,"Times New Roman",serif}body[data-markda-theme="midnight"]{--markda-accent:#7aa2f7}body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
