@@ -2,12 +2,20 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.5 - 2026-07-23
+
+- Fixed live Markdown initialization so math, tables, code blocks, and inline formatting render correctly on first open.
+- Kept light, dark, and automatic theme selections synchronized across open editor tabs and restored webviews.
+- Improved table toolbar behavior for focused live cells, including row and column operations that preserve focus.
+- Made Mermaid labels render reliably without unsafe SVG foreign objects and bundled the fonts required by KaTeX.
+- Preserved the viewport during undo and redo in editable widgets and hid stale Markdown source markers after focus changes.
+- Added browser and unit regression coverage for initialization, diagrams, tables, themes, cursor behavior, and widget history.
+
 ## 0.1.4 - 2026-07-19
 
 - Added unified undo and redo behavior for source text, editable tables, and code blocks.
 - Improved live Markdown marker rendering, list bullets, links, cursor visibility, and active-line highlighting.
-- Fixed duplicate plain-text paste handling and kept external documee h# あああああ
-istory.
+- Fixed duplicate plain-text paste handling and kept external document history intact.
 
 ## 0.1.3 - 2026-07-19
 

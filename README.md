@@ -11,13 +11,14 @@ Write Markdown as a formatted document without giving up the source file. Markda
 - Edit rendered Markdown in place or switch to the full source view.
 - Use Typora-style paragraph breaks, smart HTML-to-Markdown paste, and modifier-click link opening.
 - Work with tables using direct cell editing, row and column controls, drag reordering, resizing, alignment, and Tab navigation.
-- Edit code blocks directly, change their language, and copy their contents without opening source mode.
+- Edit code blocks directly without opening source mode, with unified undo and redo behavior.
 - Render KaTeX math and Mermaid diagrams without sending document content to an online rendering service.
 - Insert multiple images, or save images from the clipboard and drag-and-drop into a configurable asset folder.
 - Navigate with filterable Outline and Files views, workspace Markdown search, and Quick Open.
 - Use focus and typewriter modes, light and dark themes, find, and document statistics.
 - Export a styled standalone HTML document or bare HTML.
 - Keep split editors synchronized through the underlying VS Code text document.
+- Keep the selected editor theme synchronized across open Markdown tabs.
 
 ## Getting started
 
@@ -45,8 +46,7 @@ The Markda activity-bar view provides document outline and Markdown file navigat
 | Strikethrough | `Alt+Shift+5` | `Ctrl+Shift+Backtick` |
 | Copy as Markdown | `Ctrl+Shift+C` | `Cmd+Shift+C` |
 | Paste as plain text | `Ctrl+Shift+V` | `Cmd+Shift+V` |
-## ああああ
-# いい
+
 Search for `Markda:` in the Command Palette to see all available commands, including table and math insertion, workspace search, statistics, and HTML export.
 
 ## Settings

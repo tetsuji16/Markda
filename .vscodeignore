@@ -1,10 +1,17 @@
 .git/**
+.github/**
 .vscode/**
 .gitignore
+clean.diff
+diff_main.txt
+opencode.json
+dev/**
 src/**
 test/**
 scripts/**
 tsconfig.json
+vitest.config.ts
+vitest.browser.config.ts
 esbuild.mjs
 *.vsix
 node_modules/**

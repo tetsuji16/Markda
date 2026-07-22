@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { areValidTextChanges, decodeImageSource, parseEditorToHostMessage, type EditorCommand, type EditorToHostMessage, type HostToEditorMessage, type TextChange } from './protocol.js';
-import { getEditorSettings } from './settings.js';
+import { getEditorSettings, getThemeMode } from './settings.js';
 import { getStatistics } from './statistics.js';
 import { findMinimalChange } from './textChange.js';
 import { OutlineProvider } from './outlineProvider.js';
@@ -19,6 +19,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
   private readonly views = new Set<EditorView>();
   private readonly disposables: vscode.Disposable[] = [];
   private activeView: EditorView | undefined;
+  private themeMode: ReturnType<typeof getThemeMode>;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -26,13 +27,13 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     private readonly status: vscode.StatusBarItem,
     private readonly onDidActivateDocument?: (uri: vscode.Uri) => void,
   ) {
+    this.themeMode = getThemeMode();
     this.disposables.push(
       vscode.workspace.onDidChangeTextDocument((event) => this.onDocumentChanged(event)),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (!event.affectsConfiguration('markda')) return;
-        for (const view of this.views) {
-          this.post(view, { type: 'configurationChanged', settings: getEditorSettings(view.document.uri) });
-        }
+        if (event.affectsConfiguration('markda.editor.themeMode')) this.themeMode = getThemeMode();
+        this.broadcastSettings();
       }),
       vscode.window.onDidChangeActiveTextEditor(() => this.refreshStatus()),
     );
@@ -55,6 +56,10 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (panel.active) {
         this.activeView = view;
         this.onDidActivateDocument?.(document.uri);
+        // Messages sent while a webview is hidden can be dropped while VS Code
+        // suspends its context. Reconcile the theme on every tab activation,
+        // including retained contexts that do not emit another `ready` event.
+        this.postSettings(view);
         this.refreshStatus();
       }
     });
@@ -97,7 +102,10 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     switch (message.type) {
       case 'ready':
         // The initial document is embedded in the webview HTML so the editor can
-        // paint immediately. `ready` only confirms that command messaging is live.
+        // paint immediately. A hidden tab may have had its webview discarded and
+        // recreated from older HTML, so always reconcile it with the current
+        // in-memory settings when command messaging becomes live again.
+        this.postSettings(view);
         this.refreshStatus();
         return;
       case 'edit':
@@ -131,6 +139,11 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
         await vscode.env.clipboard.writeText(message.text);
         return;
       case 'updateThemeMode':
+        // Keep the current selection in memory and notify every open tab before
+        // waiting for VS Code to flush the global setting to disk. This closes
+        // the gap where a fast tab switch could initialize from the old value.
+        this.themeMode = message.mode;
+        this.broadcastSettings();
         await vscode.workspace.getConfiguration('markda').update('editor.themeMode', message.mode, vscode.ConfigurationTarget.Global);
         return;
       case 'state':
@@ -386,6 +399,14 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     void view.panel.webview.postMessage(message);
   }
 
+  private broadcastSettings(): void {
+    for (const view of this.views) this.postSettings(view);
+  }
+
+  private postSettings(view: EditorView): void {
+    this.post(view, { type: 'configurationChanged', settings: getEditorSettings(view.document.uri, this.themeMode) });
+  }
+
   private resync(view: EditorView): void {
     this.post(view, { type: 'documentChanged', version: view.document.version, text: view.document.getText() });
   }
@@ -396,7 +417,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       resourceBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(view.document.uri, '..')).toString()}/`,
       themeBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.globalStorageUri, 'themes')).toString()}/`,
       version: view.document.version,
-      text: view.document.getText(), settings: getEditorSettings(view.document.uri),
+      text: view.document.getText(), settings: getEditorSettings(view.document.uri, this.themeMode),
     };
   }
 

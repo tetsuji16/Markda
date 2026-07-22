@@ -20,7 +20,7 @@ const builds = [
     platform: 'browser',
     format: 'esm',
     external: ['./katexLoader.js', './mermaidLoader.js'],
-    loader: { '.ttf': 'file' },
+    loader: { '.ttf': 'file', '.woff': 'file', '.woff2': 'file' },
     assetNames: '[name]',
   },
   {

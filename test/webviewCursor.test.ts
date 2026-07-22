@@ -309,6 +309,58 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     expect(view.dom.textContent).not.toContain('$$');
   });
 
+  it('returns an open block math editor to its rendered view when touched outside', async () => {
+    vi.resetModules();
+    const text = ['Before math.', '', '$$', 'x^2', '$$', '', 'After math.'].join('\n');
+    setupEditor(text);
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    const rendered = view.dom.querySelector<HTMLElement>('.markda-block-math')!;
+    const source = view.dom.querySelector<HTMLTextAreaElement>('.markda-block-source-editor')!;
+    rendered.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(source.hidden).toBe(false);
+    expect(rendered.hidden).toBe(true);
+    source.value = 'x^3';
+    source.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+
+    view.contentDOM.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await tick();
+
+    expect(source.hidden).toBe(true);
+    expect(rendered.hidden).toBe(false);
+    expect(view.state.doc.toString()).toContain('x^3');
+  });
+
+  it('returns an open Mermaid source editor to its rendered view when touched outside', async () => {
+    vi.resetModules();
+    const text = ['Before diagram.', '', '```mermaid', 'graph TD', '  A --> B', '```', '', 'After diagram.'].join('\n');
+    setupEditor(text);
+    const initial = (globalThis as typeof globalThis & {
+      __markdaInitial: { settings: { markdown: { diagrams: boolean } } };
+    }).__markdaInitial;
+    initial.settings.markdown.diagrams = true;
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    const rendered = view.dom.querySelector<HTMLElement>('[data-markda-renderer="mermaid"]')!;
+    const source = view.dom.querySelector<HTMLTextAreaElement>('.markda-block-source-editor')!;
+    rendered.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(source.hidden).toBe(false);
+    expect(rendered.hidden).toBe(true);
+    source.value = ['graph TD', '  A --> C'].join('\n');
+    source.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+
+    view.contentDOM.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await tick();
+
+    expect(view.dom.querySelector<HTMLTextAreaElement>('.markda-block-source-editor')?.hidden).toBe(true);
+    expect(view.dom.querySelector<HTMLElement>('[data-markda-renderer="mermaid"]')?.hidden).toBe(false);
+    expect(view.state.doc.toString()).toContain('A --> C');
+  });
+
   it('renders a GitHub alert and includes its quoted body', async () => {
     vi.resetModules();
     setupEditor(['Before alert.', '', '> [!WARNING]', '> Review this before publishing.', '', 'After alert.'].join('\n'));

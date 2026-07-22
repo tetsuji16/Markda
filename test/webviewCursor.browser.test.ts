@@ -100,13 +100,19 @@ describe('live Markdown pointer geometry in Chromium', () => {
     const ordinaryLine = view.contentDOM.querySelectorAll('.cm-line')[1]!;
     await clickPosition(ordinaryPosition, ordinaryLine, 7);
 
-    const inlineDocument = 'Before **bold** and [Link](https://example.com) after.';
+    const inlineDocument = ['Before **bold** and [Link](https://example.com) after.', 'Destination line.'].join('\n');
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: inlineDocument }, selection: { anchor: 0 } });
     await settle();
     const boldPosition = inlineDocument.indexOf('bold') + 1;
     const bold = view.dom.querySelector('.markda-strong')!;
     await clickPosition(boldPosition, bold, 1);
     expect(view.dom.querySelectorAll('.markda-meta-expanded')).toHaveLength(2);
+
+    const destinationPosition = inlineDocument.indexOf('Destination') + 4;
+    const destinationLine = view.contentDOM.querySelectorAll('.cm-line')[1]!;
+    await clickPosition(destinationPosition, destinationLine, 4);
+    expect(view.dom.querySelector('.markda-meta-expanded')).toBeNull();
+    expect(view.dom.querySelector('.markda-strong')?.textContent).toBe('bold');
 
     const longParagraph = 'A wrapped ordinary paragraph '.repeat(14).trim();
     const sourceDocument = [

@@ -7,6 +7,7 @@ import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec,
 import { Decoration, EditorView, highlightActiveLine, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import DOMPurify from 'dompurify';
+import 'katex/dist/katex.css';
 import MarkdownIt from 'markdown-it';
 import footnote from 'markdown-it-footnote';
 import mark from 'markdown-it-mark';
@@ -79,6 +80,7 @@ let katexInstance: typeof import('katex')['default'] | undefined;
 let cachedDocumentText = '';
 let cachedTable: MarkdownTable | undefined;
 let activeTableFrom: number | undefined;
+let activeLiveTableCursor: { from: number; row: number; column: number } | undefined;
 let activeCodeFrom: number | undefined;
 let activeImageFrom: number | undefined;
 let activeMathFrom: number | undefined;
@@ -265,6 +267,22 @@ updateThemeToggleLabel();
 document.querySelector('#table-insert-confirm')?.addEventListener('click', () => insertTableFromDialog());
 view.dom.addEventListener('paste', (event) => void handlePaste(event));
 view.dom.addEventListener('drop', (event) => void receiveImageFiles(event.dataTransfer?.files, event));
+let livePreviewSelectionFocused = true;
+let editorFocusRefreshScheduled = false;
+const refreshAfterEditorFocusChange = () => {
+  if (editorFocusRefreshScheduled) return;
+  editorFocusRefreshScheduled = true;
+  requestAnimationFrame(() => {
+    editorFocusRefreshScheduled = false;
+    livePreviewSelectionFocused = view.dom.ownerDocument.activeElement === view.contentDOM;
+    if (view.dom.isConnected) view.dispatch({ effects: refreshLivePreview.of(null) });
+  });
+};
+// CodeMirror retains its logical selection when focus moves into a table/code
+// widget or the toolbar. Refresh so that stale selection cannot keep Markdown
+// source syntax exposed after the visible selection has ended.
+view.contentDOM.addEventListener('focusin', refreshAfterEditorFocusChange);
+view.contentDOM.addEventListener('focusout', refreshAfterEditorFocusChange);
 preview.addEventListener('scroll', () => syncScroll(preview, view.scrollDOM));
 view.scrollDOM.addEventListener('scroll', () => syncScroll(view.scrollDOM, preview));
 preview.addEventListener('keydown', (event) => {
@@ -288,15 +306,6 @@ window.addEventListener('beforeunload', () => {
 });
 window.addEventListener('pagehide', synchronizeBeforeSuspend);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') synchronizeBeforeSuspend(); });
-applyViewState(initialViewState);
-if (initialDocument) {
-  applySettings();
-  scheduleDerivedStateUpdate();
-}
-vscode.postMessage({ type: 'ready' });
-loadKatex().then(() => {
-  view.dispatch({ effects: refreshLivePreview.of(null) });
-});
 
 function onHostMessage(message: HostToEditorMessage): void {
   switch (message.type) {
@@ -941,6 +950,17 @@ function insertLiveLineBreak(editor: EditorView, shiftKey: boolean): boolean {
 }
 
 function updateTableToolbar(source = cachedDocumentText): void {
+  if (activeLiveTableCursor) {
+    if (!source) source = view.state.doc.toString();
+    const table = findMarkdownTable(source, activeLiveTableCursor.from,
+      view.state.doc.lineAt(activeLiveTableCursor.from).number - 1);
+    if (table) {
+      appRoot.classList.add('table-active');
+      updateTableToolbarButtons(table, activeLiveTableCursor.row);
+      return;
+    }
+    activeLiveTableCursor = undefined;
+  }
   const position = view.state.selection.main.head;
   // Almost every cursor move is outside a table. Avoid materializing and splitting
   // the complete document unless the active line can actually be a table row.
@@ -955,34 +975,50 @@ function updateTableToolbar(source = cachedDocumentText): void {
   cachedTable = table;
   appRoot.classList.toggle('table-active', Boolean(table));
   const cursor = table ? tableCursor(source, table, position) : undefined;
-  document.querySelector<HTMLButtonElement>('[data-table-command="row-delete"]')!.disabled = !table || (cursor?.row ?? -1) < 0;
-  document.querySelector<HTMLButtonElement>('[data-table-command="column-delete"]')!.disabled = !table || table.header.length <= 1;
+  if (table) updateTableToolbarButtons(table, cursor?.row ?? -1);
+}
+
+function updateTableToolbarButtons(table: MarkdownTable, row: number): void {
+  document.querySelector<HTMLButtonElement>('[data-table-command="row-delete"]')!.disabled = row < 0;
+  document.querySelector<HTMLButtonElement>('[data-table-command="column-delete"]')!.disabled = table.header.length <= 1;
 }
 
 function runTableCommand(command: string): void {
   const source = view.state.doc.toString();
-  const table = findMarkdownTable(source, view.state.selection.main.head, view.state.doc.lineAt(view.state.selection.main.head).number - 1);
+  const liveCursor = activeLiveTableCursor;
+  const tableOffset = liveCursor?.from ?? view.state.selection.main.head;
+  const table = findMarkdownTable(source, tableOffset, view.state.doc.lineAt(tableOffset).number - 1);
   if (!table) return;
-  const cursor = tableCursor(source, table, view.state.selection.main.head);
+  const cursor = liveCursor
+    ? { row: liveCursor.row, column: liveCursor.column }
+    : tableCursor(source, table, view.state.selection.main.head);
   let updated: MarkdownTable = table;
+  let focusRow = cursor.row;
+  let focusColumn = cursor.column;
   switch (command) {
     case 'row-before':
-      updated = addTableRow(table, Math.max(0, cursor.row));
+      focusRow = Math.max(0, cursor.row);
+      updated = addTableRow(table, focusRow);
       break;
     case 'row-after':
-      updated = addTableRow(table, cursor.row < 0 ? 0 : cursor.row + 1);
+      focusRow = cursor.row < 0 ? 0 : cursor.row + 1;
+      updated = addTableRow(table, focusRow);
       break;
     case 'row-delete':
       updated = deleteTableRow(table, cursor.row);
+      focusRow = updated.rows.length === 0 ? -1 : Math.min(cursor.row, updated.rows.length - 1);
       break;
     case 'column-left':
-      updated = addTableColumn(table, cursor.column);
+      focusColumn = cursor.column;
+      updated = addTableColumn(table, focusColumn);
       break;
     case 'column-right':
-      updated = addTableColumn(table, cursor.column + 1);
+      focusColumn = cursor.column + 1;
+      updated = addTableColumn(table, focusColumn);
       break;
     case 'column-delete':
       updated = deleteTableColumn(table, cursor.column);
+      focusColumn = Math.min(cursor.column, updated.header.length - 1);
       break;
     case 'align-left':
       updated = alignTableColumn(table, cursor.column, 'left');
@@ -996,7 +1032,24 @@ function runTableCommand(command: string): void {
     default:
       return;
   }
-  replaceTable(source, table, updated, cursor.row, Math.min(cursor.column, updated.header.length - 1));
+  if (liveCursor) replaceLiveTable(source, table, updated, focusRow, Math.min(focusColumn, updated.header.length - 1));
+  else replaceTable(source, table, updated, cursor.row, Math.min(cursor.column, updated.header.length - 1));
+}
+
+function replaceLiveTable(
+  source: string, original: MarkdownTable, updated: MarkdownTable, row: number, column: number,
+): void {
+  const eol = source.includes('\r\n') ? '\r\n' : source.includes('\r') ? '\r' : '\n';
+  activeTableFrom = undefined;
+  activeLiveTableCursor = { from: original.from, row, column };
+  view.dispatch({ changes: { from: original.from, to: original.to, insert: serializeMarkdownTable(updated, eol) } });
+  requestAnimationFrame(() => {
+    const wrapper = Array.from(document.querySelectorAll<HTMLElement>('.markda-live-table-wrap'))
+      .find((element) => element.dataset.tableFrom === String(original.from));
+    const cell = Array.from(wrapper?.querySelectorAll<HTMLElement>('th,td') ?? [])
+      .find((element) => element.dataset.tableRow === String(row) && element.dataset.tableColumn === String(column));
+    cell?.focus();
+  });
 }
 
 function replaceTable(source: string, original: MarkdownTable, updated: MarkdownTable, row: number, column: number): void {
@@ -1261,11 +1314,11 @@ async function renderMermaidBlocks(renderVersion: number): Promise<void> {
   initializeMermaid(mermaid);
   for (const [index, block] of blocks.entries()) {
     try {
-      const result = await mermaid.render(`markda-diagram-${index}-${Date.now()}`, block.textContent ?? '');
+      const result = await mermaid.render(`markda-diagram-${index}-${crypto.randomUUID()}`, block.textContent ?? '');
       if (renderVersion !== previewRenderVersion) return;
       const container = document.createElement('div');
       container.className = 'markda-diagram';
-      container.innerHTML = DOMPurify.sanitize(result.svg, { USE_PROFILES: { svg: true, svgFilters: true } });
+      container.innerHTML = validateMermaidSvg(result.svg);
       block.parentElement?.replaceWith(container);
     } catch (error) {
       block.parentElement?.classList.add('markda-render-error');
@@ -1282,6 +1335,11 @@ function markdaColor(name: string, fallback: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
+function renderInlinePreview(element: HTMLElement, source: string): void {
+  const renderer = clientRenderer ??= createClientRenderer();
+  element.innerHTML = DOMPurify.sanitize(renderer.renderInline(source), { USE_PROFILES: { html: true } });
+}
+
 function initializeMermaid(mermaid: typeof import('mermaid')['default']): void {
   const dark = usesDarkColors();
   const fg = markdaColor('--markda-fg', dark ? '#d4d4d4' : '#1a1a1a');
@@ -1289,6 +1347,7 @@ function initializeMermaid(mermaid: typeof import('mermaid')['default']): void {
     startOnLoad: false,
     securityLevel: 'strict',
     theme: dark ? 'dark' : 'default',
+    htmlLabels: false,
     themeVariables: {
       primaryTextColor: fg,
       lineColor: fg,
@@ -1301,6 +1360,19 @@ function initializeMermaid(mermaid: typeof import('mermaid')['default']): void {
   });
 }
 
+function validateMermaidSvg(svg: string): string {
+  // securityLevel=strict already sanitizes Mermaid's output, and htmlLabels=false
+  // keeps labels in native SVG text nodes. A second DOMPurify pass removed those
+  // valid labels, so verify the strict renderer's security postconditions instead.
+  if (!/^\s*<svg(?:\s|>)/iu.test(svg)
+    || /<\s*(?:script|iframe|object|embed)(?:\s|>)/iu.test(svg)
+    || /\s+on[a-z][\w:-]*\s*=/iu.test(svg)
+    || /\s+(?:href|xlink:href)\s*=\s*["']?\s*javascript:/iu.test(svg)) {
+    throw new Error('Mermaid returned unsafe or invalid SVG');
+  }
+  return svg;
+}
+
 async function renderLiveMermaid(container: HTMLElement, source: string): Promise<void> {
   const renderThemeRevision = colorThemeRevision;
   try {
@@ -1309,12 +1381,16 @@ async function renderLiveMermaid(container: HTMLElement, source: string): Promis
     initializeMermaid(mermaid);
     const result = await mermaid.render(`markda-live-${crypto.randomUUID()}`, source);
     if (container.isConnected && renderThemeRevision === colorThemeRevision) {
-      container.innerHTML = DOMPurify.sanitize(result.svg, { USE_PROFILES: { svg: true, svgFilters: true } });
+      container.innerHTML = validateMermaidSvg(result.svg);
     } else if (container.isConnected) {
       void renderLiveMermaid(container, source);
     }
-  } catch {
-    if (container.isConnected) container.textContent = source;
+  } catch (error) {
+    if (container.isConnected) {
+      container.classList.add('markda-render-error');
+      container.title = String(error);
+      container.textContent = source;
+    }
   }
 }
 
@@ -1334,6 +1410,8 @@ class TaskWidget extends WidgetType {
 }
 
 class ImageWidget extends WidgetType {
+  private disposeEditor: (() => void) | undefined;
+
   constructor(private readonly editor: EditorView, private readonly from: number, private readonly alt: string, private readonly source: string) { super(); }
   toDOM(): HTMLElement {
     const figure = document.createElement('figure');
@@ -1391,12 +1469,15 @@ class ImageWidget extends WidgetType {
       this.editor.dispatch({ effects: refreshLivePreview.of(null) });
     }));
     figure.append(editorPanel);
-    const edit = () => toggleWidgetEditor(this.editor, editorPanel, image.isConnected ? image : caption);
+    const editorBinding = bindWidgetEditor(this.editor, editorPanel, image.isConnected ? image : caption, figure);
+    this.disposeEditor = editorBinding.dispose;
+    const edit = editorBinding.toggle;
     figure.addEventListener('dblclick', edit);
     figure.addEventListener('keydown', (event) => { if (event.key === 'Enter') edit(); });
     return figure;
   }
   ignoreEvent(): boolean { return true; }
+  destroy(): void { this.disposeEditor?.(); }
   eq(other: ImageWidget): boolean {
     return other.from === this.from && (activeImageFrom === this.from
       || (other.source === this.source && other.alt === this.alt));
@@ -1413,6 +1494,8 @@ function commitImage(editor: EditorView, from: number, alt: string, source: stri
 }
 
 class CodeBlockWidget extends WidgetType {
+  private disposeEditor: (() => void) | undefined;
+
   constructor(
     private readonly editor: EditorView,
     private readonly from: number,
@@ -1423,23 +1506,6 @@ class CodeBlockWidget extends WidgetType {
   toDOM(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'markda-live-code';
-    const controls = document.createElement('div');
-    controls.className = 'markda-code-controls';
-    const language = document.createElement('input');
-    language.type = 'text';
-    language.value = this.language;
-    language.placeholder = isJapanese ? '言語' : 'Language';
-    language.ariaLabel = isJapanese ? 'コード言語' : 'Code language';
-    language.addEventListener('change', () => commitCodeBlock(this.editor, this.from, undefined, language.value.trim()));
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.textContent = isJapanese ? 'コピー' : 'Copy';
-    copy.addEventListener('click', () => vscode.postMessage({ type: 'copyToClipboard', text: this.source }));
-    const editSource = document.createElement('button');
-    editSource.type = 'button';
-    editSource.textContent = isJapanese ? 'ソース' : 'Source';
-    controls.append(language, copy, editSource);
-    container.append(controls);
     if (this.language === 'math' || this.language === 'latex') {
       const rendered = document.createElement('div');
       rendered.className = 'markda-code-rendered';
@@ -1448,8 +1514,14 @@ class CodeBlockWidget extends WidgetType {
       const sourceEditor = createBlockSourceEditor(this.editor, this.source,
         (value) => commitCodeBlock(this.editor, this.from, value, undefined));
       sourceEditor.hidden = true;
-      const toggle = () => toggleWidgetEditor(this.editor, sourceEditor, rendered);
-      editSource.addEventListener('click', toggle);
+      sourceEditor.addEventListener('focus', () => { activeCodeFrom = this.from; });
+      sourceEditor.addEventListener('blur', () => {
+        if (activeCodeFrom === this.from) activeCodeFrom = undefined;
+        this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+      });
+      const editorBinding = bindWidgetEditor(this.editor, sourceEditor, rendered, container);
+      this.disposeEditor = editorBinding.dispose;
+      const toggle = editorBinding.toggle;
       rendered.addEventListener('dblclick', toggle);
       rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') toggle(); });
       container.append(rendered, sourceEditor);
@@ -1464,14 +1536,19 @@ class CodeBlockWidget extends WidgetType {
       const sourceEditor = createBlockSourceEditor(this.editor, this.source,
         (value) => commitCodeBlock(this.editor, this.from, value, undefined));
       sourceEditor.hidden = true;
-      const toggle = () => toggleWidgetEditor(this.editor, sourceEditor, rendered);
-      editSource.addEventListener('click', toggle);
+      sourceEditor.addEventListener('focus', () => { activeCodeFrom = this.from; });
+      sourceEditor.addEventListener('blur', () => {
+        if (activeCodeFrom === this.from) activeCodeFrom = undefined;
+        this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+      });
+      const editorBinding = bindWidgetEditor(this.editor, sourceEditor, rendered, container);
+      this.disposeEditor = editorBinding.dispose;
+      const toggle = editorBinding.toggle;
       rendered.addEventListener('dblclick', toggle);
       rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') toggle(); });
       container.append(rendered, sourceEditor);
       void renderLiveMermaid(rendered, this.source);
     } else {
-      editSource.hidden = true;
       const pre = document.createElement('pre');
       const code = document.createElement('code');
       code.className = this.language ? `language-${this.language}` : '';
@@ -1510,6 +1587,7 @@ class CodeBlockWidget extends WidgetType {
     return container;
   }
   ignoreEvent(): boolean { return true; }
+  destroy(): void { this.disposeEditor?.(); }
   eq(other: CodeBlockWidget): boolean {
     return other.from === this.from && other.themeRevision === this.themeRevision
       && (activeCodeFrom === this.from || (other.source === this.source && other.language === this.language));
@@ -1546,10 +1624,13 @@ function codeContentRange(state: EditorState, openingTo: number, closingFrom: nu
 }
 
 class TableWidget extends WidgetType {
+  private disposeEditor: (() => void) | undefined;
+
   constructor(private readonly editor: EditorView, private readonly table: MarkdownTable) { super(); }
   toDOM(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'markda-live-table-wrap';
+    container.dataset.tableFrom = String(this.table.from);
     container.setAttribute('role', 'group');
     container.setAttribute('aria-label', 'Editable Markdown table');
     const cellCount = (this.table.rows.length + 1) * this.table.header.length;
@@ -1568,20 +1649,17 @@ class TableWidget extends WidgetType {
         if (current) this.editor.dispatch({ changes: { from: current.from, to: current.to, insert: value } });
       });
       sourceEditor.hidden = true;
-      edit.addEventListener('click', () => toggleWidgetEditor(this.editor, sourceEditor, summary));
+      sourceEditor.addEventListener('focus', () => { activeTableFrom = this.table.from; });
+      sourceEditor.addEventListener('blur', () => {
+        if (activeTableFrom === this.table.from) activeTableFrom = undefined;
+        this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+      });
+      const editorBinding = bindWidgetEditor(this.editor, sourceEditor, summary, container);
+      this.disposeEditor = editorBinding.dispose;
+      edit.addEventListener('click', editorBinding.toggle);
       container.append(summary, edit, sourceEditor);
       return container;
     }
-    const controls = document.createElement('div');
-    controls.className = 'markda-inline-table-controls';
-    const actions: readonly [string, () => void][] = [
-      [isJapanese ? '+ 行' : '+ Row', () => commitWidgetTable(this.editor, this.table.from, (table) => { table.rows.push(Array.from({ length: table.header.length }, () => '')); })],
-      [isJapanese ? '− 行' : '− Row', () => commitWidgetTable(this.editor, this.table.from, (table) => { if (table.rows.length > 1) table.rows.pop(); })],
-      [isJapanese ? '+ 列' : '+ Column', () => commitWidgetTable(this.editor, this.table.from, (table) => { table.header.push(''); table.alignments.push('default'); for (const row of table.rows) row.push(''); })],
-      [isJapanese ? '− 列' : '− Column', () => commitWidgetTable(this.editor, this.table.from, (table) => { if (table.header.length > 1) { table.header.pop(); table.alignments.pop(); for (const row of table.rows) row.pop(); } })],
-    ];
-    for (const [label, action] of actions) { const button = document.createElement('button'); button.textContent = label; button.type = 'button'; button.addEventListener('click', action); controls.append(button); }
-    container.append(controls);
     const tableElement = document.createElement('table');
     [this.table.header, ...this.table.rows].forEach((row, rowIndex) => {
       const tr = document.createElement('tr');
@@ -1590,7 +1668,11 @@ class TableWidget extends WidgetType {
         const element = document.createElement(rowIndex === 0 ? 'th' : 'td');
         element.contentEditable = 'true';
         element.spellcheck = true;
-        element.textContent = cell;
+        element.dataset.tableRow = String(rowIndex - 1);
+        element.dataset.tableColumn = String(column);
+        let cellSource = cell;
+        let editing = false;
+        renderInlinePreview(element, cellSource);
         element.style.textAlign = this.table.alignments[column] === 'default' ? '' : this.table.alignments[column] ?? '';
         if (rowIndex === 0) {
           element.draggable = true;
@@ -1600,19 +1682,44 @@ class TableWidget extends WidgetType {
         }
         const commitGate = new CompositionCommitGate();
         let commitTimer: number | undefined;
-        const commit = () => this.updateCell(rowIndex - 1, column, element.textContent ?? '');
+        const enterEditing = () => {
+          if (editing) return;
+          editing = true;
+          element.classList.add('markda-table-cell-editing');
+          element.textContent = cellSource;
+        };
+        const commit = () => this.updateCell(rowIndex - 1, column, cellSource);
         const scheduleCommit = () => {
+          cellSource = element.textContent ?? '';
           window.clearTimeout(commitTimer);
           commitTimer = window.setTimeout(() => { commitTimer = undefined; commitGate.request(commit); }, 80);
         };
-        element.addEventListener('focus', () => { activeTableFrom = this.table.from; });
+        // Pointerdown runs before the browser places the caret, so expose the raw
+        // Markdown first and let the click land at the expected source position.
+        element.addEventListener('pointerdown', enterEditing);
+        element.addEventListener('focus', () => {
+          enterEditing();
+          activeTableFrom = this.table.from;
+          activeLiveTableCursor = { from: this.table.from, row: rowIndex - 1, column };
+          updateTableToolbar();
+        });
         element.addEventListener('input', scheduleCommit);
         element.addEventListener('compositionstart', () => commitGate.start());
         element.addEventListener('compositionend', () => commitGate.end(commit));
         element.addEventListener('blur', () => {
+          cellSource = element.textContent ?? '';
           window.clearTimeout(commitTimer);
           commitGate.flush(commit);
           if (activeTableFrom === this.table.from) activeTableFrom = undefined;
+          editing = false;
+          element.classList.remove('markda-table-cell-editing');
+          renderInlinePreview(element, cellSource);
+          queueMicrotask(() => {
+            const active = document.activeElement;
+            if (document.querySelector('#table-toolbar')?.contains(active) || container.contains(active)) return;
+            if (activeLiveTableCursor?.from === this.table.from) activeLiveTableCursor = undefined;
+            updateTableToolbar();
+          });
         });
         element.addEventListener('keydown', (event) => {
           if (runEditableHistoryShortcut(event, this.editor, () => {
@@ -1645,6 +1752,7 @@ class TableWidget extends WidgetType {
     return container;
   }
   ignoreEvent(): boolean { return true; }
+  destroy(): void { this.disposeEditor?.(); }
   eq(other: TableWidget): boolean {
     return other.table.from === this.table.from
       && (activeTableFrom === this.table.from || serializeMarkdownTable(other.table) === serializeMarkdownTable(this.table));
@@ -1693,6 +1801,8 @@ function runEditableHistoryShortcut(event: KeyboardEvent, editor: EditorView, fl
   const command = historyShortcut(event);
   if (!command) return false;
   event.preventDefault();
+  const scrollTop = editor.scrollDOM.scrollTop;
+  const scrollLeft = editor.scrollDOM.scrollLeft;
   // Commit the latest DOM value before popping history. This also covers the
   // debounce window immediately after a keystroke. Blurring makes the widget
   // rebuild from the restored Markdown instead of retaining stale DOM text.
@@ -1700,6 +1810,17 @@ function runEditableHistoryShortcut(event: KeyboardEvent, editor: EditorView, fl
   (event.currentTarget as HTMLElement | null)?.blur();
   (command === 'undo' ? undo : redo)(editor);
   editor.focus();
+  // CodeMirror history intentionally scrolls the restored selection into view.
+  // Nested live editors do not own that selection, so it may still point to a
+  // distant source line and make the document appear to jump on Ctrl+Z. Keep the
+  // viewport where the user invoked Undo/Redo; the widget itself is rebuilt from
+  // the restored Markdown above.
+  editor.scrollDOM.scrollTop = scrollTop;
+  editor.scrollDOM.scrollLeft = scrollLeft;
+  requestAnimationFrame(() => {
+    editor.scrollDOM.scrollTop = scrollTop;
+    editor.scrollDOM.scrollLeft = scrollLeft;
+  });
   return true;
 }
 
@@ -1737,6 +1858,8 @@ function commitWidgetTable(editor: EditorView, from: number, mutate: (table: Mar
 }
 
 class MathWidget extends WidgetType {
+  private disposeEditor: (() => void) | undefined;
+
   constructor(
     private readonly source: string,
     private readonly displayMode: boolean = false,
@@ -1762,14 +1885,16 @@ class MathWidget extends WidgetType {
       const sourceEditor = createBlockSourceEditor(this.editor, this.source,
         (value) => commitBlockMath(this.editor!, this.from!, value));
       sourceEditor.hidden = true;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'markda-block-math-wrap';
       sourceEditor.addEventListener('focus', () => { activeMathFrom = this.from; });
       sourceEditor.addEventListener('blur', () => {
         if (activeMathFrom === this.from) activeMathFrom = undefined;
         this.editor?.dispatch({ effects: refreshLivePreview.of(null) });
       });
-      element.addEventListener('dblclick', () => toggleWidgetEditor(this.editor!, sourceEditor, element));
-      const wrapper = document.createElement('div');
-      wrapper.className = 'markda-block-math-wrap';
+      const editorBinding = bindWidgetEditor(this.editor, sourceEditor, element, wrapper);
+      this.disposeEditor = editorBinding.dispose;
+      element.addEventListener('dblclick', editorBinding.toggle);
       wrapper.append(element, sourceEditor);
       return wrapper;
     }
@@ -1778,6 +1903,9 @@ class MathWidget extends WidgetType {
   eq(other: MathWidget): boolean {
     return other.from === this.from && (activeMathFrom === this.from
       || (other.source === this.source && other.displayMode === this.displayMode));
+  }
+  destroy(): void {
+    this.disposeEditor?.();
   }
 }
 
@@ -1864,12 +1992,51 @@ function createBlockSourceEditor(editor: EditorView, source: string, commit: (va
   return input;
 }
 
-function toggleWidgetEditor(editor: EditorView, input: HTMLElement, rendered: HTMLElement): void {
-  const opening = input.hidden;
-  input.hidden = !opening;
-  rendered.hidden = opening;
-  if (opening) input.focus();
-  editor.requestMeasure();
+function bindWidgetEditor(
+  editor: EditorView, input: HTMLElement, rendered: HTMLElement, boundary: HTMLElement,
+): { toggle: () => void; dispose: () => void } {
+  let listeningForOutsidePointer = false;
+  const stopListeningForOutsidePointer = () => {
+    if (!listeningForOutsidePointer) return;
+    document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
+    listeningForOutsidePointer = false;
+  };
+  const close = () => {
+    if (input.hidden) return;
+    input.hidden = true;
+    rendered.hidden = false;
+    stopListeningForOutsidePointer();
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && input.contains(active)) active.blur();
+    editor.requestMeasure();
+  };
+  function closeOnOutsidePointer(event: PointerEvent): void {
+    if (event.target instanceof Node && !boundary.contains(event.target)) close();
+  }
+  const closeAfterFocusLeaves = () => queueMicrotask(() => {
+    if (!boundary.contains(document.activeElement)) close();
+  });
+  boundary.addEventListener('focusout', closeAfterFocusLeaves);
+  const toggle = () => {
+    if (!input.hidden) {
+      close();
+      return;
+    }
+    input.hidden = false;
+    rendered.hidden = true;
+    const focusTarget = input.matches('input,textarea,select,[contenteditable="true"]')
+      ? input
+      : input.querySelector<HTMLElement>('input,textarea,select,[contenteditable="true"]');
+    focusTarget?.focus();
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true);
+    listeningForOutsidePointer = true;
+    editor.requestMeasure();
+  };
+  const dispose = () => {
+    stopListeningForOutsidePointer();
+    boundary.removeEventListener('focusout', closeAfterFocusLeaves);
+  };
+  return { toggle, dispose };
 }
 
 let livePreviewPointerGeneration = 0;
@@ -2012,6 +2179,10 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
   const decorations: { from: number; to?: number; decoration: Decoration }[] = [];
   const state = editor.state.field(modeField);
   const selection = editor.state.selection.main;
+  // A blurred editor keeps its last logical selection. Source markers should be
+  // exposed only while that selection still owns the visible editing focus.
+  const selectionFrom = livePreviewSelectionFocused ? selection.from : -1;
+  const selectionTo = livePreviewSelectionFocused ? selection.to : -1;
   let documentSource: string | undefined;
   const activeLine = editor.state.doc.lineAt(selection.head).number;
   const focusLines = state.focusMode ? activeFocusLines(editor, activeLine) : { from: 1, to: editor.state.doc.lines };
@@ -2051,13 +2222,13 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
           decorations.push({ from, to: from + 3, decoration: Decoration.replace({ widget: new TaskWidget(editor, from, (task[2] ?? ' ') !== ' ') }) });
         }
         if (heading) addMetaDecoration(decorations, line.from, line.from + heading[0].length,
-          selectionIntersects(selection.from, selection.to, line.from, line.to));
+          selectionIntersects(selectionFrom, selectionTo, line.from, line.to));
         if (quote) addMetaDecoration(decorations, line.from, line.from + quote[0].length,
-          selectionIntersects(selection.from, selection.to, line.from, line.to));
+          selectionIntersects(selectionFrom, selectionTo, line.from, line.to));
         if (list && !/^\s*[-+*]\s+\[[ xX]\]/u.test(text)) {
           const markerFrom = line.from + (list[1]?.length ?? 0);
           const markerTo = markerFrom + (list[2]?.length ?? 0);
-          const expanded = selectionIntersects(selection.from, selection.to, line.from, line.to);
+          const expanded = selectionIntersects(selectionFrom, selectionTo, line.from, line.to);
           const bullet = /^[-+*]$/u.test(list[2] ?? '');
           decorations.push({
             from: markerFrom,
@@ -2067,7 +2238,7 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
             }),
           });
         }
-        addInlineDecorations(decorations, editor, line.from, text, selection.from, selection.to);
+        addInlineDecorations(decorations, editor, line.from, text, selectionFrom, selectionTo);
       } else {
         addSourceLinkDecorations(decorations, line.from, text);
       }
@@ -2334,20 +2505,34 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .markda-shell{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.markda-toolbar{min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--markda-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
 .table-toolbar{display:none;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;line-height:1.65}.preview-visible #preview{display:block}
-.cm-editor{height:100%;min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px var(--markda-padding-x,24px) 90px;line-height:1.7}.cm-content{max-width:var(--markda-content-width);margin:0;caret-color:var(--markda-cursor-color)}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-activeLine{background:var(--markda-line-highlight)}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px}.cm-selectionBackground{background:var(--markda-selection)!important}
+.cm-editor{height:100%;min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px var(--markda-padding-x,24px) 90px;line-height:1.7}.cm-content{max-width:var(--markda-content-width);margin:0;caret-color:var(--markda-cursor-color)}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-activeLine{background-color:var(--markda-line-highlight)!important}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px}.cm-selectionBackground{background:var(--markda-selection)!important}
 .markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--markda-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-quote{border-left:4px solid var(--markda-border);padding-left:14px!important;color:var(--markda-muted)}.markda-list-marker{color:var(--markda-muted)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--markda-fg);font-weight:700;text-align:center}
 .markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--markda-surface);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
 .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em;accent-color:var(--markda-accent)}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--markda-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{color:var(--markda-muted);text-align:center;font-size:.9em}
-.markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button,.markda-code-controls button,.markda-inline-table-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
-.markda-image-editor input,.markda-block-source-editor,.markda-code-controls input,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-source-editor{display:block;width:100%;min-height:120px;resize:vertical;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
-.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-code-controls{display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px}.markda-code-controls input{min-width:70px;width:110px;padding:3px 5px}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none}.markda-code-rendered{padding:10px}
-.markda-live-table-wrap{overflow:auto;margin:12px 0}.markda-inline-table-controls{display:flex;gap:4px;justify-content:flex-end;margin-bottom:4px}.markda-live-table-wrap table{border-collapse:collapse;width:100%}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto}.markda-live-table-wrap th{background:var(--markda-surface)}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
+.markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
+.markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-source-editor{display:block;width:100%;min-height:120px;resize:vertical;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
+.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-code-rendered{padding:10px}
+.markda-live-table-wrap{overflow:auto;margin:12px 0;color:var(--markda-fg)}.markda-live-table-wrap table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap th{background:var(--markda-surface)}.markda-live-table-wrap code{padding:1px 4px;color:var(--markda-fg);background:var(--markda-surface);border-radius:3px;font-family:var(--vscode-editor-font-family)}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
 .markda-callout{margin:12px 0;padding:12px 16px;border-radius:6px;border-left:4px solid;background:var(--markda-surface)}.markda-callout-title{font-weight:600;margin-bottom:4px}.markda-callout-content{color:var(--markda-fg)}.markda-callout-edit{margin-top:8px;font-size:11px;padding:2px 8px;opacity:0}.markda-callout:hover .markda-callout-edit{opacity:1}
 .markda-callout-note{border-color:var(--markda-info);background:var(--markda-info-bg)}.markda-callout-note .markda-callout-title{color:var(--markda-info)}.markda-callout-tip{border-color:var(--markda-tip);background:var(--markda-tip-bg)}.markda-callout-tip .markda-callout-title{color:var(--markda-tip)}
 .markda-callout-important,.markda-callout-warning{border-color:var(--markda-warning);background:var(--markda-warning-bg)}.markda-callout-important .markda-callout-title,.markda-callout-warning .markda-callout-title{color:var(--markda-warning)}.markda-callout-caution{border-color:var(--markda-error);background:var(--markda-error-bg)}.markda-callout-caution .markda-callout-title{color:var(--markda-error)}
 dialog{color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:260px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:76px;padding:5px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
-body[data-markda-theme="paper"] .cm-content{font-family:Georgia,"Times New Roman",serif}body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
-#preview h1,#preview h2,#preview h3{line-height:1.25;margin-top:1.5em}#preview h2{border-bottom:1px solid var(--markda-border);padding-bottom:.25em}#preview pre{overflow:auto;padding:14px;background:var(--markda-surface);border-radius:5px}#preview code{font-family:var(--vscode-editor-font-family)}#preview blockquote{margin-left:0;padding-left:1em;border-left:4px solid var(--markda-border);color:var(--markda-muted)}#preview table{border-collapse:collapse;width:100%}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 10px}#preview th{background:var(--markda-surface)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
+body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
+#preview{color:var(--markda-fg);background:var(--markda-bg)}#preview h1,#preview h2,#preview h3{color:var(--markda-fg);line-height:1.25;margin-top:1.5em}#preview h2{border-bottom:1px solid var(--markda-border);padding-bottom:.25em}#preview pre{overflow:auto;padding:14px;color:var(--markda-fg);background:var(--markda-surface);border-radius:5px}#preview code{font-family:var(--vscode-editor-font-family);color:var(--markda-fg)}#preview :not(pre)>code{padding:1px 4px;background:var(--markda-surface);border-radius:3px}#preview pre code{padding:0;color:var(--markda-fg);background:transparent}#preview blockquote{margin-left:0;padding-left:1em;color:var(--markda-muted);background:transparent;border-left:4px solid var(--markda-border)}#preview blockquote p{color:inherit}#preview table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 10px;color:var(--markda-fg);background:var(--markda-bg)}#preview th{background:var(--markda-surface)}#preview input{accent-color:var(--markda-accent)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
 @media(max-width:760px){.markda-toolbar button span:not(.math-icon){display:none}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}}
   @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 `; }
+
+// Start only after every widget class above has been initialized. applySettings()
+// dispatches a synchronous live-preview refresh; running it earlier can evaluate
+// an initial math/code/table range while its widget class is still in the temporal
+// dead zone. CodeMirror then disables the crashed view plugin for the whole editor.
+applyViewState(initialViewState);
+if (initialDocument) {
+  applySettings();
+  scheduleDerivedStateUpdate();
+}
+vscode.postMessage({ type: 'ready' });
+loadKatex().then(() => {
+  view.dispatch({ effects: refreshLivePreview.of(null) });
+});

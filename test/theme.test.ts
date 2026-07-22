@@ -73,7 +73,10 @@ describe('Markda color themes', () => {
     await import('../src/webview/main.js');
     await settle();
 
-    expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({ theme: 'default' }));
+    expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining({
+      theme: 'default',
+      htmlLabels: false,
+    }));
     const lightRenderCount = mermaid.render.mock.calls.length;
     // Happy DOM may discard CodeMirror block widgets after its zero-sized
     // viewport is measured. Keep a connected live-diagram surface to verify the

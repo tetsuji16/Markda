@@ -1,20 +1,23 @@
 import * as vscode from 'vscode';
 import type { EditorSettings } from './protocol.js';
 
-export function getEditorSettings(uri?: vscode.Uri): EditorSettings {
+export function getThemeMode(uri?: vscode.Uri): EditorSettings['themeMode'] {
   const config = vscode.workspace.getConfiguration('markda', uri);
+  // The toolbar writes a user-wide preference. Read that target directly so a
+  // resource/workspace override cannot make another document forget it.
   const configuredThemeMode = config.inspect<'auto' | 'light' | 'dark'>('editor.themeMode')?.globalValue;
+  return configuredThemeMode ?? config.get<'auto' | 'light' | 'dark'>('editor.themeMode', 'auto');
+}
+
+export function getEditorSettings(uri?: vscode.Uri, themeMode = getThemeMode(uri)): EditorSettings {
+  const config = vscode.workspace.getConfiguration('markda', uri);
   return {
     contentWidth: config.get('editor.contentWidth', 0),
     autoPairMarkdown: config.get('editor.autoPairMarkdown', true),
     typewriterKeepCentered: config.get('editor.typewriterKeepCentered', true),
     previewUpdateDelay: config.get('editor.previewUpdateDelay', 500),
     liveTableMaxCells: config.get('editor.liveTableMaxCells', 600),
-    // The toolbar controls a user-wide preference. Read its global value
-    // directly so resource/workspace overrides cannot make another document
-    // appear to forget the selection. `updateThemeMode` writes to this same
-    // target, which also lets VS Code persist it across restarts.
-    themeMode: configuredThemeMode ?? config.get<'auto' | 'light' | 'dark'>('editor.themeMode', 'auto'),
+    themeMode,
     markdown: {
       math: config.get('markdown.math', true),
       diagrams: config.get('markdown.diagrams', true),
