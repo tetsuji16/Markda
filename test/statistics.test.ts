@@ -48,6 +48,29 @@ describe('getStatistics', () => {
     expect(result.statistics.words).toBe(5);
   });
 
+  it('collects Setext headings and ignores heading-like text inside code fences', () => {
+    const source = [
+      'Document title',
+      '==============',
+      '',
+      'Section',
+      '---',
+      '',
+      '```md',
+      '# Not an outline entry',
+      'Fake title',
+      '===',
+      '```',
+      '',
+      '## Real section',
+    ].join('\n');
+    expect(analyzeDocument(source).headings).toEqual([
+      { level: 1, text: 'Document title', from: 0, to: 29 },
+      { level: 2, text: 'Section', from: 31, to: 42 },
+      { level: 2, text: 'Real section', from: 93, to: 108 },
+    ]);
+  });
+
   it('analyzes a long document without an input-path-sized pause', () => {
     const source = Array.from({ length: 50_000 }, (_value, index) => index % 100 === 0 ? `## Section ${index}\n` : 'ordinary text \u65e5\u672c\n').join('');
     const started = performance.now();

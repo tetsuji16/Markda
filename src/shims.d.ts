@@ -6,6 +6,11 @@ declare module 'markdown-it-mark' {
 
 declare module '*.css';
 
+declare module '*.md?raw' {
+  const source: string;
+  export default source;
+}
+
 declare module 'markdown-it-sub' {
   import type MarkdownIt from 'markdown-it';
   const plugin: MarkdownIt.PluginSimple;

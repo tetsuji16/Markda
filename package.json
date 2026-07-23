@@ -602,6 +602,7 @@
     "@lezer/highlight": "^1.2.1",
     "@vscode/codicons": "^0.0.40",
     "dompurify": "^3.2.6",
+    "entities": "^4.5.0",
     "katex": "^0.16.22",
     "markdown-it": "^14.1.0",
     "markdown-it-footnote": "^4.0.0",

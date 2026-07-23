@@ -5,6 +5,32 @@ export interface TextEdit {
   cursor: number;
 }
 
+const baseMarkdownPairs: Readonly<Record<string, string>> = {
+  '*': '*', '_': '_', '`': '`', '[': ']', '(': ')', '{': '}', '"': '"', "'": "'",
+};
+
+export function markdownPairEdit(
+  source: string, from: number, to: number, input: string, math: boolean,
+): TextEdit | undefined {
+  if (input.length !== 1) return undefined;
+  const pairs = math ? { ...baseMarkdownPairs, $: '$' } : baseMarkdownPairs;
+  const selected = source.slice(from, to);
+  if (!selected && Object.values(pairs).includes(input) && source.slice(to, to + 1) === input) {
+    return { from: to, to, insert: '', cursor: to + 1 };
+  }
+  const closing = pairs[input];
+  if (!closing) return undefined;
+  const insert = `${input}${selected}${closing}`;
+  return { from, to, insert, cursor: from + input.length + selected.length };
+}
+
+export function markdownPairDeletion(source: string, position: number, math: boolean): TextEdit | undefined {
+  if (position <= 0 || position >= source.length) return undefined;
+  const pairs = math ? { ...baseMarkdownPairs, $: '$' } : baseMarkdownPairs;
+  if (pairs[source[position - 1] ?? ''] !== source[position]) return undefined;
+  return { from: position - 1, to: position + 1, insert: '', cursor: position - 1 };
+}
+
 export type HistoryShortcut = 'undo' | 'redo';
 
 /**
@@ -94,6 +120,17 @@ export class CompositionCommitGate {
     this.pending = false;
     commit();
   }
+}
+
+/**
+ * Reads a contenteditable as the plain text the user sees. Chromium represents
+ * editing line breaks with a mixture of text nodes, <br>, and block elements;
+ * textContent drops the implicit breaks between those blocks and can therefore
+ * corrupt code when the value is committed to the Markdown document.
+ */
+export function editablePlainText(element: HTMLElement): string {
+  const renderedText = element.innerText;
+  return (typeof renderedText === 'string' ? renderedText : element.textContent ?? '').replace(/\r\n?/gu, '\n');
 }
 
 export function htmlFragmentToMarkdown(html: string): string {

@@ -4,9 +4,10 @@ import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-mar
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language';
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from '@codemirror/state';
-import { Decoration, EditorView, highlightActiveLine, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { Decoration, drawSelection, EditorView, highlightActiveLine, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import DOMPurify from 'dompurify';
+import { decodeHTML } from 'entities';
 import 'katex/dist/katex.css';
 import MarkdownIt from 'markdown-it';
 import footnote from 'markdown-it-footnote';
@@ -22,7 +23,10 @@ import {
   addTableColumn, addTableRow, alignTableColumn, deleteTableColumn, deleteTableRow,
   findMarkdownTable, serializeMarkdownTable, tableCursor, type MarkdownTable, type TableAlignment,
 } from '../table.js';
-import { CompositionCommitGate, historyShortcut, htmlFragmentToMarkdown, liveEnterEdit } from './editorLogic.js';
+import {
+  CompositionCommitGate, editablePlainText, historyShortcut, htmlFragmentToMarkdown, liveEnterEdit,
+  markdownPairDeletion, markdownPairEdit,
+} from './editorLogic.js';
 
 declare function acquireVsCodeApi<T = unknown>(): {
   postMessage(message: EditorToHostMessage): void;
@@ -84,6 +88,11 @@ let activeCodeFrom: number | undefined;
 let activeImageFrom: number | undefined;
 let activeMathFrom: number | undefined;
 let activeCalloutFrom: number | undefined;
+let activeHtmlFrom: number | undefined;
+let referenceDefinitionCache: {
+  doc: EditorState['doc'];
+  definitions: ReadonlyMap<string, MarkdownReferenceDefinition>;
+} | undefined;
 let beginLivePreviewFreeze: ((editor: EditorView) => void) | undefined;
 let colorThemeRevision = 0;
 const nestedEditableFlushers = new WeakMap<HTMLElement, () => void>();
@@ -206,6 +215,7 @@ const view = new EditorView({
       ]),
       createMarkdownPairing(),
       EditorView.lineWrapping,
+      drawSelection(),
       highlightActiveLine(),
       createLivePreviewPlugin(),
       blockDecorationsField,
@@ -266,6 +276,9 @@ updateThemeToggleLabel();
 document.querySelector('#table-insert-confirm')?.addEventListener('click', () => insertTableFromDialog());
 view.dom.addEventListener('paste', (event) => void handlePaste(event));
 view.dom.addEventListener('drop', (event) => void receiveImageFiles(event.dataTransfer?.files, event));
+// Treat the initial CodeMirror selection as the active editing selection. A
+// subsequent focusout refreshes this flag so toolbar and widget focus cannot
+// leave stale Markdown source exposed.
 let livePreviewSelectionFocused = true;
 let editorFocusRefreshScheduled = false;
 const refreshAfterEditorFocusChange = () => {
@@ -831,13 +844,7 @@ function calculateStatistics(): DocumentStatistics {
 }
 
 function extractHeadings(text: string): Heading[] {
-  const headings: Heading[] = [];
-  const expression = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/gmu;
-  for (const match of text.matchAll(expression)) {
-    const from = match.index ?? 0;
-    headings.push({ level: match[1]?.length ?? 1, text: match[2] ?? '', from, to: from + match[0].length });
-  }
-  return headings;
+  return analyzeDocument(text).headings;
 }
 
 function currentSelection(): { anchor: number; head: number } {
@@ -845,20 +852,36 @@ function currentSelection(): { anchor: number; head: number } {
 }
 
 function createMarkdownPairing() { return EditorView.inputHandler.of((editor, from, to, text) => {
-  if (!settings.autoPairMarkdown || text.length !== 1) return false;
-  const pairs: Record<string, string> = { '*': '*', '_': '_', '`': '`', '[': ']', '(': ')', '{': '}', '"': '"', "'": "'" };
-  if (settings.markdown.math) pairs.$ = '$';
-  const closing = pairs[text];
-  if (!closing) return false;
-  const selected = editor.state.sliceDoc(from, to);
-  if (selected.length === 0 && editor.state.sliceDoc(to, to + 1) === text && closing === text) {
-    editor.dispatch({ selection: EditorSelection.cursor(to + 1) });
-    return true;
-  }
-  const inserted = `${text}${selected}${closing}`;
-  editor.dispatch({ changes: { from, to, insert: inserted }, selection: EditorSelection.cursor(from + text.length + selected.length) });
+  if (!settings.autoPairMarkdown) return false;
+  const edit = markdownPairEdit(editor.state.doc.toString(), from, to, text, settings.markdown.math);
+  if (!edit) return false;
+  editor.dispatch({
+    changes: { from: edit.from, to: edit.to, insert: edit.insert },
+    selection: EditorSelection.cursor(edit.cursor),
+  });
   return true;
 }); }
+
+function deleteEmptyMarkdownPair(editor: EditorView): boolean {
+  if (!settings.autoPairMarkdown) return false;
+  const selection = editor.state.selection.main;
+  if (!selection.empty) return false;
+  const edit = markdownPairDeletion(editor.state.doc.toString(), selection.head, settings.markdown.math);
+  if (!edit) return false;
+  editor.dispatch({
+    changes: { from: edit.from, to: edit.to, insert: edit.insert },
+    selection: EditorSelection.cursor(edit.cursor),
+  });
+  return true;
+}
+
+function skipAutomaticCloser(editor: EditorView, character: string): boolean {
+  if (!settings.autoPairMarkdown) return false;
+  const selection = editor.state.selection.main;
+  if (!selection.empty || editor.state.sliceDoc(selection.head, selection.head + 1) !== character) return false;
+  editor.dispatch({ selection: EditorSelection.cursor(selection.head + 1) });
+  return true;
+}
 
 // Move the cursor exactly one line up/down, preserving the column. CodeMirror's
 // built-in vertical motion relies on layout coordinates which the live-preview
@@ -885,6 +908,13 @@ function createMarkdaKeymap() {
   return [
     { key: 'Enter', run: (editor: EditorView) => insertLiveLineBreak(editor, false) },
     { key: 'Shift-Enter', run: (editor: EditorView) => insertLiveLineBreak(editor, true) },
+    { key: 'Backspace', run: deleteEmptyMarkdownPair },
+    // Handle asymmetric closers before Chromium maps the caret through hidden
+    // live-preview delimiters. Waiting for beforeinput can otherwise turn `[]`
+    // into `[]]` even though the logical CodeMirror selection is between them.
+    { key: ']', run: (editor: EditorView) => skipAutomaticCloser(editor, ']') },
+    { key: ')', run: (editor: EditorView) => skipAutomaticCloser(editor, ')') },
+    { key: '}', run: (editor: EditorView) => skipAutomaticCloser(editor, '}') },
     { key: 'ArrowUp', run: (editor: EditorView) => moveCursorVertically(editor, -1, false) },
     { key: 'ArrowDown', run: (editor: EditorView) => moveCursorVertically(editor, 1, false) },
     { key: 'Shift-ArrowUp', run: (editor: EditorView) => moveCursorVertically(editor, -1, true) },
@@ -1127,10 +1157,22 @@ function wrapLink(editor: EditorView): boolean {
 }
 
 function setHeading(editor: EditorView, level: number): boolean {
-  const line = editor.state.doc.lineAt(editor.state.selection.main.head);
+  const activeLine = editor.state.doc.lineAt(editor.state.selection.main.head);
+  const activeIsSetextMarker = /^[ \t]{0,3}(?:=+|-+)[ \t]*$/u.test(activeLine.text) && activeLine.number > 1;
+  const line = activeIsSetextMarker ? editor.state.doc.line(activeLine.number - 1) : activeLine;
+  const nextLine = line.number < editor.state.doc.lines ? editor.state.doc.line(line.number + 1) : undefined;
+  const setextMarker = nextLine && /^[ \t]{0,3}(?:=+|-+)[ \t]*$/u.test(nextLine.text) && line.text.trim()
+    ? nextLine
+    : undefined;
   const existing = line.text.match(/^#{1,6}[ \t]+/u)?.[0] ?? '';
   const replacement = level === 0 ? '' : `${'#'.repeat(level)} `;
-  editor.dispatch({ changes: { from: line.from, to: line.from + existing.length, insert: replacement } });
+  editor.dispatch({
+    changes: [
+      { from: line.from, to: line.from + existing.length, insert: replacement },
+      ...(setextMarker ? [{ from: line.to, to: setextMarker.to, insert: '' }] : []),
+    ],
+    selection: EditorSelection.cursor(line.from + replacement.length),
+  });
   return true;
 }
 
@@ -1377,6 +1419,56 @@ async function renderLiveMermaid(container: HTMLElement, source: string): Promis
   }
 }
 
+class ThematicBreakWidget extends WidgetType {
+  constructor(private readonly editor: EditorView, private readonly from: number) { super(); }
+  toDOM(): HTMLElement {
+    const rule = document.createElement('hr');
+    rule.className = 'markda-thematic-break';
+    rule.title = 'Horizontal rule';
+    rule.addEventListener('click', () => {
+      this.editor.dispatch({ selection: EditorSelection.cursor(this.from) });
+      this.editor.focus();
+    });
+    return rule;
+  }
+  ignoreEvent(event: Event): boolean { return event.type !== 'click'; }
+  eq(other: ThematicBreakWidget): boolean { return other.from === this.from; }
+}
+
+class TrailingParagraphWidget extends WidgetType {
+  constructor(private readonly editor: EditorView) { super(); }
+  toDOM(): HTMLElement {
+    const target = document.createElement('div');
+    target.className = 'markda-trailing-paragraph';
+    target.tabIndex = 0;
+    target.setAttribute('role', 'button');
+    target.setAttribute('aria-label', 'Add paragraph after block');
+    target.title = 'Click to add a paragraph after this block';
+    const append = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      appendParagraphAfterTerminalBlock(this.editor);
+    };
+    target.addEventListener('click', append);
+    target.addEventListener('keydown', append);
+    return target;
+  }
+  ignoreEvent(): boolean { return true; }
+}
+
+function appendParagraphAfterTerminalBlock(editor: EditorView): void {
+  const text = editor.state.doc.toString();
+  const eol = text.match(/\r\n|\r|\n/u)?.[0] ?? '\n';
+  const insert = text.endsWith(eol) ? eol : `${eol}${eol}`;
+  const from = editor.state.doc.length;
+  editor.dispatch({
+    changes: { from, insert },
+    selection: EditorSelection.cursor(from + insert.length),
+    scrollIntoView: true,
+  });
+  editor.focus();
+}
+
 class TaskWidget extends WidgetType {
   constructor(private readonly editor: EditorView, private readonly from: number, private readonly checked: boolean) { super(); }
   toDOM(): HTMLElement {
@@ -1390,6 +1482,291 @@ class TaskWidget extends WidgetType {
   }
   ignoreEvent(): boolean { return true; }
   eq(other: TaskWidget): boolean { return other.from === this.from && other.checked === this.checked; }
+}
+
+class InlineImageWidget extends WidgetType {
+  constructor(
+    private readonly editor: EditorView,
+    private readonly from: number,
+    private readonly alt: string,
+    private readonly source: string,
+  ) { super(); }
+
+  toDOM(): HTMLElement {
+    const container = document.createElement('span');
+    container.className = 'markda-inline-image';
+    container.tabIndex = 0;
+    container.setAttribute('role', 'button');
+    container.setAttribute('aria-label', `Image: ${this.alt || this.source}. Activate to edit Markdown.`);
+    container.title = 'Click to edit image Markdown';
+    if (/^https?:/iu.test(this.source) && settings.security.allowRemoteResources !== 'always') {
+      container.classList.add('markda-inline-image-blocked');
+      container.textContent = this.alt || 'Remote image';
+    } else {
+      const image = document.createElement('img');
+      image.alt = this.alt;
+      try {
+        image.src = /^(?:data:|vscode-webview:)/iu.test(this.source)
+          ? this.source
+          : new URL(this.source, resourceBaseUri).toString();
+        container.append(image);
+      } catch {
+        container.textContent = this.alt || this.source;
+      }
+    }
+    const edit = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      this.editor.dispatch({ selection: EditorSelection.cursor(this.from + 2) });
+      this.editor.focus();
+    };
+    container.addEventListener('click', edit);
+    container.addEventListener('keydown', edit);
+    return container;
+  }
+
+  ignoreEvent(event: Event): boolean { return event.type !== 'click' && event.type !== 'keydown'; }
+  eq(other: InlineImageWidget): boolean {
+    return other.from === this.from && other.alt === this.alt && other.source === this.source;
+  }
+}
+
+class FootnoteReferenceWidget extends WidgetType {
+  constructor(private readonly editor: EditorView, private readonly from: number, private readonly label: string) { super(); }
+
+  toDOM(): HTMLElement {
+    const reference = document.createElement('sup');
+    reference.className = 'markda-footnote-reference';
+    reference.tabIndex = 0;
+    reference.setAttribute('role', 'button');
+    reference.setAttribute('aria-label', `Footnote ${this.label}. Activate to edit.`);
+    reference.title = 'Click to edit footnote reference';
+    reference.textContent = this.label;
+    const edit = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      this.editor.dispatch({ selection: EditorSelection.cursor(this.from + 2) });
+      this.editor.focus();
+    };
+    reference.addEventListener('click', edit);
+    reference.addEventListener('keydown', edit);
+    return reference;
+  }
+
+  ignoreEvent(event: Event): boolean { return event.type !== 'click' && event.type !== 'keydown'; }
+  eq(other: FootnoteReferenceWidget): boolean { return other.from === this.from && other.label === this.label; }
+}
+
+class InlineHtmlWidget extends WidgetType {
+  constructor(private readonly editor: EditorView, private readonly from: number, private readonly source: string) { super(); }
+
+  toDOM(): HTMLElement {
+    const container = document.createElement('span');
+    container.className = 'markda-inline-html';
+    container.tabIndex = 0;
+    container.setAttribute('role', 'button');
+    container.setAttribute('aria-label', 'Rendered inline HTML. Activate to edit source.');
+    container.title = 'Click to edit HTML source';
+    container.innerHTML = DOMPurify.sanitize(this.source, { USE_PROFILES: { html: true } });
+    const edit = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      this.editor.dispatch({ selection: EditorSelection.cursor(this.from + 1) });
+      this.editor.focus();
+    };
+    container.addEventListener('click', edit);
+    container.addEventListener('keydown', edit);
+    return container;
+  }
+
+  ignoreEvent(event: Event): boolean { return event.type !== 'click' && event.type !== 'keydown'; }
+  eq(other: InlineHtmlWidget): boolean { return other.from === this.from && other.source === this.source; }
+}
+
+class EntityWidget extends WidgetType {
+  constructor(private readonly editor: EditorView, private readonly from: number, private readonly source: string) { super(); }
+
+  toDOM(): HTMLElement {
+    const value = document.createElement('span');
+    value.className = 'markda-entity';
+    value.tabIndex = 0;
+    value.setAttribute('role', 'button');
+    value.setAttribute('aria-label', `${decodeHtmlEntity(this.source)}. Activate to edit entity source.`);
+    value.title = 'Click to edit character entity';
+    value.textContent = decodeHtmlEntity(this.source);
+    const edit = () => {
+      this.editor.dispatch({ selection: EditorSelection.cursor(this.from + 1) });
+      this.editor.focus();
+    };
+    value.addEventListener('click', edit);
+    value.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') edit(); });
+    return value;
+  }
+
+  ignoreEvent(event: Event): boolean { return event.type !== 'click' && event.type !== 'keydown'; }
+  eq(other: EntityWidget): boolean { return other.from === this.from && other.source === this.source; }
+}
+
+class FootnoteDefinitionWidget extends WidgetType {
+  constructor(
+    private readonly editor: EditorView,
+    private readonly from: number,
+    private readonly label: string,
+    private readonly content: string,
+  ) { super(); }
+
+  toDOM(): HTMLElement {
+    const container = document.createElement('div');
+    container.className = 'markda-footnote-definition';
+    const label = document.createElement('sup');
+    label.textContent = this.label;
+    label.setAttribute('aria-hidden', 'true');
+    const content = document.createElement('div');
+    content.className = 'markda-footnote-definition-content';
+    content.contentEditable = 'true';
+    content.spellcheck = true;
+    content.setAttribute('aria-label', `Footnote ${this.label} content`);
+    content.textContent = this.content;
+    const gate = new CompositionCommitGate();
+    let timer: number | undefined;
+    let dirty = false;
+    const commit = () => commitFootnoteDefinition(this.editor, this.from, this.label, editablePlainText(content));
+    const commitIfDirty = () => {
+      if (!dirty) return;
+      dirty = false;
+      commit();
+    };
+    nestedEditableFlushers.set(content, () => {
+      window.clearTimeout(timer);
+      timer = undefined;
+      gate.flush(commitIfDirty);
+    });
+    content.addEventListener('input', () => {
+      dirty = true;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { timer = undefined; gate.request(commitIfDirty); }, 80);
+    });
+    content.addEventListener('compositionstart', () => gate.start());
+    content.addEventListener('compositionend', () => gate.end(commitIfDirty));
+    content.addEventListener('keydown', (event) => {
+      runEditableHistoryShortcut(event, this.editor, () => {
+        window.clearTimeout(timer);
+        gate.flush(commitIfDirty);
+      });
+    });
+    content.addEventListener('blur', () => {
+      window.clearTimeout(timer);
+      gate.flush(commitIfDirty);
+    });
+    container.append(label, content);
+    return container;
+  }
+
+  ignoreEvent(): boolean { return true; }
+  eq(other: FootnoteDefinitionWidget): boolean {
+    return other.from === this.from && other.label === this.label && other.content === this.content;
+  }
+}
+
+class ReferenceDefinitionWidget extends WidgetType {
+  constructor(
+    private readonly editor: EditorView,
+    private readonly from: number,
+    private readonly label: string,
+    private readonly definition: MarkdownReferenceDefinition,
+  ) { super(); }
+
+  toDOM(): HTMLElement {
+    const container = document.createElement('div');
+    container.className = 'markda-reference-definition';
+    const labelInput = document.createElement('input');
+    labelInput.value = this.label;
+    labelInput.setAttribute('aria-label', 'Reference label');
+    const destinationInput = document.createElement('input');
+    destinationInput.value = this.definition.destination;
+    destinationInput.setAttribute('aria-label', 'Reference destination');
+    const titleInput = document.createElement('input');
+    titleInput.value = this.definition.title ?? '';
+    titleInput.placeholder = 'Optional title';
+    titleInput.setAttribute('aria-label', 'Reference title');
+    const commit = () => commitReferenceDefinition(
+      this.editor, this.from, labelInput.value, destinationInput.value, titleInput.value,
+    );
+    for (const input of [labelInput, destinationInput, titleInput]) {
+      input.addEventListener('change', commit);
+      input.addEventListener('keydown', (event) => {
+        if (runEditableHistoryShortcut(event, this.editor, commit)) return;
+        if (event.key === 'Enter') input.blur();
+      });
+    }
+    container.append(labelInput, document.createTextNode('→'), destinationInput, titleInput);
+    return container;
+  }
+
+  ignoreEvent(): boolean { return true; }
+  eq(other: ReferenceDefinitionWidget): boolean {
+    return other.from === this.from && other.label === this.label
+      && other.definition.destination === this.definition.destination
+      && other.definition.title === this.definition.title;
+  }
+}
+
+class HtmlBlockWidget extends WidgetType {
+  constructor(private readonly editor: EditorView, private readonly from: number, private readonly source: string) { super(); }
+
+  toDOM(): HTMLElement {
+    const container = document.createElement('div');
+    container.className = 'markda-html-block';
+    container.contentEditable = 'true';
+    container.spellcheck = true;
+    container.setAttribute('aria-label', 'Rendered HTML block');
+    container.innerHTML = DOMPurify.sanitize(this.source, { USE_PROFILES: { html: true } });
+    if (!container.childNodes.length) {
+      const placeholder = document.createElement('span');
+      placeholder.className = 'markda-html-empty';
+      placeholder.textContent = 'HTML block has no visible safe content';
+      container.append(placeholder);
+    }
+    const gate = new CompositionCommitGate();
+    let timer: number | undefined;
+    let dirty = false;
+    const commit = () => commitHtmlBlock(this.editor, this.from, container.innerHTML);
+    const commitIfDirty = () => {
+      if (!dirty) return;
+      dirty = false;
+      commit();
+    };
+    nestedEditableFlushers.set(container, () => {
+      window.clearTimeout(timer);
+      gate.flush(commitIfDirty);
+    });
+    container.addEventListener('focus', () => { activeHtmlFrom = this.from; });
+    container.addEventListener('input', () => {
+      dirty = true;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { timer = undefined; gate.request(commitIfDirty); }, 100);
+    });
+    container.addEventListener('compositionstart', () => gate.start());
+    container.addEventListener('compositionend', () => gate.end(commitIfDirty));
+    container.addEventListener('keydown', (event) => {
+      runEditableHistoryShortcut(event, this.editor, () => {
+        window.clearTimeout(timer);
+        gate.flush(commitIfDirty);
+      });
+    });
+    container.addEventListener('blur', () => {
+      window.clearTimeout(timer);
+      gate.flush(commitIfDirty);
+      if (activeHtmlFrom === this.from) activeHtmlFrom = undefined;
+      this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+    });
+    return container;
+  }
+
+  ignoreEvent(): boolean { return true; }
+  eq(other: HtmlBlockWidget): boolean {
+    return other.from === this.from && (activeHtmlFrom === this.from || other.source === this.source);
+  }
 }
 
 class ImageWidget extends WidgetType {
@@ -1476,6 +1853,60 @@ function commitImage(editor: EditorView, from: number, alt: string, source: stri
   editor.dispatch({ changes: { from: line.from, to: line.to, insert: `${indentation}![${safeAlt}](${safeSource})` } });
 }
 
+class IndentedCodeWidget extends WidgetType {
+  constructor(private readonly editor: EditorView, private readonly from: number, private readonly source: string) { super(); }
+
+  toDOM(): HTMLElement {
+    const container = document.createElement('div');
+    container.className = 'markda-live-code markda-indented-code';
+    const pre = document.createElement('pre');
+    const code = document.createElement('code');
+    code.contentEditable = 'true';
+    code.spellcheck = false;
+    code.setAttribute('aria-label', 'Indented code content');
+    code.textContent = this.source;
+    const gate = new CompositionCommitGate();
+    let timer: number | undefined;
+    let dirty = false;
+    const commit = () => commitIndentedCode(this.editor, this.from, editablePlainText(code));
+    const commitIfDirty = () => {
+      if (!dirty) return;
+      dirty = false;
+      commit();
+    };
+    nestedEditableFlushers.set(code, () => {
+      window.clearTimeout(timer);
+      gate.flush(commitIfDirty);
+    });
+    code.addEventListener('input', () => {
+      dirty = true;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { timer = undefined; gate.request(commitIfDirty); }, 80);
+    });
+    code.addEventListener('compositionstart', () => gate.start());
+    code.addEventListener('compositionend', () => gate.end(commitIfDirty));
+    code.addEventListener('keydown', (event) => {
+      if (runEditableHistoryShortcut(event, this.editor, () => {
+        window.clearTimeout(timer);
+        gate.flush(commitIfDirty);
+      })) return;
+      if (event.key !== 'Enter' && event.key !== 'Tab') return;
+      event.preventDefault();
+      insertTextIntoEditable(code, event.key === 'Enter' ? '\n' : '  ');
+    });
+    code.addEventListener('blur', () => {
+      window.clearTimeout(timer);
+      gate.flush(commitIfDirty);
+    });
+    pre.append(code);
+    container.append(pre);
+    return container;
+  }
+
+  ignoreEvent(): boolean { return true; }
+  eq(other: IndentedCodeWidget): boolean { return other.from === this.from && other.source === this.source; }
+}
+
 class CodeBlockWidget extends WidgetType {
   private disposeEditor: (() => void) | undefined;
 
@@ -1543,24 +1974,31 @@ class CodeBlockWidget extends WidgetType {
       code.setAttribute('aria-label', 'Code content');
       const gate = new CompositionCommitGate();
       let timer: number | undefined;
-      const commit = () => commitCodeBlock(this.editor, this.from, code.textContent ?? '', undefined);
+      let dirty = false;
+      const commit = () => commitCodeBlock(this.editor, this.from, editablePlainText(code), undefined);
+      const commitIfDirty = () => {
+        if (!dirty) return;
+        dirty = false;
+        commit();
+      };
       nestedEditableFlushers.set(code, () => {
         window.clearTimeout(timer);
         timer = undefined;
-        gate.flush(commit);
+        gate.flush(commitIfDirty);
       });
       code.addEventListener('focus', () => { activeCodeFrom = this.from; });
       code.addEventListener('input', () => {
+        dirty = true;
         window.clearTimeout(timer);
-        timer = window.setTimeout(() => { timer = undefined; gate.request(commit); }, 80);
+        timer = window.setTimeout(() => { timer = undefined; gate.request(commitIfDirty); }, 80);
       });
       code.addEventListener('compositionstart', () => gate.start());
-      code.addEventListener('compositionend', () => gate.end(commit));
+      code.addEventListener('compositionend', () => gate.end(commitIfDirty));
       code.addEventListener('keydown', (event) => {
         if (runEditableHistoryShortcut(event, this.editor, () => {
           window.clearTimeout(timer);
           timer = undefined;
-          gate.flush(commit);
+          gate.flush(commitIfDirty);
         })) return;
         if (event.key !== 'Enter' && event.key !== 'Tab') return;
         event.preventDefault();
@@ -1568,7 +2006,7 @@ class CodeBlockWidget extends WidgetType {
       });
       code.addEventListener('blur', () => {
         window.clearTimeout(timer);
-        gate.flush(commit);
+        gate.flush(commitIfDirty);
         if (activeCodeFrom === this.from) activeCodeFrom = undefined;
       });
       pre.append(code);
@@ -1581,6 +2019,26 @@ class CodeBlockWidget extends WidgetType {
   eq(other: CodeBlockWidget): boolean {
     return other.from === this.from && other.themeRevision === this.themeRevision
       && (activeCodeFrom === this.from || (other.source === this.source && other.language === this.language));
+  }
+}
+
+function commitIndentedCode(editor: EditorView, from: number, source: string): void {
+  const opening = editor.state.doc.lineAt(Math.min(from, editor.state.doc.length));
+  if (!/^(?: {4}|\t)/u.test(opening.text)) return;
+  let endLine = opening.number;
+  while (endLine < editor.state.doc.lines) {
+    const next = editor.state.doc.line(endLine + 1).text;
+    if (next && !/^(?: {4}|\t)/u.test(next)) break;
+    endLine++;
+  }
+  while (endLine > opening.number && !editor.state.doc.line(endLine).text) endLine--;
+  const to = editor.state.doc.line(endLine).to;
+  const eol = editor.state.doc.toString().match(/\r\n|\r|\n/u)?.[0] ?? '\n';
+  const replacement = source.replace(/\r\n?/gu, '\n').split('\n')
+    .map((line) => line ? `    ${line}` : '')
+    .join(eol);
+  if (editor.state.sliceDoc(opening.from, to) !== replacement) {
+    editor.dispatch({ changes: { from: opening.from, to, insert: replacement } });
   }
 }
 
@@ -1599,7 +2057,10 @@ function commitCodeBlock(editor: EditorView, from: number, source: string | unde
   if (source !== undefined) {
     const closingLine = editor.state.doc.line(closing);
     const { from: contentFrom, to: contentTo } = codeContentRange(editor.state, opening.to, closingLine.from);
-    changes.push({ from: contentFrom, to: contentTo, insert: source.replace(/\r?\n$/u, '') });
+    const replacement = source.replace(/\r?\n$/u, '');
+    if (editor.state.sliceDoc(contentFrom, contentTo) !== replacement) {
+      changes.push({ from: contentFrom, to: contentTo, insert: replacement });
+    }
   }
   if (changes.length) editor.dispatch({ changes });
 }
@@ -1670,6 +2131,7 @@ class TableWidget extends WidgetType {
         }
         const commitGate = new CompositionCommitGate();
         let commitTimer: number | undefined;
+        let dirty = false;
         const enterEditing = () => {
           if (editing) return;
           editing = true;
@@ -1677,16 +2139,22 @@ class TableWidget extends WidgetType {
           element.textContent = cellSource;
         };
         const commit = () => this.updateCell(rowIndex - 1, column, cellSource);
+        const commitIfDirty = () => {
+          if (!dirty) return;
+          dirty = false;
+          commit();
+        };
         nestedEditableFlushers.set(element, () => {
-          cellSource = element.textContent ?? '';
+          cellSource = editablePlainText(element);
           window.clearTimeout(commitTimer);
           commitTimer = undefined;
-          commitGate.flush(commit);
+          commitGate.flush(commitIfDirty);
         });
         const scheduleCommit = () => {
-          cellSource = element.textContent ?? '';
+          cellSource = editablePlainText(element);
+          dirty = true;
           window.clearTimeout(commitTimer);
-          commitTimer = window.setTimeout(() => { commitTimer = undefined; commitGate.request(commit); }, 80);
+          commitTimer = window.setTimeout(() => { commitTimer = undefined; commitGate.request(commitIfDirty); }, 80);
         };
         // Pointerdown runs before the browser places the caret, so expose the raw
         // Markdown first and let the click land at the expected source position.
@@ -1699,11 +2167,11 @@ class TableWidget extends WidgetType {
         });
         element.addEventListener('input', scheduleCommit);
         element.addEventListener('compositionstart', () => commitGate.start());
-        element.addEventListener('compositionend', () => commitGate.end(commit));
+        element.addEventListener('compositionend', () => commitGate.end(commitIfDirty));
         element.addEventListener('blur', () => {
-          cellSource = element.textContent ?? '';
+          cellSource = editablePlainText(element);
           window.clearTimeout(commitTimer);
-          commitGate.flush(commit);
+          commitGate.flush(commitIfDirty);
           if (activeTableFrom === this.table.from) activeTableFrom = undefined;
           editing = false;
           element.classList.remove('markda-table-cell-editing');
@@ -1719,7 +2187,7 @@ class TableWidget extends WidgetType {
           if (runEditableHistoryShortcut(event, this.editor, () => {
             window.clearTimeout(commitTimer);
             commitTimer = undefined;
-            commitGate.flush(commit);
+            commitGate.flush(commitIfDirty);
           })) return;
           navigateEditableCell(event, container);
         });
@@ -1918,6 +2386,17 @@ class MathWidget extends WidgetType {
 
 function commitBlockMath(editor: EditorView, from: number, source: string): void {
   const opening = editor.state.doc.lineAt(Math.min(from, editor.state.doc.length));
+  const inlineBlock = opening.text.match(/^(\s*)\$\$(.+)\$\$\s*$/u);
+  if (inlineBlock) {
+    editor.dispatch({
+      changes: {
+        from: opening.from,
+        to: opening.to,
+        insert: `${inlineBlock[1] ?? ''}$$${source.replace(/\r?\n/gu, ' ').trim()}$$`,
+      },
+    });
+    return;
+  }
   if (!/^\s*\$\$\s*$/u.test(opening.text)) return;
   let closing = opening.number + 1;
   while (closing <= editor.state.doc.lines && !/^\s*\$\$\s*$/u.test(editor.state.doc.line(closing).text)) closing++;
@@ -1950,25 +2429,32 @@ class CalloutWidget extends WidgetType {
     content.spellcheck = true;
     const gate = new CompositionCommitGate();
     let timer: number | undefined;
-    const commit = () => commitCallout(this.editor, this.from, this.type, content.textContent ?? '');
+    let dirty = false;
+    const commit = () => commitCallout(this.editor, this.from, this.type, editablePlainText(content));
+    const commitIfDirty = () => {
+      if (!dirty) return;
+      dirty = false;
+      commit();
+    };
     nestedEditableFlushers.set(content, () => {
       window.clearTimeout(timer);
       timer = undefined;
-      gate.flush(commit);
+      gate.flush(commitIfDirty);
     });
     content.addEventListener('focus', () => { activeCalloutFrom = this.from; });
     content.addEventListener('input', () => {
+      dirty = true;
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => { timer = undefined; gate.request(commit); }, 80);
+      timer = window.setTimeout(() => { timer = undefined; gate.request(commitIfDirty); }, 80);
     });
     content.addEventListener('compositionstart', () => gate.start());
-    content.addEventListener('compositionend', () => gate.end(commit));
+    content.addEventListener('compositionend', () => gate.end(commitIfDirty));
     content.addEventListener('keydown', (event) => {
-      runEditableHistoryShortcut(event, this.editor, () => { window.clearTimeout(timer); gate.flush(commit); });
+      runEditableHistoryShortcut(event, this.editor, () => { window.clearTimeout(timer); gate.flush(commitIfDirty); });
     });
     content.addEventListener('blur', () => {
       window.clearTimeout(timer);
-      gate.flush(commit);
+      gate.flush(commitIfDirty);
       if (activeCalloutFrom === this.from) activeCalloutFrom = undefined;
       this.editor.dispatch({ effects: refreshLivePreview.of(null) });
     });
@@ -1990,21 +2476,28 @@ function createBlockSourceEditor(editor: EditorView, source: string, commit: (va
   input.setAttribute('aria-label', 'Block Markdown source');
   const gate = new CompositionCommitGate();
   let timer: number | undefined;
+  let dirty = false;
   const save = () => commit(input.value);
+  const saveIfDirty = () => {
+    if (!dirty) return;
+    dirty = false;
+    save();
+  };
   nestedEditableFlushers.set(input, () => {
     window.clearTimeout(timer);
     timer = undefined;
-    gate.flush(save);
+    gate.flush(saveIfDirty);
   });
   input.addEventListener('input', () => {
+    dirty = true;
     window.clearTimeout(timer);
-    timer = window.setTimeout(() => { timer = undefined; gate.request(save); }, 80);
+    timer = window.setTimeout(() => { timer = undefined; gate.request(saveIfDirty); }, 80);
   });
   input.addEventListener('compositionstart', () => gate.start());
-  input.addEventListener('compositionend', () => gate.end(save));
-  input.addEventListener('blur', () => { window.clearTimeout(timer); gate.flush(save); });
+  input.addEventListener('compositionend', () => gate.end(saveIfDirty));
+  input.addEventListener('blur', () => { window.clearTimeout(timer); gate.flush(saveIfDirty); });
   input.addEventListener('keydown', (event) => {
-    if (runEditableHistoryShortcut(event, editor, () => { window.clearTimeout(timer); gate.flush(save); })) return;
+    if (runEditableHistoryShortcut(event, editor, () => { window.clearTimeout(timer); gate.flush(saveIfDirty); })) return;
   });
   return input;
 }
@@ -2173,7 +2666,7 @@ function createLivePreviewPlugin() {
       // Block widget contents do not depend on the outer selection. CodeMirror
       // still needs a refresh when the caret enters or leaves a replaceable
       // block, but ordinary paragraph cursor movement must stay on the cheap path.
-      if ((update.docChanged || update.viewportChanged || modeChanged || refreshRequested
+      if ((update.docChanged || modeChanged || refreshRequested
         || (update.selectionSet && !this.pointerActive && selectionTouchesBlockCandidate(update)))
         && !this.applyingBlockRefresh && !this.blockRefreshQueued) {
         this.blockRefreshQueued = true;
@@ -2200,7 +2693,7 @@ function selectionTouchesBlockCandidate(update: ViewUpdate): boolean {
 }
 
 function isBlockCandidateLine(line: string): boolean {
-  return line.includes('|') || /^\s*(?:```|~~~|\$\$\s*$|!\[[^\]]*\]\([^)]+\)\s*$|>\s*(?:\[!|\*\*))/u.test(line);
+  return line.includes('|') || /^\s*(?:```|~~~|\$\$\s*$|(?:[*_-]\s*){3,}|=+\s*$|!\[[^\]]*\]\([^)]+\)\s*$|>\s*(?:\[!|\*\*))/u.test(line);
 }
 
 function buildInlineDecorations(editor: EditorView): DecorationSet {
@@ -2211,7 +2704,7 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
   // exposed only while that selection still owns the visible editing focus.
   const selectionFrom = livePreviewSelectionFocused ? selection.from : -1;
   const selectionTo = livePreviewSelectionFocused ? selection.to : -1;
-  let documentSource: string | undefined;
+  const references = referenceDefinitionsFor(editor.state);
   const activeLine = editor.state.doc.lineAt(selection.head).number;
   const focusLines = state.focusMode ? activeFocusLines(editor, activeLine) : { from: 1, to: editor.state.doc.lines };
   let processedUntil = -1;
@@ -2225,6 +2718,10 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
       // replacement twice duplicates the rendered text and exposes hidden syntax.
       processedUntil = line.to + 1;
       const text = line.text;
+      // Typora-style single-line display math (`$$…$$`) is owned by the block
+      // decoration pass. Without this guard the inline `$…$` matcher renders the
+      // inner pair and leaves one literal dollar sign visible on each side.
+      if (/^\s*\$\$(.+)\$\$\s*$/u.test(text)) continue;
       // Skip block math ($$ ... $$) ranges: the block-decoration pass already
       // replaces them with a widget, so the inline pass must not also touch them.
       if (/^\s*\$\$\s*$/u.test(text)) {
@@ -2238,9 +2735,19 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
         }
       }
       const heading = text.match(/^(#{1,6})([ \t]+)(?=\S)/u);
+      const setext = lineNumber < editor.state.doc.lines
+        ? editor.state.doc.line(lineNumber + 1).text.match(/^[ \t]{0,3}(=+|-+)[ \t]*$/u)
+        : null;
+      const setextMarker = lineNumber > 1 && editor.state.doc.line(lineNumber - 1).text.trim()
+        ? text.match(/^[ \t]{0,3}(=+|-+)[ \t]*$/u)
+        : null;
       const quote = text.match(/^(>[ \t]?)/u);
       const list = text.match(/^(\s*)([-+*]|\d+[.)])(\s+)/u);
       if (heading) decorations.push({ from: line.from, decoration: Decoration.line({ class: `markda-h${heading[1]?.length ?? 1}` }) });
+      if (setext && text.trim()) decorations.push({
+        from: line.from,
+        decoration: Decoration.line({ class: setext[1]?.startsWith('=') ? 'markda-h1' : 'markda-h2' }),
+      });
       if (quote) decorations.push({ from: line.from, decoration: Decoration.line({ class: 'markda-quote' }) });
       if (state.focusMode && (lineNumber < focusLines.from || lineNumber > focusLines.to)) decorations.push({ from: line.from, decoration: Decoration.line({ class: 'markda-unfocused' }) });
       if (!state.sourceMode) {
@@ -2250,13 +2757,22 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
           decorations.push({ from, to: from + 3, decoration: Decoration.replace({ widget: new TaskWidget(editor, from, (task[2] ?? ' ') !== ' ') }) });
         }
         if (heading) addMetaDecoration(decorations, line.from, line.from + heading[0].length,
-          selectionIntersects(selectionFrom, selectionTo, line.from, line.to));
+          selectionIntersectsBlock(selectionFrom, selectionTo, line.from, line.to));
+        if (setextMarker) {
+          const headingLine = editor.state.doc.line(lineNumber - 1);
+          const expanded = selectionIntersectsBlock(selectionFrom, selectionTo, headingLine.from, line.to);
+          decorations.push({
+            from: line.from,
+            decoration: Decoration.line({ class: expanded ? 'markda-setext-marker-expanded' : 'markda-setext-marker' }),
+          });
+          addMetaDecoration(decorations, line.from, line.to, expanded);
+        }
         if (quote) addMetaDecoration(decorations, line.from, line.from + quote[0].length,
-          selectionIntersects(selectionFrom, selectionTo, line.from, line.to));
-        if (list && !/^\s*[-+*]\s+\[[ xX]\]/u.test(text)) {
+          selectionIntersectsBlock(selectionFrom, selectionTo, line.from, line.to));
+        if (list) {
           const markerFrom = line.from + (list[1]?.length ?? 0);
           const markerTo = markerFrom + (list[2]?.length ?? 0);
-          const expanded = selectionIntersects(selectionFrom, selectionTo, line.from, line.to);
+          const expanded = selectionIntersectsBlock(selectionFrom, selectionTo, line.from, line.to);
           const bullet = /^[-+*]$/u.test(list[2] ?? '');
           decorations.push({
             from: markerFrom,
@@ -2266,7 +2782,9 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
             }),
           });
         }
-        addInlineDecorations(decorations, editor, line.from, text, selectionFrom, selectionTo);
+        if (!/^[ \t]{0,3}\[[^\]\n]+\]:/u.test(text)) {
+          addInlineDecorations(decorations, editor, line.from, text, selectionFrom, selectionTo, references);
+        }
       } else {
         addSourceLinkDecorations(decorations, line.from, text);
       }
@@ -2287,14 +2805,113 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
   let documentSource: string | undefined;
   if (state.sourceMode) return Decoration.none;
   let processedUntil = -1;
-  for (const range of editor.visibleRanges) {
-    const firstLine = editor.state.doc.lineAt(range.from).number;
-    const lastLine = editor.state.doc.lineAt(range.to).number;
-    for (let lineNumber = firstLine; lineNumber <= lastLine; lineNumber++) {
+  // Block replacements change the editor's height map. If the decoration set is
+  // rebuilt from visibleRanges, that re-layout can move a block outside the next
+  // reported viewport and remove it again. The resulting feedback loop exposes
+  // raw tables, images, fences, and math after scrolling or window re-layout.
+  // Keep one document-wide source of truth; CodeMirror still creates widget DOM
+  // lazily only when a decorated block enters the viewport.
+  const firstLine = 1;
+  const lastLine = editor.state.doc.lines;
+  for (let lineNumber = firstLine; lineNumber <= lastLine; lineNumber++) {
       const line = editor.state.doc.line(lineNumber);
       if (line.from < processedUntil) continue;
       processedUntil = line.to + 1;
       const text = line.text;
+      const htmlBlock = settings.markdown.html && settings.security.allowUnsafeHtml && /^\s*</u.test(text)
+        ? findSyntaxAncestor(editor.state, Math.min(line.from + text.search(/\S/u), line.to), 'HTMLBlock')
+        : undefined;
+      if (htmlBlock && editor.state.doc.lineAt(htmlBlock.from).number === lineNumber) {
+        const endLine = editor.state.doc.lineAt(Math.max(htmlBlock.from, htmlBlock.to - 1));
+        decorations.push({
+          from: htmlBlock.from,
+          to: blockDecorationTo(editor.state, endLine.to),
+          decoration: Decoration.replace({
+            widget: new HtmlBlockWidget(editor, htmlBlock.from, editor.state.sliceDoc(htmlBlock.from, htmlBlock.to)),
+            block: true,
+          }),
+        });
+        processedUntil = endLine.to + 1;
+        continue;
+      }
+      const indentedCode = /^(?: {4}|\t)/u.test(text)
+        ? findSyntaxAncestor(editor.state, Math.min(line.from + Math.min(4, line.length), line.to), 'CodeBlock')
+        : undefined;
+      if (indentedCode && editor.state.doc.lineAt(indentedCode.from).number === lineNumber) {
+        const endLine = editor.state.doc.lineAt(Math.max(indentedCode.from, indentedCode.to - 1));
+        const source = editor.state.sliceDoc(indentedCode.from, indentedCode.to)
+          .replace(/^(?: {4}|\t)/gmu, '')
+          .replace(/\r?\n$/u, '');
+        decorations.push({
+          from: line.from,
+          to: blockDecorationTo(editor.state, endLine.to),
+          decoration: Decoration.replace({
+            widget: new IndentedCodeWidget(editor, line.from, source),
+            block: true,
+          }),
+        });
+        processedUntil = endLine.to + 1;
+        continue;
+      }
+      const footnoteDefinition = text.match(/^[ \t]{0,3}\[\^([^\]\n]+)\]:[ \t]*(.*)$/u);
+      if (footnoteDefinition) {
+        let endLine = lineNumber;
+        const contentLines = [footnoteDefinition[2] ?? ''];
+        while (endLine < editor.state.doc.lines) {
+          const continuation = editor.state.doc.line(endLine + 1).text.match(/^(?: {4}|\t)(.*)$/u);
+          if (!continuation) break;
+          endLine++;
+          contentLines.push(continuation[1] ?? '');
+        }
+        const end = editor.state.doc.line(endLine).to;
+        decorations.push({
+          from: line.from,
+          to: blockDecorationTo(editor.state, end),
+          decoration: Decoration.replace({
+            widget: new FootnoteDefinitionWidget(
+              editor, line.from, footnoteDefinition[1] ?? '', contentLines.join('\n'),
+            ),
+            block: true,
+          }),
+        });
+        processedUntil = end + 1;
+        continue;
+      }
+      const referenceDefinition = parseReferenceDefinition(text);
+      if (referenceDefinition) {
+        decorations.push({
+          from: line.from,
+          to: blockDecorationTo(editor.state, line.to),
+          decoration: Decoration.replace({
+            widget: new ReferenceDefinitionWidget(editor, line.from, referenceDefinition.label, referenceDefinition),
+            block: true,
+          }),
+        });
+        continue;
+      }
+      const thematicBreak = /^[ \t]{0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/u.test(text)
+        && !(lineNumber > 1 && editor.state.doc.line(lineNumber - 1).text.trim() && /^[ \t]{0,3}-+[ \t]*$/u.test(text));
+      if (thematicBreak) {
+        decorations.push({
+          from: line.from,
+          to: blockDecorationTo(editor.state, line.to),
+          decoration: Decoration.replace({ widget: new ThematicBreakWidget(editor, line.from), block: true }),
+        });
+        continue;
+      }
+      const inlineBlockMath = text.match(/^\s*\$\$(.+)\$\$\s*$/u);
+      if (inlineBlockMath) {
+        decorations.push({
+          from: line.from,
+          to: blockDecorationTo(editor.state, line.to),
+          decoration: Decoration.replace({
+            widget: new MathWidget(inlineBlockMath[1] ?? '', true, editor, line.from),
+            block: true,
+          }),
+        });
+        processedUntil = line.to + 1;
+        continue;
+      }
       // Block math: a line that is exactly "$$" (or "$$" with trailing spaces)
       // opens a multi-line math block that closes at the next "$$" line.
       const blockMathOpen = /^\s*\$\$\s*$/u.test(text);
@@ -2363,26 +2980,61 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
         processedUntil = end;
         continue;
       }
-    }
+  }
+  if (decorations.some((item) => item.to === editor.state.doc.length)) {
+    decorations.push({
+      from: editor.state.doc.length,
+      decoration: Decoration.widget({
+        widget: new TrailingParagraphWidget(editor),
+        block: true,
+        side: 1,
+      }),
+    });
   }
   if (decorations.length === 0) return Decoration.none;
   return Decoration.set(decorations.map((item) => item.decoration.range(item.from, item.to ?? item.from)), true);
 }
 
+/**
+ * Inline spans expand only while the caret is strictly inside their source
+ * range. A caret at the rendered right edge belongs to the surrounding text,
+ * matching Typora's "move the cursor to the middle of a span" behavior.
+ */
 function selectionIntersects(selectionFrom: number, selectionTo: number, from: number, to: number): boolean {
   return selectionFrom === selectionTo
-    // A caret on a range boundary is outside the marker. In particular, the
-    // editor starts at position 0, which is also the start of a leading "# ".
-    // Treating that boundary as an intersection exposes the heading marker as
-    // soon as a document opens, before the user has attempted to edit it.
     ? selectionFrom > from && selectionFrom < to
     : selectionTo > from && selectionFrom < to;
+}
+
+/**
+ * Block syntax is controlled by focus of the whole source block, not by whether
+ * the caret is strictly inside its text. The start and end positions therefore
+ * remain active; moving to another line (or blurring the editor) closes it.
+ */
+function selectionIntersectsBlock(
+  selectionFrom: number, selectionTo: number, from: number, to: number,
+): boolean {
+  if (selectionFrom < 0 || selectionTo < 0) return false;
+  return selectionFrom === selectionTo
+    ? selectionFrom >= from && selectionFrom <= to
+    : selectionTo >= from && selectionFrom <= to;
 }
 
 function blockDecorationTo(state: EditorState, sourceTo: number): number {
   if (sourceTo >= state.doc.length) return sourceTo;
   const line = state.doc.lineAt(sourceTo);
   return line.to === sourceTo && line.number < state.doc.lines ? state.doc.line(line.number + 1).from : sourceTo;
+}
+
+function findSyntaxAncestor(
+  state: EditorState, position: number, name: string,
+): { from: number; to: number } | undefined {
+  let node = syntaxTree(state).resolveInner(position, 1);
+  for (;;) {
+    if (node.name === name) return { from: node.from, to: node.to };
+    if (!node.parent) return undefined;
+    node = node.parent;
+  }
 }
 
 function addSourceLinkDecorations(
@@ -2412,8 +3064,137 @@ function activeFocusLines(editor: EditorView, activeLine: number): { from: numbe
 function addInlineDecorations(
   output: { from: number; to?: number; decoration: Decoration }[], editor: EditorView,
   lineFrom: number, text: string, selectionFrom: number, selectionTo: number,
+  references: ReadonlyMap<string, MarkdownReferenceDefinition>,
 ): void {
   const linkRanges: { start: number; end: number }[] = [];
+  if (settings.markdown.html && settings.security.allowUnsafeHtml) {
+    for (const match of text.matchAll(/<([A-Za-z][\w-]*)(?:\s[^<>]*?)?>[\s\S]*?<\/\1>/gu)) {
+      const start = lineFrom + (match.index ?? 0);
+      const end = start + match[0].length;
+      const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+      linkRanges.push({ start, end });
+      if (!expanded) {
+        output.push({
+          from: start,
+          to: end,
+          decoration: Decoration.replace({ widget: new InlineHtmlWidget(editor, start, match[0]) }),
+        });
+      }
+    }
+  }
+  for (const match of text.matchAll(/&(?:#(?:x[0-9a-f]+|\d+)|[A-Za-z][A-Za-z0-9]+);/giu)) {
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + match[0].length;
+    if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    linkRanges.push({ start, end });
+    if (!expanded) {
+      output.push({
+        from: start,
+        to: end,
+        decoration: Decoration.replace({ widget: new EntityWidget(editor, start, match[0]) }),
+      });
+    }
+  }
+  for (const match of text.matchAll(/!\[([^\]\n]*)\]\(([^)\n]+)\)/gu)) {
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + match[0].length;
+    linkRanges.push({ start, end });
+    // A stand-alone image is owned by the richer block ImageWidget.
+    if (text.trim() === match[0]) continue;
+    const rawTarget = (match[2] ?? '').trim();
+    const source = rawTarget.match(/^<([^>]+)>/u)?.[1] ?? rawTarget.match(/^\S+/u)?.[0] ?? rawTarget;
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    if (expanded) {
+      addMetaDecoration(output, start, start + 2, true);
+      output.push({
+        from: start + 2,
+        to: start + 2 + (match[1]?.length ?? 0),
+        decoration: Decoration.mark({ class: 'markda-image-alt' }),
+      });
+      addMetaDecoration(output, start + 2 + (match[1]?.length ?? 0), end, true);
+    } else {
+      output.push({
+        from: start,
+        to: end,
+        decoration: Decoration.replace({ widget: new InlineImageWidget(editor, start, match[1] ?? '', source) }),
+      });
+    }
+  }
+  for (const match of text.matchAll(/!\[([^\]\n]*)\]\[([^\]\n]*)\]/gu)) {
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + match[0].length;
+    if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
+    const definition = references.get(normalizeReferenceLabel(match[2] || match[1] || ''));
+    if (!definition) continue;
+    linkRanges.push({ start, end });
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    if (expanded) {
+      addMetaDecoration(output, start, start + 2, true);
+      output.push({
+        from: start + 2,
+        to: start + 2 + (match[1]?.length ?? 0),
+        decoration: Decoration.mark({ class: 'markda-image-alt' }),
+      });
+      addMetaDecoration(output, start + 2 + (match[1]?.length ?? 0), end, true);
+    } else {
+      output.push({
+        from: start,
+        to: end,
+        decoration: Decoration.replace({
+          widget: new InlineImageWidget(editor, start, match[1] ?? '', definition.destination),
+        }),
+      });
+    }
+  }
+  for (const match of text.matchAll(/!\[([^\]\n]+)\](?![\[(])/gu)) {
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + match[0].length;
+    if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
+    const definition = references.get(normalizeReferenceLabel(match[1] ?? ''));
+    if (!definition) continue;
+    linkRanges.push({ start, end });
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    if (expanded) {
+      addMetaDecoration(output, start, start + 2, true);
+      output.push({
+        from: start + 2,
+        to: end - 1,
+        decoration: Decoration.mark({ class: 'markda-image-alt' }),
+      });
+      addMetaDecoration(output, end - 1, end, true);
+    } else {
+      output.push({
+        from: start,
+        to: end,
+        decoration: Decoration.replace({
+          widget: new InlineImageWidget(editor, start, match[1] ?? '', definition.destination),
+        }),
+      });
+    }
+  }
+  for (const match of text.matchAll(/\[\^([^\]\n]+)\]/gu)) {
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + match[0].length;
+    if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
+    linkRanges.push({ start, end });
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    if (expanded) {
+      addMetaDecoration(output, start, start + 2, true);
+      output.push({
+        from: start + 2,
+        to: end - 1,
+        decoration: Decoration.mark({ class: 'markda-footnote-source' }),
+      });
+      addMetaDecoration(output, end - 1, end, true);
+    } else {
+      output.push({
+        from: start,
+        to: end,
+        decoration: Decoration.replace({ widget: new FootnoteReferenceWidget(editor, start, match[1] ?? '') }),
+      });
+    }
+  }
   for (const match of text.matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/gu)) {
     const start = lineFrom + (match.index ?? 0);
     const end = start + match[0].length;
@@ -2438,10 +3219,104 @@ function addInlineDecorations(
     });
     addMetaDecoration(output, labelTo, end, expanded);
   }
+  for (const match of text.matchAll(/\[([^\]\n]+)\]\[([^\]\n]*)\]/gu)) {
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + match[0].length;
+    if ((match.index ?? 0) > 0 && text[(match.index ?? 0) - 1] === '!') continue;
+    if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
+    const definition = references.get(normalizeReferenceLabel(match[2] || match[1] || ''));
+    if (!definition) continue;
+    linkRanges.push({ start, end });
+    const labelFrom = start + 1;
+    const labelTo = labelFrom + (match[1]?.length ?? 0);
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    addMetaDecoration(output, start, labelFrom, expanded);
+    output.push({
+      from: labelFrom,
+      to: labelTo,
+      decoration: Decoration.mark({
+        class: 'markda-link-text',
+        attributes: {
+          'data-href': definition.destination,
+          title: definition.title || 'Click to edit; Ctrl/Cmd+click to open',
+        },
+      }),
+    });
+    addMetaDecoration(output, labelTo, end, expanded);
+  }
+  for (const match of text.matchAll(/(?<!!)\[([^\]\n^][^\]\n]*)\](?![\[(])/gu)) {
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + match[0].length;
+    if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
+    const definition = references.get(normalizeReferenceLabel(match[1] ?? ''));
+    if (!definition) continue;
+    linkRanges.push({ start, end });
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    addMetaDecoration(output, start, start + 1, expanded);
+    output.push({
+      from: start + 1,
+      to: end - 1,
+      decoration: Decoration.mark({
+        class: 'markda-link-text',
+        attributes: {
+          'data-href': definition.destination,
+          title: definition.title || 'Click to edit; Ctrl/Cmd+click to open',
+        },
+      }),
+    });
+    addMetaDecoration(output, end - 1, end, expanded);
+  }
+  for (const match of text.matchAll(/<((?:https?:\/\/|mailto:)[^<>\s]+)>/giu)) {
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + match[0].length;
+    if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    const href = match[1] ?? '';
+    linkRanges.push({ start, end });
+    addMetaDecoration(output, start, start + 1, expanded);
+    output.push({
+      from: start + 1,
+      to: end - 1,
+      decoration: Decoration.mark({
+        class: 'markda-link-text',
+        attributes: {
+          'data-href': href,
+          title: 'Click to edit; Ctrl/Cmd+click to open',
+        },
+      }),
+    });
+    addMetaDecoration(output, end - 1, end, expanded);
+  }
+  for (const match of text.matchAll(/\bhttps?:\/\/[^\s<>()]+/giu)) {
+    const raw = match[0].replace(/[.,!?;:]+$/u, '');
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + raw.length;
+    if (!raw || linkRanges.some((range) => start < range.end && end > range.start)) continue;
+    linkRanges.push({ start, end });
+    output.push({
+      from: start,
+      to: end,
+      decoration: Decoration.mark({
+        class: 'markda-link-text',
+        attributes: { 'data-href': raw, title: 'Ctrl/Cmd+click to open' },
+      }),
+    });
+  }
+  for (const match of text.matchAll(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/gu)) {
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + match[0].length;
+    if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
+    const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
+    addMetaDecoration(output, start, start + 1, expanded);
+    linkRanges.push({ start, end });
+  }
   const patterns: readonly [RegExp, string, number][] = [
     [/(\*\*|__)(?=\S)(.+?\S)\1/gu, 'markda-strong', 2],
     [/(?<!\*)\*(?!\*)(?=\S)(.+?\S)(?<!\*)\*(?!\*)/gu, 'markda-emphasis', 1],
+    [/(?<![\w_])_(?!_)(?=\S)(.+?\S)_(?![\w_])/gu, 'markda-emphasis', 1],
     [/~~(?=\S)(.+?\S)~~/gu, 'markda-strike', 2],
+    [/(?<!~)~(?!~)(?=\S)([^~\s](?:[^~]*?[^~\s])?)~(?!~)/gu, 'markda-subscript', 1],
+    [/\^(?=\S)([^^\s](?:[^^]*?[^^\s])?)\^/gu, 'markda-superscript', 1],
     [/==(?=\S)(.+?\S)==/gu, 'markda-highlight', 2],
     [/`([^`]+)`/gu, 'markda-code', 1],
   ];
@@ -2474,6 +3349,95 @@ function addInlineDecorations(
       }) });
     }
   }
+  const hardBreak = text.match(/ {2,}$/u);
+  if (hardBreak) {
+    const start = lineFrom + text.length - hardBreak[0].length;
+    addMetaDecoration(output, start, lineFrom + text.length,
+      selectionIntersects(selectionFrom, selectionTo, start, lineFrom + text.length));
+  }
+}
+
+interface MarkdownReferenceDefinition {
+  destination: string;
+  title?: string;
+}
+
+interface ParsedReferenceDefinition extends MarkdownReferenceDefinition {
+  label: string;
+}
+
+function normalizeReferenceLabel(label: string): string {
+  return label.trim().replace(/\s+/gu, ' ').toLocaleLowerCase();
+}
+
+function decodeHtmlEntity(source: string): string {
+  return decodeHTML(source);
+}
+
+function commitHtmlBlock(editor: EditorView, from: number, html: string): void {
+  const block = findSyntaxAncestor(editor.state, Math.min(from, editor.state.doc.length), 'HTMLBlock');
+  if (!block) return;
+  const safeHtml = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } }).replace(/\r\n?/gu, '\n');
+  if (editor.state.sliceDoc(block.from, block.to) !== safeHtml) {
+    editor.dispatch({ changes: { from: block.from, to: block.to, insert: safeHtml } });
+  }
+}
+
+function parseReferenceDefinition(line: string): ParsedReferenceDefinition | undefined {
+  const match = line.match(/^[ \t]{0,3}\[([^\]\n^][^\]\n]*)\]:[ \t]*(?:<([^>\n]+)>|(\S+?))(?:[ \t]+(?:"([^"\n]*)"|'([^'\n]*)'|\(([^)\n]*)\)))?[ \t]*$/u);
+  if (!match) return undefined;
+  const label = match[1] ?? '';
+  const destination = match[2] ?? match[3] ?? '';
+  const title = match[4] ?? match[5] ?? match[6];
+  return label && destination ? { label, destination, ...(title ? { title } : {}) } : undefined;
+}
+
+function collectReferenceDefinitions(source: string): ReadonlyMap<string, MarkdownReferenceDefinition> {
+  const definitions = new Map<string, MarkdownReferenceDefinition>();
+  for (const line of source.split(/\r\n|\r|\n/u)) {
+    const parsed = parseReferenceDefinition(line);
+    if (!parsed) continue;
+    const label = normalizeReferenceLabel(parsed.label);
+    if (!definitions.has(label)) {
+      definitions.set(label, { destination: parsed.destination, ...(parsed.title ? { title: parsed.title } : {}) });
+    }
+  }
+  return definitions;
+}
+
+function referenceDefinitionsFor(state: EditorState): ReadonlyMap<string, MarkdownReferenceDefinition> {
+  if (referenceDefinitionCache?.doc === state.doc) return referenceDefinitionCache.definitions;
+  const definitions = collectReferenceDefinitions(state.doc.toString());
+  referenceDefinitionCache = { doc: state.doc, definitions };
+  return definitions;
+}
+
+function commitFootnoteDefinition(editor: EditorView, from: number, label: string, content: string): void {
+  const opening = editor.state.doc.lineAt(Math.min(from, editor.state.doc.length));
+  if (!/^[ \t]{0,3}\[\^[^\]\n]+\]:/u.test(opening.text)) return;
+  let endLine = opening.number;
+  while (endLine < editor.state.doc.lines && /^(?: {4}|\t)/u.test(editor.state.doc.line(endLine + 1).text)) endLine++;
+  const to = editor.state.doc.line(endLine).to;
+  const eol = editor.state.doc.toString().match(/\r\n|\r|\n/u)?.[0] ?? '\n';
+  const lines = content.replace(/\r\n?/gu, '\n').split('\n');
+  const safeLabel = label.replace(/[\]\r\n]/gu, '');
+  const replacement = `[^${safeLabel}]: ${lines[0] ?? ''}${lines.slice(1).map((line) => `${eol}    ${line}`).join('')}`;
+  if (editor.state.sliceDoc(opening.from, to) !== replacement) {
+    editor.dispatch({ changes: { from: opening.from, to, insert: replacement } });
+  }
+}
+
+function commitReferenceDefinition(
+  editor: EditorView, from: number, label: string, destination: string, title: string,
+): void {
+  const line = editor.state.doc.lineAt(Math.min(from, editor.state.doc.length));
+  if (!parseReferenceDefinition(line.text)) return;
+  const safeLabel = label.replace(/[\]\r\n]/gu, '').trim() || 'reference';
+  const safeDestination = destination.replace(/[\r\n<>]/gu, '').trim();
+  const target = /\s/u.test(safeDestination) ? `<${safeDestination}>` : safeDestination;
+  const safeTitle = title.replace(/[\r\n"]/gu, '').trim();
+  const replacement = `[${safeLabel}]: ${target}${safeTitle ? ` "${safeTitle}"` : ''}`;
+  if (replacement !== line.text) editor.dispatch({ changes: { from: line.from, to: line.to, insert: replacement } });
 }
 
 function commitCallout(editor: EditorView, from: number, type: string, content: string): void {
@@ -2505,7 +3469,7 @@ function getStyles(): string { return String.raw`
   --markda-surface:#f6f8fa;--markda-surface-secondary:#eef2f6;--markda-elevated:#fff;
   --markda-hover:#eaeef2;--markda-active:#dbeafe;--markda-selection:#add6ff;
   --markda-line-highlight:#0969da14;--markda-find-highlight:#fff8c5;--markda-focus:#0969da;
-  --markda-cursor-color:#1a1a1a;--markda-accent:#0969da;--markda-error:#cf222e;
+  --markda-cursor-color:#1a1a1a;--markda-cursor-shadow:transparent;--markda-accent:#0969da;--markda-error:#cf222e;
   --markda-error-bg:#ffebe9;--markda-info:#0969da;--markda-info-bg:#ddf4ff;
   --markda-tip:#1a7f37;--markda-tip-bg:#dafbe1;--markda-warning:#9a6700;--markda-warning-bg:#fff8c5;
   --markda-scrollbar-track:transparent;--markda-scrollbar-thumb:#1f232847;
@@ -2517,7 +3481,7 @@ function getStyles(): string { return String.raw`
   --markda-surface:#252526;--markda-surface-secondary:#2d2d30;--markda-elevated:#252526;
   --markda-hover:#2a2d2e;--markda-active:#37373d;--markda-selection:#264f78;
   --markda-line-highlight:#ffffff0f;--markda-find-highlight:#515c6a;--markda-focus:#007fd4;
-  --markda-cursor-color:#fff;--markda-accent:#7aa2f7;--markda-error:#f48771;
+  --markda-cursor-color:#7dd3fc;--markda-cursor-shadow:#7dd3fcb3;--markda-accent:#7aa2f7;--markda-error:#f48771;
   --markda-error-bg:#3b1f23;--markda-info:#75beff;--markda-info-bg:#152b3c;
   --markda-tip:#89d185;--markda-tip-bg:#17351f;--markda-warning:#e2c08d;--markda-warning-bg:#352f15;
   --markda-scrollbar-thumb:#c8c8c866;--markda-scrollbar-thumb-hover:#c8c8c88c;--markda-scrollbar-thumb-active:#c8c8c8b3;
@@ -2535,13 +3499,16 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .markda-shell{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.markda-toolbar{min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--markda-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
 .table-toolbar{display:none;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;line-height:1.65}.preview-visible #preview{display:block}
-.cm-editor{height:100%;min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px var(--markda-padding-x,24px) 90px;line-height:1.7}.cm-content{max-width:var(--markda-content-width);margin:0;caret-color:var(--markda-cursor-color)}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-activeLine{background-color:var(--markda-line-highlight)!important}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px}.cm-selectionBackground{background:var(--markda-selection)!important}
-.markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--markda-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-quote{border-left:4px solid var(--markda-border);padding-left:14px!important;color:var(--markda-muted)}.markda-list-marker{color:var(--markda-muted)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--markda-fg);font-weight:700;text-align:center}
-.markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--markda-surface);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
+.cm-editor{height:100%;min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px var(--markda-padding-x,24px) 90px;line-height:1.7}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-content{max-width:var(--markda-content-width);margin:0}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-activeLine{background-color:var(--markda-line-highlight)!important}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:0 0 4px 1px var(--markda-cursor-shadow)}.cm-selectionBackground{background:var(--markda-selection)!important}
+.markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--markda-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-setext-marker{height:0;min-height:0;line-height:0;overflow:hidden}.markda-quote{border-left:4px solid var(--markda-border);padding-left:14px!important;color:var(--markda-muted)}.markda-list-marker{color:var(--markda-muted)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--markda-fg);font-weight:700;text-align:center}
+.markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-subscript{font-size:.78em;vertical-align:sub}.markda-superscript{font-size:.78em;vertical-align:super}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--markda-surface);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-inline-html,.markda-entity{cursor:pointer}.markda-inline-image{display:inline-flex;align-items:center;max-width:min(18em,70vw);max-height:4em;margin:0 .2em;padding:2px;border:1px solid transparent;border-radius:4px;vertical-align:middle;cursor:pointer}.markda-inline-image:hover{border-color:var(--markda-border)}.markda-inline-image img{display:block;max-width:100%;max-height:3.5em}.markda-inline-image-blocked{padding:1px 5px;color:var(--markda-muted);background:var(--markda-surface)}.markda-image-alt,.markda-footnote-source{color:var(--markda-muted)}.markda-footnote-reference{display:inline-block;min-width:1em;padding:0 2px;color:var(--markda-link);font-size:.75em;line-height:1;vertical-align:super;cursor:pointer}.markda-thematic-break{width:100%;height:0;margin:1em 0;border:0;border-top:1px solid var(--markda-border)}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
 .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em;accent-color:var(--markda-accent)}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--markda-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{color:var(--markda-muted);text-align:center;font-size:.9em}
 .markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
 .markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-source-editor{display:block;width:100%;min-height:120px;resize:vertical;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
+.markda-footnote-definition{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;margin:.45em 0;padding:6px 9px;color:var(--markda-muted);background:var(--markda-surface);border-radius:4px}.markda-footnote-definition-content{min-height:1.5em;white-space:pre-wrap;outline:none}.markda-reference-definition{display:grid;grid-template-columns:minmax(7em,.5fr) auto minmax(10em,1fr) minmax(8em,.7fr);gap:6px;align-items:center;margin:.45em 0;padding:6px 9px;background:var(--markda-surface);border-radius:4px}.markda-reference-definition input{min-width:0;padding:4px 6px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}
+.markda-html-block{margin:.6em 0;padding:8px;outline:none;border:1px solid transparent;border-radius:4px}.markda-html-block:focus{border-color:var(--markda-border)}.markda-html-empty{color:var(--markda-muted);font-style:italic}
 .markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-code-rendered{padding:10px}
+.markda-trailing-paragraph{min-height:1.7em;margin-top:2px;border-radius:3px;cursor:text}.markda-trailing-paragraph:hover,.markda-trailing-paragraph:focus{background:var(--markda-line-highlight);outline:none}.markda-trailing-paragraph:focus::before{content:"";display:inline-block;height:1.35em;border-left:2px solid var(--markda-cursor-color);box-shadow:0 0 4px 1px var(--markda-cursor-shadow);vertical-align:middle}
 .markda-live-table-wrap{overflow:auto;margin:12px 0;color:var(--markda-fg)}.markda-live-table-wrap table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap th{background:var(--markda-surface)}.markda-live-table-wrap code{padding:1px 4px;color:var(--markda-fg);background:var(--markda-surface);border-radius:3px;font-family:var(--vscode-editor-font-family)}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
 .markda-callout{margin:12px 0;padding:12px 16px;border-radius:6px;border-left:4px solid;background:var(--markda-surface)}.markda-callout-title{font-weight:600;margin-bottom:4px}.markda-callout-content{color:var(--markda-fg)}.markda-callout-edit{margin-top:8px;font-size:11px;padding:2px 8px;opacity:0}.markda-callout:hover .markda-callout-edit{opacity:1}
 .markda-callout-note{border-color:var(--markda-info);background:var(--markda-info-bg)}.markda-callout-note .markda-callout-title{color:var(--markda-info)}.markda-callout-tip{border-color:var(--markda-tip);background:var(--markda-tip-bg)}.markda-callout-tip .markda-callout-title{color:var(--markda-tip)}

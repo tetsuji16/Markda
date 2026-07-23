@@ -17,6 +17,8 @@ describe('rendered math and Mermaid editing in Chromium', () => {
       'y^2',
       '$$',
       '',
+      '$$z^2$$',
+      '',
       '```mermaid',
       'graph TD; A-->B',
       '```',
@@ -38,6 +40,8 @@ describe('rendered math and Mermaid editing in Chromium', () => {
     const { __getEditorView } = await import('../src/webview/main.js');
     await settle();
     const view = __getEditorView();
+    expect(view.dom.querySelectorAll('.markda-block-math')).toHaveLength(2);
+    expect(view.dom.textContent).not.toContain('$$');
 
     view.dom.querySelector<HTMLElement>('.markda-inline-math')!.click();
     await settle();
