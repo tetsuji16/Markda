@@ -18,9 +18,9 @@ Markda does not collect telemetry. External URLs and remote resources follow the
 
 ## Editor behavior
 
-Live view and source view operate on the same CodeMirror 6 document. Live view hides inactive syntax markers and renders headings, quotes, emphasis, links, images, tasks, code blocks, math, Mermaid diagrams, and tables in the editing surface.
+Live view and source view operate on the same CodeMirror 6 document. Live view hides inactive syntax markers and directly renders headings, quotes, lists, emphasis, links (inline, reference, shortcut, automatic, and bare URL forms), images (block, inline, and reference forms), character entities, escapes, tasks, footnotes, reference definitions, fenced and indented code blocks, permitted HTML, math, Mermaid diagrams, thematic breaks, and tables in the editing surface. Activating a rendered inline object exposes only its Markdown source; editable block objects synchronize their changes back to the original source range.
 
-In ordinary live-view paragraphs, Enter creates a paragraph and Shift+Enter creates a Markdown hard break. Lists, quotes, headings, fenced code blocks, and source view retain structural Markdown behavior. Rich clipboard HTML is converted to Markdown for headings, paragraphs, formatting, links, images, lists, quotes, tables, and code.
+In ordinary live-view paragraphs, Enter creates a paragraph and Shift+Enter creates a Markdown hard break. Lists, quotes, headings, fenced code blocks, and source view retain structural Markdown behavior. Rich clipboard HTML is converted to Markdown for headings, paragraphs, formatting, links, images, lists, quotes, tables, and code. HTML blocks are directly editable only when both Markdown HTML and unsafe HTML are explicitly enabled; edited HTML is sanitized before it is written back.
 
 Live tables support direct cell editing, IME-safe synchronization, Tab navigation, inline formatting shortcuts, row and column operations, drag reordering, column resizing, and alignment. Tables above the configured cell limit use a lightweight source editor. Code blocks support direct content editing and IME input.
 

@@ -24,7 +24,11 @@ async function settle(): Promise<void> {
 describe('editable widget history in Chromium', () => {
   it('keeps the viewport stable when Ctrl+Z restores a code block edit', async () => {
     document.body.innerHTML = '<div id="app"></div>';
-    const originalCode = 'const answer = 41;';
+    const originalCode = [
+      'y_pred = torch.sigmoid(torch.tensor([0.5, -1.2]))',
+      'print(f"Predictions: {y_pred.tolist()}")',
+    ].join('\n');
+    const changedPrediction = 'print(f"Predictions: {y_pred.tolist()}!")';
     const text = [
       ...Array.from({ length: 45 }, (_, index) => `Leading paragraph ${index + 1}.`),
       '',
@@ -64,8 +68,16 @@ describe('editable widget history in Chromium', () => {
     const beforeUndoScrollTop = view.scrollDOM.scrollTop;
     expect(beforeUndoScrollTop).toBeGreaterThan(0);
     code.focus();
-    code.textContent = 'const answer = 42;';
+    // Chromium commonly represents a contenteditable newline as an implicit
+    // break before a div. textContent concatenates these nodes and used to
+    // commit a corrupt code block before Undo ran.
+    const secondLine = document.createElement('div');
+    secondLine.textContent = changedPrediction;
+    code.replaceChildren(document.createTextNode(originalCode.split('\n')[0] ?? ''), secondLine);
     code.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(view.state.doc.toString()).toContain(`${originalCode.split('\n')[0]}\n${changedPrediction}`);
+
     code.dispatchEvent(new KeyboardEvent('keydown', {
       key: 'z', ctrlKey: true, bubbles: true, cancelable: true,
     }));

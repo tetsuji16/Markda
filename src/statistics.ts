@@ -36,17 +36,38 @@ export function analyzeDocument(text: string): { statistics: DocumentStatistics;
 
   let lineStart = 0;
   let lines = 0;
+  let fence: { marker: '`' | '~'; length: number } | undefined;
+  let previousLine: { text: string; from: number; to: number } | undefined;
   while (lineStart <= text.length) {
     let lineEnd = lineStart;
     while (lineEnd < text.length && text[lineEnd] !== '\r' && text[lineEnd] !== '\n') lineEnd++;
     const line = text.slice(lineStart, lineEnd);
-    const heading = line.match(/^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/u);
-    if (heading) headings.push({
-      level: heading[1]?.length ?? 1,
-      text: heading[2] ?? '',
-      from: lineStart,
-      to: lineEnd,
-    });
+    const fenceMarker = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/u)?.[1];
+    if (fenceMarker) {
+      const marker = fenceMarker[0] as '`' | '~';
+      if (!fence) fence = { marker, length: fenceMarker.length };
+      else if (fence.marker === marker && fenceMarker.length >= fence.length
+        && /^[ \t]*(?:`+|~+)[ \t]*$/u.test(line)) fence = undefined;
+      previousLine = undefined;
+    } else if (!fence) {
+      const heading = line.match(/^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/u);
+      if (heading) headings.push({
+        level: heading[1]?.length ?? 1,
+        text: heading[2] ?? '',
+        from: lineStart,
+        to: lineEnd,
+      });
+      const setext = line.match(/^[ \t]{0,3}(=+|-+)[ \t]*$/u);
+      if (setext && previousLine?.text.trim() && !/^(?:#{1,6}|>|[-+*]|\d+[.)])[ \t]/u.test(previousLine.text)) {
+        headings.push({
+          level: setext[1]?.startsWith('=') ? 1 : 2,
+          text: previousLine.text.trim(),
+          from: previousLine.from,
+          to: lineEnd,
+        });
+      }
+      previousLine = line.trim() ? { text: line, from: lineStart, to: lineEnd } : undefined;
+    }
     lines++;
     if (lineEnd >= text.length) break;
     lineStart = lineEnd + (text[lineEnd] === '\r' && text[lineEnd + 1] === '\n' ? 2 : 1);

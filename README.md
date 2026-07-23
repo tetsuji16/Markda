@@ -8,7 +8,7 @@ Write Markdown as a formatted document without giving up the source file. Markda
 
 ## Highlights
 
-- Edit rendered Markdown in place or switch to the full source view.
+- Edit the supported CommonMark and Markda extension syntax in place—including reference links and images, footnotes, indented code, entities, and explicitly permitted HTML—or switch to the full source view.
 - Use document-style paragraph breaks, smart HTML-to-Markdown paste, and modifier-click link opening.
 - Work with tables using direct cell editing, row and column controls, drag reordering, resizing, alignment, and Tab navigation.
 - Edit code blocks directly without opening source mode, with unified undo and redo behavior.

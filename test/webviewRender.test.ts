@@ -35,7 +35,8 @@ describe('live Markdown webview', () => {
     expect(editor.querySelector('.markda-strong')?.textContent).toBe('Output');
     expect(editor.querySelector('.markda-link-text')?.textContent).toBe('GitHub Issues');
     expect(editor.querySelectorAll('.markda-meta')).toHaveLength(5);
-    expect(Array.from(editor.querySelectorAll('.markda-meta'))
-      .every((marker) => !marker.classList.contains('markda-meta-expanded'))).toBe(true);
+    const expanded = Array.from(editor.querySelectorAll<HTMLElement>('.markda-meta-expanded'));
+    expect(expanded).toHaveLength(1);
+    expect(expanded[0]?.textContent).toBe('# ');
   });
 });

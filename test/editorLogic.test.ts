@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CompositionCommitGate, domFragmentToMarkdown, historyShortcut, liveEnterEdit } from '../src/webview/editorLogic.js';
+import {
+  CompositionCommitGate, domFragmentToMarkdown, historyShortcut, liveEnterEdit,
+  markdownPairDeletion, markdownPairEdit,
+} from '../src/webview/editorLogic.js';
 
 describe('historyShortcut', () => {
   const shortcut = (key: string, overrides: Partial<KeyboardEvent> = {}) => historyShortcut({
@@ -17,6 +20,25 @@ describe('historyShortcut', () => {
     expect(shortcut('z', { ctrlKey: false })).toBeUndefined();
     expect(shortcut('z', { altKey: true })).toBeUndefined();
     expect(shortcut('z', { isComposing: true })).toBeUndefined();
+  });
+});
+
+describe('Markdown delimiter pairing', () => {
+  it('wraps a selection and skips an existing closing delimiter', () => {
+    expect(markdownPairEdit('word', 0, 4, '[', false)).toEqual({
+      from: 0, to: 4, insert: '[word]', cursor: 5,
+    });
+    expect(markdownPairEdit('[]', 1, 1, ']', false)).toEqual({
+      from: 1, to: 1, insert: '', cursor: 2,
+    });
+  });
+
+  it('removes an untouched pair with one Backspace and respects the math setting', () => {
+    expect(markdownPairDeletion('[]', 1, false)).toEqual({
+      from: 0, to: 2, insert: '', cursor: 0,
+    });
+    expect(markdownPairDeletion('$$', 1, false)).toBeUndefined();
+    expect(markdownPairDeletion('$$', 1, true)?.to).toBe(2);
   });
 });
 

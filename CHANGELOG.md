@@ -2,6 +2,13 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.8 - 2026-07-23
+
+- Opened rendered inline math, block math, fenced math, and Mermaid source editors with a single click.
+- Kept Markdown syntax collapsed when the caret is exactly at the right edge of an inline span, matching Typora-style live preview behavior.
+- Prevented `Ctrl+S` from blurring or rebuilding active table, code, callout, math, and Mermaid editors, eliminating viewport movement while saving.
+- Added Chromium regression coverage for dark-to-light code colors and rendered-source editing interactions.
+
 ## 0.1.7 - 2026-07-23
 
 - Improved cursor responsiveness by avoiding unnecessary block-widget refreshes on ordinary paragraph movement.

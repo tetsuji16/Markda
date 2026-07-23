@@ -81,6 +81,12 @@ describe('Markda theme colors in Chromium', () => {
     expect(root.dataset.markdaColorMode).toBe('dark');
     expect(getComputedStyle(document.body).backgroundColor).toBe('rgb(30, 30, 30)');
     expect(getComputedStyle(document.body).color).toBe('rgb(212, 212, 212)');
+    content.focus();
+    await settle();
+    const cursor = document.querySelector<HTMLElement>('.cm-cursor')!;
+    expect(getComputedStyle(cursor).borderLeftColor).toBe('rgb(125, 211, 252)');
+    expect(getComputedStyle(cursor).borderLeftWidth).toBe('2px');
+    expect(getComputedStyle(cursor).boxShadow).toContain('rgba(125, 211, 252, 0.7)');
     expect(getComputedStyle(quote).color).toBe('rgb(168, 168, 168)');
     expect(getComputedStyle(inlineCode).backgroundColor).toBe('rgb(37, 37, 38)');
     expect(getComputedStyle(document.querySelector<HTMLElement>('.markda-live-code code')!).color).toBe('rgb(212, 212, 212)');
@@ -95,5 +101,12 @@ describe('Markda theme colors in Chromium', () => {
       letterSpacing: getComputedStyle(content).letterSpacing,
       lineHeight: getComputedStyle(content).lineHeight,
     }).toEqual(lightTypography);
+
+    document.querySelector<HTMLButtonElement>('#theme-toggle')!.click();
+    document.querySelector<HTMLButtonElement>('#theme-toggle')!.click();
+    await settle();
+    expect(root.dataset.markdaColorMode).toBe('light');
+    expect(getComputedStyle(document.querySelector<HTMLElement>('.markda-live-code code')!).color).toBe('rgb(26, 26, 26)');
+    expect(getComputedStyle(document.querySelector<HTMLElement>('#preview pre code')!).color).toBe('rgb(26, 26, 26)');
   });
 });

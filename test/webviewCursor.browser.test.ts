@@ -142,11 +142,21 @@ describe('live Markdown pointer geometry in Chromium', () => {
       selection: { anchor: 0 },
     });
     await settle();
+    expect(view.dom.querySelector('.markda-live-table-wrap')).not.toBeNull();
 
     const visiblePosition = view.state.doc.toString().indexOf('Trailing paragraph 1.') + 7;
     view.dispatch({ effects: EditorView.scrollIntoView(visiblePosition, { y: 'center' }) });
     await settle();
     expect(view.scrollDOM.scrollTop).toBeGreaterThan(0);
+
+    // Block widgets must not disappear from the decoration source of truth when
+    // scrolling changes CodeMirror's visible ranges and remeasures widget heights.
+    view.dispatch({ effects: EditorView.scrollIntoView(0, { y: 'start' }) });
+    await settle();
+    expect(view.dom.querySelector('.markda-live-table-wrap')).not.toBeNull();
+    view.dispatch({ effects: EditorView.scrollIntoView(visiblePosition, { y: 'center' }) });
+    await settle();
+
     const domPoint = view.domAtPos(visiblePosition);
     const visibleOrdinaryLine = (domPoint.node instanceof Element ? domPoint.node : domPoint.node.parentElement)?.closest('.cm-line');
     expect(visibleOrdinaryLine).not.toBeNull();
