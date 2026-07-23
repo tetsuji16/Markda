@@ -1,10 +1,24 @@
 # Markda
 
-Write Markdown as a formatted document without giving up the source file. Markda is a source-preserving live editor for VS Code Desktop: the file on disk remains ordinary Markdown, while headings, links, tasks, tables, math, and diagrams render directly in the editor.
+Write Markdown. See the result. Keep the source.
+
+Markda is a calm, source-preserving Markdown editor for VS Code Desktop. Write directly in a formatted document with headings, tasks, links, code, tables, math, diagrams, and images—while the file on disk remains ordinary Markdown.
 
 > Markda 0.1 is a preview release. Keep important work under version control and report reproducible editing issues.
 
 [Report a bug](https://github.com/tetsuji16/Markda/issues) · [Release history](https://github.com/tetsuji16/Markda/blob/main/CHANGELOG.md) · [Sponsor Markda](https://github.com/sponsors/tetsuji16)
+
+## Write in place
+
+![Markda showing formatted headings, tasks, a block quote, emphasis, and inline code in a clean writing view](media/screenshots/writing-view.png)
+
+Formatting stays readable while you write. Move between the live document and full Markdown source whenever you need to see the syntax.
+
+## Keep math close to the words
+
+![Markda editing a math block in place while rendering inline and display equations](media/screenshots/math-editing.png)
+
+Click rendered math to edit its source in place. KaTeX output stays beside the text that explains it, and rendering runs locally.
 
 ## Highlights
 
