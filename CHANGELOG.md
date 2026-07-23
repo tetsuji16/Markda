@@ -2,6 +2,11 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.9 - 2026-07-24
+
+- Added writing and math-editing screenshots to the GitHub and Marketplace introduction.
+- Refined the extension description around Markda's calm, source-preserving writing experience.
+
 ## 0.1.8 - 2026-07-23
 
 - Opened rendered inline math, block math, fenced math, and Mermaid source editors with a single click.

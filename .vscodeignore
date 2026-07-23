@@ -6,6 +6,9 @@ clean.diff
 diff_main.txt
 opencode.json
 dev/**
+output/**
+docs/sample.md
+docs/sample.assets/**
 src/**
 test/**
 scripts/**
