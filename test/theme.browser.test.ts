@@ -95,5 +95,12 @@ describe('Markda theme colors in Chromium', () => {
       letterSpacing: getComputedStyle(content).letterSpacing,
       lineHeight: getComputedStyle(content).lineHeight,
     }).toEqual(lightTypography);
+
+    document.querySelector<HTMLButtonElement>('#theme-toggle')!.click();
+    document.querySelector<HTMLButtonElement>('#theme-toggle')!.click();
+    await settle();
+    expect(root.dataset.markdaColorMode).toBe('light');
+    expect(getComputedStyle(document.querySelector<HTMLElement>('.markda-live-code code')!).color).toBe('rgb(26, 26, 26)');
+    expect(getComputedStyle(document.querySelector<HTMLElement>('#preview pre code')!).color).toBe('rgb(26, 26, 26)');
   });
 });

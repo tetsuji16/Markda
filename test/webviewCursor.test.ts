@@ -102,6 +102,40 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     expect(messages.at(-1)).toMatchObject({ type: 'save', text: 'before after' });
   });
 
+  it('flushes an active block editor on Ctrl+S without closing or blurring it', async () => {
+    vi.resetModules();
+    const text = ['```mermaid', 'graph TD; A-->B', '```'].join('\n');
+    const postMessage = setupEditor(text);
+    const initial = (globalThis as typeof globalThis & {
+      __markdaInitial: { settings: { markdown: { diagrams: boolean } } };
+    }).__markdaInitial;
+    initial.settings.markdown.diagrams = true;
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    const rendered = view.dom.querySelector<HTMLElement>('[data-markda-renderer="mermaid"]')!;
+    rendered.click();
+    const source = view.dom.querySelector<HTMLTextAreaElement>('.markda-block-source-editor')!;
+    expect(source.hidden).toBe(false);
+    expect(document.activeElement).toBe(source);
+
+    source.value = 'graph TD; A-->C';
+    source.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    postMessage.mockClear();
+    const event = new KeyboardEvent('keydown', {
+      key: 's', ctrlKey: true, bubbles: true, cancelable: true,
+    });
+    source.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(source.hidden).toBe(false);
+    expect(view.state.doc.toString()).toContain('A-->C');
+    expect(postMessage.mock.calls.at(-1)?.[0]).toMatchObject({
+      type: 'save', text: expect.stringContaining('A-->C'),
+    });
+  });
+
   it('includes edits made while the preceding transaction is awaiting acknowledgement', async () => {
     vi.resetModules();
     const postMessage = setupEditor('start');
@@ -198,6 +232,40 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     expect(view.dom.querySelector('.markda-meta-expanded')).toBeNull();
     expect(view.dom.querySelector('.markda-inline-math-source')).toBeNull();
     expect(view.dom.querySelector('.markda-inline-math')).not.toBeNull();
+  });
+
+  it('opens inline math source on a single click', async () => {
+    vi.resetModules();
+    const text = 'Before $x^2$ after.';
+    setupEditor(text);
+    const initial = (globalThis as typeof globalThis & {
+      __markdaInitial: { settings: { markdown: { math: boolean } } };
+    }).__markdaInitial;
+    initial.settings.markdown.math = true;
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    view.dom.querySelector<HTMLElement>('.markda-inline-math')!.click();
+    await tick();
+
+    expect(view.state.selection.main.head).toBe(text.indexOf('$') + 1);
+    expect(view.dom.querySelector('.markda-inline-math-source')?.textContent).toBe('x^2');
+  });
+
+  it('keeps Markdown collapsed when the caret is exactly at a span right edge', async () => {
+    vi.resetModules();
+    const text = 'Before **bold** after.';
+    setupEditor(text);
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    view.dispatch({ selection: { anchor: text.indexOf('** after') + 2 } });
+    await tick();
+
+    expect(view.dom.querySelector('.markda-meta-expanded')).toBeNull();
+    expect(view.dom.querySelector('.markda-strong')?.textContent).toBe('bold');
   });
 
   it('hides a leading heading marker at the initial caret boundary', async () => {
@@ -319,7 +387,7 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     const view = __getEditorView();
     const rendered = view.dom.querySelector<HTMLElement>('.markda-block-math')!;
     const source = view.dom.querySelector<HTMLTextAreaElement>('.markda-block-source-editor')!;
-    rendered.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    rendered.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(source.hidden).toBe(false);
     expect(rendered.hidden).toBe(true);
     source.value = 'x^3';
@@ -347,7 +415,7 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     const view = __getEditorView();
     const rendered = view.dom.querySelector<HTMLElement>('[data-markda-renderer="mermaid"]')!;
     const source = view.dom.querySelector<HTMLTextAreaElement>('.markda-block-source-editor')!;
-    rendered.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    rendered.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(source.hidden).toBe(false);
     expect(rendered.hidden).toBe(true);
     source.value = ['graph TD', '  A --> C'].join('\n');

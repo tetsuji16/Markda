@@ -86,6 +86,7 @@ let activeMathFrom: number | undefined;
 let activeCalloutFrom: number | undefined;
 let beginLivePreviewFreeze: ((editor: EditorView) => void) | undefined;
 let colorThemeRevision = 0;
+const nestedEditableFlushers = new WeakMap<HTMLElement, () => void>();
 
 let settings: EditorSettings = initialDocument?.settings ?? {
   contentWidth: 860, autoPairMarkdown: true, typewriterKeepCentered: true, previewUpdateDelay: 500, liveTableMaxCells: 600,
@@ -406,10 +407,13 @@ function applyTextChanges(text: string, changes: readonly TextChange[]): string 
 
 function flushActiveEditable(): void {
   const active = document.activeElement;
-  // Keep the main CodeMirror surface focused across Ctrl+S. Only nested live
-  // editors need a blur so their final DOM value is committed to Markdown.
   if (!(active instanceof HTMLElement) || active === view.contentDOM) return;
-  if (active.isContentEditable || active.matches('input, textarea, select')) active.blur();
+  // Saving must not blur or rebuild a live widget: that changes its measured
+  // height and makes the viewport visibly jump. Flush its pending DOM value
+  // directly while preserving focus and selection.
+  const flush = nestedEditableFlushers.get(active);
+  if (flush) flush();
+  else if (active.isContentEditable || active.matches('input, textarea, select')) active.blur();
 }
 
 function synchronizeBeforeSuspend(): void {
@@ -1501,7 +1505,8 @@ class CodeBlockWidget extends WidgetType {
       const editorBinding = bindWidgetEditor(this.editor, sourceEditor, rendered, container);
       this.disposeEditor = editorBinding.dispose;
       const toggle = editorBinding.toggle;
-      rendered.addEventListener('dblclick', toggle);
+      rendered.title = 'Click to edit math source';
+      rendered.addEventListener('click', toggle);
       rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') toggle(); });
       container.append(rendered, sourceEditor);
       void renderKatexInto(rendered, this.source, true);
@@ -1523,7 +1528,8 @@ class CodeBlockWidget extends WidgetType {
       const editorBinding = bindWidgetEditor(this.editor, sourceEditor, rendered, container);
       this.disposeEditor = editorBinding.dispose;
       const toggle = editorBinding.toggle;
-      rendered.addEventListener('dblclick', toggle);
+      rendered.title = 'Click to edit Mermaid source';
+      rendered.addEventListener('click', toggle);
       rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') toggle(); });
       container.append(rendered, sourceEditor);
       void renderLiveMermaid(rendered, this.source);
@@ -1538,6 +1544,11 @@ class CodeBlockWidget extends WidgetType {
       const gate = new CompositionCommitGate();
       let timer: number | undefined;
       const commit = () => commitCodeBlock(this.editor, this.from, code.textContent ?? '', undefined);
+      nestedEditableFlushers.set(code, () => {
+        window.clearTimeout(timer);
+        timer = undefined;
+        gate.flush(commit);
+      });
       code.addEventListener('focus', () => { activeCodeFrom = this.from; });
       code.addEventListener('input', () => {
         window.clearTimeout(timer);
@@ -1666,6 +1677,12 @@ class TableWidget extends WidgetType {
           element.textContent = cellSource;
         };
         const commit = () => this.updateCell(rowIndex - 1, column, cellSource);
+        nestedEditableFlushers.set(element, () => {
+          cellSource = element.textContent ?? '';
+          window.clearTimeout(commitTimer);
+          commitTimer = undefined;
+          commitGate.flush(commit);
+        });
         const scheduleCommit = () => {
           cellSource = element.textContent ?? '';
           window.clearTimeout(commitTimer);
@@ -1871,9 +1888,22 @@ class MathWidget extends WidgetType {
       });
       const editorBinding = bindWidgetEditor(this.editor, sourceEditor, element, wrapper);
       this.disposeEditor = editorBinding.dispose;
-      element.addEventListener('dblclick', editorBinding.toggle);
+      element.title = 'Click to edit math source';
+      element.addEventListener('click', editorBinding.toggle);
+      element.addEventListener('keydown', (event) => { if (event instanceof KeyboardEvent && event.key === 'Enter') editorBinding.toggle(); });
       wrapper.append(element, sourceEditor);
       return wrapper;
+    }
+    if (this.editor && this.from !== undefined) {
+      element.title = 'Click to edit inline math source';
+      element.tabIndex = 0;
+      const edit = () => {
+        const position = Math.min(this.from! + 1, this.editor!.state.doc.length);
+        this.editor!.dispatch({ selection: EditorSelection.cursor(position) });
+        this.editor!.focus();
+      };
+      element.addEventListener('click', edit);
+      element.addEventListener('keydown', (event) => { if (event instanceof KeyboardEvent && event.key === 'Enter') edit(); });
     }
     return element;
   }
@@ -1921,6 +1951,11 @@ class CalloutWidget extends WidgetType {
     const gate = new CompositionCommitGate();
     let timer: number | undefined;
     const commit = () => commitCallout(this.editor, this.from, this.type, content.textContent ?? '');
+    nestedEditableFlushers.set(content, () => {
+      window.clearTimeout(timer);
+      timer = undefined;
+      gate.flush(commit);
+    });
     content.addEventListener('focus', () => { activeCalloutFrom = this.from; });
     content.addEventListener('input', () => {
       window.clearTimeout(timer);
@@ -1956,6 +1991,11 @@ function createBlockSourceEditor(editor: EditorView, source: string, commit: (va
   const gate = new CompositionCommitGate();
   let timer: number | undefined;
   const save = () => commit(input.value);
+  nestedEditableFlushers.set(input, () => {
+    window.clearTimeout(timer);
+    timer = undefined;
+    gate.flush(save);
+  });
   input.addEventListener('input', () => {
     window.clearTimeout(timer);
     timer = window.setTimeout(() => { timer = undefined; gate.request(save); }, 80);
@@ -2429,7 +2469,9 @@ function addInlineDecorations(
       output.push({ from: start + 1, to: end - 1, decoration: Decoration.mark({ class: 'markda-inline-math-source' }) });
       addMetaDecoration(output, end - 1, end, true);
     } else {
-      output.push({ from: start, to: end, decoration: Decoration.replace({ widget: new MathWidget(match[1] ?? '') }) });
+      output.push({ from: start, to: end, decoration: Decoration.replace({
+        widget: new MathWidget(match[1] ?? '', false, editor, start),
+      }) });
     }
   }
 }
