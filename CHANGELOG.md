@@ -2,6 +2,10 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.11 - 2026-07-25
+
+- Refreshed the Marketplace introduction and specification-view screenshot to emphasize source-preserving Markdown editing.
+
 ## 0.1.10 - 2026-07-24
 
 - Preserved CRLF and CR-only document separators when synchronizing live-editor changes, preventing edits from drifting after line breaks.
