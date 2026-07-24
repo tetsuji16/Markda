@@ -1,8 +1,8 @@
 {
   "name": "markda",
   "displayName": "Markda",
-  "description": "Write Markdown in a calm, source-preserving live editor with direct editing for tables, code, math, diagrams, and images.",
-  "version": "0.1.10",
+  "description": "A source-preserving live Markdown editor for VS Code: edit formatted Markdown in place while keeping ordinary, portable Markdown files.",
+  "version": "0.1.11",
   "publisher": "tetsuji16",
   "license": "MIT",
   "homepage": "https://github.com/tetsuji16/Markda#readme",

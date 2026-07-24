@@ -1,28 +1,28 @@
 # Markda
 
-Write Markdown. See the result. Keep the source.
+Write Markdown in its rendered form. Keep the source exactly yours.
 
-Markda is a calm, source-preserving Markdown editor for VS Code Desktop. Write directly in a formatted document with headings, tasks, links, code, tables, math, diagrams, and images—while the file on disk remains ordinary Markdown.
+Markda is a calm, source-preserving Markdown editor for VS Code Desktop. Work directly in a formatted document—headings, tasks, links, tables, code, math, diagrams, and images—while the file on disk stays ordinary Markdown that works everywhere.
 
 > Markda 0.1 is a preview release. Keep important work under version control and report reproducible editing issues.
 
 [Report a bug](https://github.com/tetsuji16/Markda/issues) · [Release history](https://github.com/tetsuji16/Markda/blob/main/CHANGELOG.md) · [Sponsor Markda](https://github.com/sponsors/tetsuji16)
 
-## Write in place
+## Source-preserving by design
 
-![Markda showing formatted headings, tasks, a block quote, emphasis, and inline code in a clean writing view](media/screenshots/writing-view.png)
+![Markda rendering its specification in the live editor, with document scope and synchronization rules shown as formatted Markdown](media/screenshots/live-editing.png)
 
-Formatting stays readable while you write. Move between the live document and full Markdown source whenever you need to see the syntax.
+The VS Code text document remains the single source of truth. Markda applies focused edits to that document while preserving untouched content and Markdown syntax. Switch to full source whenever you want to inspect or change it directly.
 
-## Keep math close to the words
+## Render math and diagrams locally
 
-![Markda editing a math block in place while rendering inline and display equations](media/screenshots/math-editing.png)
+![Markda rendering inline and display math, a Mermaid flowchart, and a verification checklist](media/screenshots/math-editing.png)
 
-Click rendered math to edit its source in place. KaTeX output stays beside the text that explains it, and rendering runs locally.
+Keep equations, Mermaid diagrams, and surrounding instructions together in one document. Click rendered math or diagrams to edit their source in place; all rendering stays local.
 
 ## Highlights
 
-- Edit the supported CommonMark and Markda extension syntax in place—including reference links and images, footnotes, indented code, entities, and explicitly permitted HTML—or switch to the full source view.
+- Edit supported CommonMark and Markda extension syntax in place—including reference links and images, footnotes, indented code, entities, and explicitly permitted HTML—or switch to the full source view.
 - Use document-style paragraph breaks, smart HTML-to-Markdown paste, and modifier-click link opening.
 - Work with tables using direct cell editing, row and column controls, drag reordering, resizing, alignment, and Tab navigation.
 - Edit code blocks directly without opening source mode, with unified undo and redo behavior.
