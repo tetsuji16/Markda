@@ -19,13 +19,15 @@ import type {
   DocumentStatistics, EditorCommand, EditorSettings, EditorToHostMessage, Heading, HostToEditorMessage, TextChange,
 } from '../protocol.js';
 import { analyzeDocument, getStatistics } from '../statistics.js';
+import { findMinimalChange } from '../textChange.js';
 import {
   addTableColumn, addTableRow, alignTableColumn, deleteTableColumn, deleteTableRow,
   findMarkdownTable, serializeMarkdownTable, tableCursor, type MarkdownTable, type TableAlignment,
 } from '../table.js';
 import {
-  CompositionCommitGate, editablePlainText, historyShortcut, htmlFragmentToMarkdown, liveEnterEdit,
-  markdownPairDeletion, markdownPairEdit,
+  CompositionCommitGate, documentLineSeparator, editablePlainText, historyShortcut, htmlFragmentToMarkdown, liveEnterEdit,
+  markdownPairDeletion, markdownPairEdit, normalizeDocumentText, serializedDocumentOffset, serializeDocumentText,
+  type DocumentLineSeparator,
 } from './editorLogic.js';
 
 declare function acquireVsCodeApi<T = unknown>(): {
@@ -72,6 +74,9 @@ let syncedText = initialDocument?.text ?? '';
 let inFlightTransaction: string | undefined;
 let inFlightChanges: readonly TextChange[] | undefined;
 let pendingChanges: ChangeSet | undefined;
+let pendingBaseText: string | undefined;
+let pendingLineSeparator: DocumentLineSeparator | undefined;
+let lineSeparator = documentLineSeparator(syncedText);
 let sendTimer: number | undefined;
 let previewTimer: number | undefined;
 let derivedStateTimer: number | undefined;
@@ -114,16 +119,16 @@ function usesDarkColors(): boolean {
 
 function createSyntaxHighlightStyle(dark: boolean): HighlightStyle {
   return HighlightStyle.define([
-    { tag: [tags.meta, tags.comment], color: dark ? '#9da5b4' : '#57606a' },
+    { tag: [tags.meta, tags.comment], color: dark ? '#9da5b4' : '#777777' },
     { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: dark ? '#c586c0' : '#7f0055' },
     { tag: [tags.string, tags.special(tags.string), tags.regexp], color: dark ? '#ce9178' : '#a31515' },
     { tag: [tags.number, tags.bool, tags.null], color: dark ? '#b5cea8' : '#067d17' },
     { tag: [tags.typeName, tags.className, tags.namespace], color: dark ? '#4ec9b0' : '#1f6f85' },
     { tag: [tags.variableName, tags.propertyName, tags.labelName], color: dark ? '#9cdcfe' : '#001080' },
     { tag: [tags.definition(tags.variableName), tags.function(tags.variableName)], color: dark ? '#dcdcaa' : '#795e26' },
-    { tag: [tags.heading, tags.strong], color: dark ? '#569cd6' : '#0550ae', fontWeight: '700' },
+    { tag: [tags.heading, tags.strong], fontWeight: '700' },
     { tag: tags.emphasis, fontStyle: 'italic' },
-    { tag: [tags.link, tags.url], color: dark ? '#75beff' : '#0969da', textDecoration: 'underline' },
+    { tag: [tags.link, tags.url], color: dark ? '#75beff' : '#4183c4', textDecoration: 'underline' },
     { tag: tags.invalid, color: dark ? '#f48771' : '#cf222e' },
   ]);
 }
@@ -276,12 +281,16 @@ updateThemeToggleLabel();
 document.querySelector('#table-insert-confirm')?.addEventListener('click', () => insertTableFromDialog());
 view.dom.addEventListener('paste', (event) => void handlePaste(event));
 view.dom.addEventListener('drop', (event) => void receiveImageFiles(event.dataTransfer?.files, event));
-// Treat the initial CodeMirror selection as the active editing selection. A
-// subsequent focusout refreshes this flag so toolbar and widget focus cannot
-// leave stale Markdown source exposed.
-let livePreviewSelectionFocused = true;
+// CodeMirror creates a logical selection at position 0 even before the editor
+// receives focus. Only expose source syntax when that selection owns the
+// visible editing focus; otherwise the first line incorrectly looks active.
+let livePreviewSelectionFocused = view.dom.ownerDocument.activeElement === view.contentDOM;
 let editorFocusRefreshScheduled = false;
-const refreshAfterEditorFocusChange = () => {
+const refreshAfterEditorFocusChange = (event: FocusEvent) => {
+  // Widget clicks often focus the editor and move its selection in the same
+  // event turn. Make that selection active immediately, while leaving the
+  // decoration refresh deferred so it cannot interrupt CodeMirror's update.
+  if (event.type === 'focusin') livePreviewSelectionFocused = true;
   if (editorFocusRefreshScheduled) return;
   editorFocusRefreshScheduled = true;
   requestAnimationFrame(() => {
@@ -328,6 +337,11 @@ function onHostMessage(message: HostToEditorMessage): void {
       documentVersion = message.version;
       settings = message.settings;
       syncedText = message.text;
+      inFlightTransaction = undefined;
+      inFlightChanges = undefined;
+      pendingChanges = undefined;
+      pendingBaseText = undefined;
+      pendingLineSeparator = undefined;
       if (!replaceDocument(message.text)) scheduleDerivedStateUpdate();
       applySettings();
       return;
@@ -343,6 +357,8 @@ function onHostMessage(message: HostToEditorMessage): void {
         inFlightTransaction = undefined;
         inFlightChanges = undefined;
         pendingChanges = undefined;
+        pendingBaseText = undefined;
+        pendingLineSeparator = undefined;
         replaceDocument(message.text);
       }
       return;
@@ -359,7 +375,13 @@ function onHostMessage(message: HostToEditorMessage): void {
 
 function onEditorUpdate(update: ViewUpdate): void {
   if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(externalUpdate))) {
-    pendingChanges = pendingChanges ? pendingChanges.compose(update.changes) : update.changes;
+    if (pendingChanges) {
+      pendingChanges = pendingChanges.compose(update.changes);
+    } else {
+      pendingChanges = update.changes;
+      pendingBaseText = update.startState.doc.toString();
+      pendingLineSeparator = lineSeparator;
+    }
     scheduleEdit();
   }
   if (update.docChanged) {
@@ -388,11 +410,13 @@ function scheduleEdit(): void {
 }
 
 function flushEdit(): void {
-  if (inFlightTransaction || !pendingChanges) return;
+  if (inFlightTransaction || !pendingChanges || pendingBaseText === undefined || pendingLineSeparator === undefined) return;
   window.clearTimeout(sendTimer);
   sendTimer = undefined;
-  const changes = changeSetToTextChanges(pendingChanges);
+  const changes = changeSetToTextChanges(pendingChanges, pendingBaseText, pendingLineSeparator);
   pendingChanges = undefined;
+  pendingBaseText = undefined;
+  pendingLineSeparator = undefined;
   if (!changes.length) return;
   inFlightTransaction = `${documentVersion}:${crypto.randomUUID()}`;
   inFlightChanges = changes;
@@ -402,10 +426,16 @@ function flushEdit(): void {
   });
 }
 
-function changeSetToTextChanges(changes: ChangeSet): TextChange[] {
+function changeSetToTextChanges(
+  changes: ChangeSet, baseText: string, separator: DocumentLineSeparator,
+): TextChange[] {
   const result: TextChange[] = [];
   changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-    result.push({ from: fromA, to: toA, insert: inserted.toString() });
+    result.push({
+      from: serializedDocumentOffset(baseText, fromA, separator),
+      to: serializedDocumentOffset(baseText, toA, separator),
+      insert: serializeDocumentText(inserted.toString(), separator),
+    });
   });
   return result;
 }
@@ -433,11 +463,13 @@ function synchronizeBeforeSuspend(): void {
   flushActiveEditable();
   flushEdit();
   const expectedText = applyTextChanges(syncedText, inFlightChanges ?? []);
-  const text = view.state.doc.toString();
+  const text = serializeDocumentText(view.state.doc.toString(), lineSeparator);
   if (text !== expectedText) {
     // The final snapshot subsumes the unsent tail. Clearing it prevents the tail
     // from being submitted a second time if this hidden webview becomes active.
     pendingChanges = undefined;
+    pendingBaseText = undefined;
+    pendingLineSeparator = undefined;
     vscode.postMessage({ type: 'finalSync', uri: documentUri, expectedText, text });
   }
 }
@@ -446,19 +478,25 @@ function synchronizeAndSave(): void {
   flushActiveEditable();
   flushEdit();
   const expectedText = applyTextChanges(syncedText, inFlightChanges ?? []);
-  const text = view.state.doc.toString();
+  const text = serializeDocumentText(view.state.doc.toString(), lineSeparator);
   // This snapshot includes any tail that could not be posted while another
   // transaction was in flight. The host processes messages serially, applies
   // that tail if its expected base still matches, and only then writes to disk.
   pendingChanges = undefined;
+  pendingBaseText = undefined;
+  pendingLineSeparator = undefined;
   vscode.postMessage({ type: 'save', uri: documentUri, expectedText, text });
 }
 
 function replaceDocument(text: string): boolean {
-  if (view.state.doc.toString() === text) return false;
-  const position = Math.min(view.state.selection.main.head, text.length);
+  const currentText = view.state.doc.toString();
+  const normalizedText = normalizeDocumentText(text);
+  lineSeparator = documentLineSeparator(text);
+  if (currentText === normalizedText) return false;
+  const position = Math.min(view.state.selection.main.head, normalizedText.length);
+  const change = findMinimalChange(currentText, normalizedText);
   view.dispatch({
-    changes: { from: 0, to: view.state.doc.length, insert: text },
+    changes: change,
     selection: EditorSelection.cursor(position),
     // Host-side edits belong to VS Code's document history. Mapping them
     // through the local history keeps old positions valid without making
@@ -637,6 +675,14 @@ function applySettings(): void {
     renderPreview();
   }
 }
+
+new MutationObserver((mutations) => {
+  for (const mutation of mutations) {
+    if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+      applySettings();
+    }
+  }
+}).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
 function insertAtSelection(value: string): void {
   const selection = view.state.selection.main;
@@ -1426,8 +1472,14 @@ class ThematicBreakWidget extends WidgetType {
     rule.className = 'markda-thematic-break';
     rule.title = 'Horizontal rule';
     rule.addEventListener('click', () => {
+      livePreviewSelectionFocused = true;
       this.editor.dispatch({ selection: EditorSelection.cursor(this.from) });
       this.editor.focus();
+      requestAnimationFrame(() => {
+        if (this.editor.dom.isConnected) {
+          this.editor.dispatch({ selection: EditorSelection.cursor(this.from) });
+        }
+      });
     });
     return rule;
   }
@@ -1517,6 +1569,7 @@ class InlineImageWidget extends WidgetType {
     const edit = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
+      livePreviewSelectionFocused = true;
       this.editor.dispatch({ selection: EditorSelection.cursor(this.from + 2) });
       this.editor.focus();
     };
@@ -1545,6 +1598,7 @@ class FootnoteReferenceWidget extends WidgetType {
     const edit = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
+      livePreviewSelectionFocused = true;
       this.editor.dispatch({ selection: EditorSelection.cursor(this.from + 2) });
       this.editor.focus();
     };
@@ -1571,6 +1625,7 @@ class InlineHtmlWidget extends WidgetType {
     const edit = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
+      livePreviewSelectionFocused = true;
       this.editor.dispatch({ selection: EditorSelection.cursor(this.from + 1) });
       this.editor.focus();
     };
@@ -1595,6 +1650,7 @@ class EntityWidget extends WidgetType {
     value.title = 'Click to edit character entity';
     value.textContent = decodeHtmlEntity(this.source);
     const edit = () => {
+      livePreviewSelectionFocused = true;
       this.editor.dispatch({ selection: EditorSelection.cursor(this.from + 1) });
       this.editor.focus();
     };
@@ -2110,6 +2166,8 @@ class TableWidget extends WidgetType {
       return container;
     }
     const tableElement = document.createElement('table');
+    const tableHead = document.createElement('thead');
+    const tableBody = document.createElement('tbody');
     [this.table.header, ...this.table.rows].forEach((row, rowIndex) => {
       const tr = document.createElement('tr');
       tr.draggable = rowIndex > 0;
@@ -2199,8 +2257,9 @@ class TableWidget extends WidgetType {
         const source = Number(event.dataTransfer?.getData('application/x-markda-row'));
         if (Number.isInteger(source) && rowIndex > 0) this.moveRow(source, rowIndex - 1);
       });
-      tableElement.append(tr);
+      (rowIndex === 0 ? tableHead : tableBody).append(tr);
     });
+    tableElement.append(tableHead, tableBody);
     tableElement.querySelectorAll<HTMLTableCellElement>('th').forEach((header) => {
       header.addEventListener('dragstart', (event) => event.dataTransfer?.setData('application/x-markda-column', header.dataset.column ?? ''));
       header.addEventListener('dragover', (event) => event.preventDefault());
@@ -2277,11 +2336,17 @@ function runEditableHistoryShortcut(event: KeyboardEvent, editor: EditorView, fl
   // distant source line and make the document appear to jump on Ctrl+Z. Keep the
   // viewport where the user invoked Undo/Redo; the widget itself is rebuilt from
   // the restored Markdown above.
-  editor.scrollDOM.scrollTop = scrollTop;
-  editor.scrollDOM.scrollLeft = scrollLeft;
-  requestAnimationFrame(() => {
+  const restoreScroll = () => {
     editor.scrollDOM.scrollTop = scrollTop;
     editor.scrollDOM.scrollLeft = scrollLeft;
+  };
+  restoreScroll();
+  requestAnimationFrame(() => {
+    restoreScroll();
+    // A theme can change the restored widget's metrics. CodeMirror may finish
+    // measuring that replacement one frame later, so restore once more after
+    // its geometry update instead of allowing Undo to nudge the viewport.
+    requestAnimationFrame(restoreScroll);
   });
   return true;
 }
@@ -2367,6 +2432,7 @@ class MathWidget extends WidgetType {
       element.tabIndex = 0;
       const edit = () => {
         const position = Math.min(this.from! + 1, this.editor!.state.doc.length);
+        livePreviewSelectionFocused = true;
         this.editor!.dispatch({ selection: EditorSelection.cursor(position) });
         this.editor!.focus();
       };
@@ -2667,7 +2733,7 @@ function createLivePreviewPlugin() {
       // still needs a refresh when the caret enters or leaves a replaceable
       // block, but ordinary paragraph cursor movement must stay on the cheap path.
       if ((update.docChanged || modeChanged || refreshRequested
-        || (update.selectionSet && !this.pointerActive && selectionTouchesBlockCandidate(update)))
+        || ((update.selectionSet || settleRequested) && !this.pointerActive && selectionTouchesBlockCandidate(update)))
         && !this.applyingBlockRefresh && !this.blockRefreshQueued) {
         this.blockRefreshQueued = true;
         queueMicrotask(() => {
@@ -2754,7 +2820,16 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
         const task = text.match(/^(\s*[-+*]\s+)\[([ xX])\](\s+)/u);
         if (task) {
           const from = line.from + (task[1]?.length ?? 0);
-          decorations.push({ from, to: from + 3, decoration: Decoration.replace({ widget: new TaskWidget(editor, from, (task[2] ?? ' ') !== ' ') }) });
+          const expanded = selectionIntersectsBlock(selectionFrom, selectionTo, line.from, line.to);
+          if (!expanded) {
+            decorations.push({
+              from,
+              to: from + 3,
+              decoration: Decoration.replace({
+                widget: new TaskWidget(editor, from, (task[2] ?? ' ') !== ' '),
+              }),
+            });
+          }
         }
         if (heading) addMetaDecoration(decorations, line.from, line.from + heading[0].length,
           selectionIntersectsBlock(selectionFrom, selectionTo, line.from, line.to));
@@ -2802,6 +2877,9 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
 function buildBlockDecorations(editor: EditorView): DecorationSet {
   const decorations: { from: number; to?: number; decoration: Decoration }[] = [];
   const state = editor.state.field(modeField);
+  const selection = editor.state.selection.main;
+  const selectionFrom = livePreviewSelectionFocused ? selection.from : -1;
+  const selectionTo = livePreviewSelectionFocused ? selection.to : -1;
   let documentSource: string | undefined;
   if (state.sourceMode) return Decoration.none;
   let processedUntil = -1;
@@ -2892,11 +2970,13 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
       const thematicBreak = /^[ \t]{0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/u.test(text)
         && !(lineNumber > 1 && editor.state.doc.line(lineNumber - 1).text.trim() && /^[ \t]{0,3}-+[ \t]*$/u.test(text));
       if (thematicBreak) {
-        decorations.push({
-          from: line.from,
-          to: blockDecorationTo(editor.state, line.to),
-          decoration: Decoration.replace({ widget: new ThematicBreakWidget(editor, line.from), block: true }),
-        });
+        if (!selectionIntersectsBlock(selectionFrom, selectionTo, line.from, line.to)) {
+          decorations.push({
+            from: line.from,
+            to: blockDecorationTo(editor.state, line.to),
+            decoration: Decoration.replace({ widget: new ThematicBreakWidget(editor, line.from), block: true }),
+          });
+        }
         continue;
       }
       const inlineBlockMath = text.match(/^\s*\$\$(.+)\$\$\s*$/u);
@@ -3464,12 +3544,14 @@ function addMetaDecoration(
 
 function getStyles(): string { return String.raw`
 :root{
-  --markda-content-width:860px;--markda-bg:#fff;--markda-fg:#1a1a1a;--markda-muted:#57606a;
-  --markda-link:#0969da;--markda-link-hover:#0550ae;--markda-border:#d0d7de;
-  --markda-surface:#f6f8fa;--markda-surface-secondary:#eef2f6;--markda-elevated:#fff;
-  --markda-hover:#eaeef2;--markda-active:#dbeafe;--markda-selection:#add6ff;
-  --markda-line-highlight:#0969da14;--markda-find-highlight:#fff8c5;--markda-focus:#0969da;
-  --markda-cursor-color:#1a1a1a;--markda-cursor-shadow:transparent;--markda-accent:#0969da;--markda-error:#cf222e;
+  --markda-content-width:860px;--markda-font-body:"Open Sans","Clear Sans","Helvetica Neue",Helvetica,Arial,"Segoe UI","Yu Gothic UI","Hiragino Sans",sans-serif;
+  --markda-font-mono:var(--vscode-editor-font-family,Consolas,"Liberation Mono",monospace);
+  --markda-bg:#fff;--markda-fg:#333;--markda-muted:#777;
+  --markda-link:#4183c4;--markda-link-hover:#2f6f9f;--markda-border:#dfe2e5;
+  --markda-surface:#f8f8f8;--markda-inline-code:#f3f4f4;--markda-surface-secondary:#eef2f2;--markda-elevated:#fff;
+  --markda-hover:#eaeef2;--markda-active:#dbeafe;--markda-selection:#b5d6fc;
+  --markda-active-line:transparent;--markda-line-highlight:#0969da14;--markda-find-highlight:#fff8c5;--markda-focus:#0969da;
+  --markda-cursor-color:var(--markda-fg);--markda-accent:#0969da;--markda-error:#cf222e;
   --markda-error-bg:#ffebe9;--markda-info:#0969da;--markda-info-bg:#ddf4ff;
   --markda-tip:#1a7f37;--markda-tip-bg:#dafbe1;--markda-warning:#9a6700;--markda-warning-bg:#fff8c5;
   --markda-scrollbar-track:transparent;--markda-scrollbar-thumb:#1f232847;
@@ -3478,44 +3560,44 @@ function getStyles(): string { return String.raw`
 :root[data-markda-color-mode="dark"]{
   --markda-bg:#1e1e1e;--markda-fg:#d4d4d4;--markda-muted:#a8a8a8;
   --markda-link:#75beff;--markda-link-hover:#a6d5ff;--markda-border:#4a4a4a;
-  --markda-surface:#252526;--markda-surface-secondary:#2d2d30;--markda-elevated:#252526;
-  --markda-hover:#2a2d2e;--markda-active:#37373d;--markda-selection:#264f78;
-  --markda-line-highlight:#ffffff0f;--markda-find-highlight:#515c6a;--markda-focus:#007fd4;
-  --markda-cursor-color:#7dd3fc;--markda-cursor-shadow:#7dd3fcb3;--markda-accent:#7aa2f7;--markda-error:#f48771;
+  --markda-surface:#252526;--markda-inline-code:#252526;--markda-surface-secondary:#2d2d30;--markda-elevated:#252526;
+  --markda-hover:#2a2d2e;--markda-active:#37373d;--markda-selection:#4a89dc;
+  --markda-active-line:transparent;--markda-line-highlight:#ffffff0f;--markda-find-highlight:#515c6a;--markda-focus:#007fd4;
+  --markda-cursor-color:var(--markda-fg);--markda-accent:#7aa2f7;--markda-error:#f48771;
   --markda-error-bg:#3b1f23;--markda-info:#75beff;--markda-info-bg:#152b3c;
   --markda-tip:#89d185;--markda-tip-bg:#17351f;--markda-warning:#e2c08d;--markda-warning-bg:#352f15;
   --markda-scrollbar-thumb:#c8c8c866;--markda-scrollbar-thumb-hover:#c8c8c88c;--markda-scrollbar-thumb-active:#c8c8c8b3;
 }
-*{box-sizing:border-box;scrollbar-color:var(--markda-scrollbar-thumb) var(--markda-scrollbar-track);scrollbar-width:thin}
+*{box-sizing:border-box;scrollbar-color:var(--markda-scrollbar-thumb) var(--markda-scrollbar-track);scrollbar-width:thin}::selection{background:var(--markda-selection)}
 *::-webkit-scrollbar{width:10px;height:10px}*::-webkit-scrollbar-track{background:var(--markda-scrollbar-track)}
 *::-webkit-scrollbar-thumb{background:var(--markda-scrollbar-thumb);border:2px solid transparent;border-radius:8px;background-clip:padding-box}
 *::-webkit-scrollbar-thumb:hover{background-color:var(--markda-scrollbar-thumb-hover)}*::-webkit-scrollbar-thumb:active{background-color:var(--markda-scrollbar-thumb-active)}
 *::-webkit-scrollbar-corner{background:var(--markda-bg)}
-html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--markda-fg);background:var(--markda-bg);font-family:var(--vscode-font-family)}
+html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--markda-fg);background:var(--markda-bg);font-family:var(--markda-font-body);-webkit-font-smoothing:antialiased}
 .markda-link-text,.markda-source-link,#preview a{color:var(--markda-link);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}.markda-link-text:hover,#preview a:hover{color:var(--markda-link-hover)}
 .markda-meta{font-size:0!important;line-height:0!important;letter-spacing:0!important;color:transparent!important}.markda-meta.markda-meta-expanded{font-size:inherit!important;line-height:inherit!important;letter-spacing:inherit!important;color:var(--markda-muted)!important}
 .markda-list-bullet-source{font-size:0;color:var(--markda-muted)}.markda-list-bullet-source::after{content:'•';display:inline-block;min-width:.8em;font-size:var(--vscode-editor-font-size);font-weight:700;text-align:center}.markda-list-bullet-source.markda-meta-expanded{font-size:inherit;color:inherit}.markda-list-bullet-source.markda-meta-expanded::after{content:none}
 button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--markda-hover)}button.active{background:var(--markda-active)}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--markda-focus);outline-offset:2px}
 .markda-shell{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.markda-toolbar{min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--markda-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
 .table-toolbar{display:none;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
-.markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;line-height:1.65}.preview-visible #preview{display:block}
-.cm-editor{height:100%;min-height:100%;font-family:var(--vscode-editor-font-family);font-size:var(--vscode-editor-font-size);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:34px var(--markda-padding-x,24px) 90px;line-height:1.7}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-content{max-width:var(--markda-content-width);margin:0}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-activeLine{background-color:var(--markda-line-highlight)!important}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:0 0 4px 1px var(--markda-cursor-shadow)}.cm-selectionBackground{background:var(--markda-selection)!important}
-.markda-h1{font-size:2em;font-weight:650;line-height:1.25;margin-top:.7em}.markda-h2{font-size:1.55em;font-weight:650;line-height:1.3;margin-top:.6em;border-bottom:1px solid var(--markda-border)}.markda-h3{font-size:1.3em;font-weight:650}.markda-h4,.markda-h5,.markda-h6{font-weight:650}.markda-setext-marker{height:0;min-height:0;line-height:0;overflow:hidden}.markda-quote{border-left:4px solid var(--markda-border);padding-left:14px!important;color:var(--markda-muted)}.markda-list-marker{color:var(--markda-muted)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--markda-fg);font-weight:700;text-align:center}
-.markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-subscript{font-size:.78em;vertical-align:sub}.markda-superscript{font-size:.78em;vertical-align:super}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--vscode-editor-font-family);background:var(--markda-surface);padding:1px 4px;border-radius:3px}.markda-inline-math{padding:0 2px}.markda-inline-html,.markda-entity{cursor:pointer}.markda-inline-image{display:inline-flex;align-items:center;max-width:min(18em,70vw);max-height:4em;margin:0 .2em;padding:2px;border:1px solid transparent;border-radius:4px;vertical-align:middle;cursor:pointer}.markda-inline-image:hover{border-color:var(--markda-border)}.markda-inline-image img{display:block;max-width:100%;max-height:3.5em}.markda-inline-image-blocked{padding:1px 5px;color:var(--markda-muted);background:var(--markda-surface)}.markda-image-alt,.markda-footnote-source{color:var(--markda-muted)}.markda-footnote-reference{display:inline-block;min-width:1em;padding:0 2px;color:var(--markda-link);font-size:.75em;line-height:1;vertical-align:super;cursor:pointer}.markda-thematic-break{width:100%;height:0;margin:1em 0;border:0;border-top:1px solid var(--markda-border)}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3{font-size:inherit;font-weight:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
+.markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
+.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:16px;color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:30px var(--markda-padding-x,30px) 100px;line-height:1.6}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:1.6}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
+.markda-h1,.markda-h2,.markda-h3,.markda-h4,.markda-h5,.markda-h6{font-weight:700;margin-top:1rem;margin-bottom:1rem}.markda-h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}.markda-h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}.markda-h3{font-size:1.5em;line-height:1.43}.markda-h4{font-size:1.25em}.markda-h5{font-size:1em}.markda-h6{font-size:1em;color:var(--markda-muted)}.markda-setext-marker{height:0;min-height:0;line-height:0;overflow:hidden}.markda-quote{border-left:4px solid var(--markda-border);padding-left:15px!important;color:var(--markda-muted)}.markda-list-marker{color:var(--markda-muted)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--markda-fg);font-weight:700;text-align:center}
+.markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-subscript{font-size:.78em;vertical-align:sub}.markda-superscript{font-size:.78em;vertical-align:super}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--markda-font-mono);font-size:.9em;background:var(--markda-inline-code);padding:0 2px;border:1px solid color-mix(in srgb,var(--markda-border) 70%,transparent);border-radius:3px}.markda-inline-math{padding:0 2px}.markda-inline-html,.markda-entity{cursor:pointer}.markda-inline-image{display:inline-flex;align-items:center;max-width:min(18em,70vw);max-height:4em;margin:0 .2em;padding:2px;border:1px solid transparent;border-radius:4px;vertical-align:middle;cursor:pointer}.markda-inline-image:hover{border-color:var(--markda-border)}.markda-inline-image img{display:block;max-width:100%;max-height:3.5em}.markda-inline-image-blocked{padding:1px 5px;color:var(--markda-muted);background:var(--markda-surface)}.markda-image-alt,.markda-footnote-source{color:var(--markda-muted)}.markda-footnote-reference{display:inline-block;min-width:1em;padding:0 2px;color:var(--markda-link);font-size:.75em;line-height:1;vertical-align:super;cursor:pointer}.markda-thematic-break{width:100%;height:2px;margin:16px 0;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3,.source-mode .markda-h4,.source-mode .markda-h5,.source-mode .markda-h6{font-size:inherit;font-weight:inherit;line-height:inherit;color:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
 .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em;accent-color:var(--markda-accent)}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--markda-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{color:var(--markda-muted);text-align:center;font-size:.9em}
 .markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
 .markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-source-editor{display:block;width:100%;min-height:120px;resize:vertical;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
 .markda-footnote-definition{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;margin:.45em 0;padding:6px 9px;color:var(--markda-muted);background:var(--markda-surface);border-radius:4px}.markda-footnote-definition-content{min-height:1.5em;white-space:pre-wrap;outline:none}.markda-reference-definition{display:grid;grid-template-columns:minmax(7em,.5fr) auto minmax(10em,1fr) minmax(8em,.7fr);gap:6px;align-items:center;margin:.45em 0;padding:6px 9px;background:var(--markda-surface);border-radius:4px}.markda-reference-definition input{min-width:0;padding:4px 6px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}
 .markda-html-block{margin:.6em 0;padding:8px;outline:none;border:1px solid transparent;border-radius:4px}.markda-html-block:focus{border-color:var(--markda-border)}.markda-html-empty{color:var(--markda-muted);font-style:italic}
-.markda-live-code{margin:10px 0;max-width:100%;overflow:auto}.markda-live-code pre{margin:0;padding:14px;border-radius:5px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-code-rendered{padding:10px}
-.markda-trailing-paragraph{min-height:1.7em;margin-top:2px;border-radius:3px;cursor:text}.markda-trailing-paragraph:hover,.markda-trailing-paragraph:focus{background:var(--markda-line-highlight);outline:none}.markda-trailing-paragraph:focus::before{content:"";display:inline-block;height:1.35em;border-left:2px solid var(--markda-cursor-color);box-shadow:0 0 4px 1px var(--markda-cursor-shadow);vertical-align:middle}
-.markda-live-table-wrap{overflow:auto;margin:12px 0;color:var(--markda-fg)}.markda-live-table-wrap table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:7px 10px;min-width:70px;resize:horizontal;overflow:auto;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap th{background:var(--markda-surface)}.markda-live-table-wrap code{padding:1px 4px;color:var(--markda-fg);background:var(--markda-surface);border-radius:3px;font-family:var(--vscode-editor-font-family)}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
+.markda-live-code{margin:15px 0;max-width:100%;overflow:auto;font-family:var(--markda-font-mono);font-size:.9em}.markda-live-code pre{margin:0;padding:8px 4px 6px;border:1px solid var(--markda-border);border-radius:3px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-code-rendered{padding:10px}
+.markda-trailing-paragraph{min-height:1.7em;margin-top:2px;border-radius:3px;cursor:text}.markda-trailing-paragraph:hover,.markda-trailing-paragraph:focus{background:var(--markda-line-highlight);outline:none}.markda-trailing-paragraph:focus::before{content:"";display:inline-block;height:1.35em;border-left:2px solid var(--markda-cursor-color);box-shadow:none;vertical-align:middle}
+.markda-live-table-wrap{overflow:auto;margin:.8em 0;color:var(--markda-fg)}.markda-live-table-wrap table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap tbody tr:nth-child(2n){background:var(--markda-surface)}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:6px 13px;min-width:70px;resize:horizontal;overflow:auto;color:var(--markda-fg);background:transparent}.markda-live-table-wrap th{font-weight:700;background:var(--markda-surface)}.markda-live-table-wrap th:focus-visible,.markda-live-table-wrap td:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--markda-focus)}.markda-live-table-wrap code{padding:0 2px;color:var(--markda-fg);background:var(--markda-inline-code);border:1px solid var(--markda-border);border-radius:3px;font-family:var(--markda-font-mono);font-size:.9em}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
 .markda-callout{margin:12px 0;padding:12px 16px;border-radius:6px;border-left:4px solid;background:var(--markda-surface)}.markda-callout-title{font-weight:600;margin-bottom:4px}.markda-callout-content{color:var(--markda-fg)}.markda-callout-edit{margin-top:8px;font-size:11px;padding:2px 8px;opacity:0}.markda-callout:hover .markda-callout-edit{opacity:1}
 .markda-callout-note{border-color:var(--markda-info);background:var(--markda-info-bg)}.markda-callout-note .markda-callout-title{color:var(--markda-info)}.markda-callout-tip{border-color:var(--markda-tip);background:var(--markda-tip-bg)}.markda-callout-tip .markda-callout-title{color:var(--markda-tip)}
 .markda-callout-important,.markda-callout-warning{border-color:var(--markda-warning);background:var(--markda-warning-bg)}.markda-callout-important .markda-callout-title,.markda-callout-warning .markda-callout-title{color:var(--markda-warning)}.markda-callout-caution{border-color:var(--markda-error);background:var(--markda-error-bg)}.markda-callout-caution .markda-callout-title{color:var(--markda-error)}
 dialog{color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:260px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:76px;padding:5px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
 body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
-#preview{color:var(--markda-fg);background:var(--markda-bg)}#preview h1,#preview h2,#preview h3{color:var(--markda-fg);line-height:1.25;margin-top:1.5em}#preview h2{border-bottom:1px solid var(--markda-border);padding-bottom:.25em}#preview pre{overflow:auto;padding:14px;color:var(--markda-fg);background:var(--markda-surface);border-radius:5px}#preview code{font-family:var(--vscode-editor-font-family);color:var(--markda-fg)}#preview :not(pre)>code{padding:1px 4px;background:var(--markda-surface);border-radius:3px}#preview pre code{padding:0;color:var(--markda-fg);background:transparent}#preview blockquote{margin-left:0;padding-left:1em;color:var(--markda-muted);background:transparent;border-left:4px solid var(--markda-border)}#preview blockquote p{color:inherit}#preview table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 10px;color:var(--markda-fg);background:var(--markda-bg)}#preview th{background:var(--markda-surface)}#preview input{accent-color:var(--markda-accent)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
+#preview{color:var(--markda-fg);background:var(--markda-bg)}#preview h1,#preview h2,#preview h3,#preview h4,#preview h5,#preview h6{position:relative;margin:1rem 0;color:var(--markda-fg);font-weight:700;line-height:1.4}#preview h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}#preview h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}#preview h3{font-size:1.5em;line-height:1.43}#preview h4{font-size:1.25em}#preview h5{font-size:1em}#preview h6{font-size:1em;color:var(--markda-muted)}#preview p,#preview blockquote,#preview ul,#preview ol,#preview dl,#preview table{margin:.8em 0}#preview ul,#preview ol{padding-left:30px}#preview li>ul,#preview li>ol{margin:0}#preview hr{box-sizing:content-box;height:2px;margin:16px 0;padding:0;overflow:hidden;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}#preview pre{overflow:auto;margin:15px 0;padding:8px 4px 6px;color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);border-radius:3px}#preview code{font-family:var(--markda-font-mono);font-size:.9em;color:var(--markda-fg)}#preview :not(pre)>code{padding:0 2px;background:var(--markda-inline-code);border:1px solid var(--markda-border);border-radius:3px}#preview pre code{padding:0;color:var(--markda-fg);background:transparent;border:0}#preview blockquote{padding:0 15px;color:var(--markda-muted);background:transparent;border-left:4px solid var(--markda-border)}#preview blockquote p{color:inherit}#preview table{border-collapse:collapse;width:100%;padding:0;color:var(--markda-fg);background:var(--markda-bg);word-break:initial}#preview tr:nth-child(2n),#preview thead{background:var(--markda-surface)}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 13px;color:var(--markda-fg);background:transparent}#preview th{font-weight:700}#preview input{accent-color:var(--markda-accent)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
 @media(max-width:760px){.markda-toolbar button span:not(.math-icon){display:none}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}}
   @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 `; }

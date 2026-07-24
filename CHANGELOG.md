@@ -2,6 +2,12 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.10 - 2026-07-24
+
+- Preserved CRLF and CR-only document separators when synchronizing live-editor changes, preventing edits from drifting after line breaks.
+- Loaded workspace Markdown files only when the Files view is first opened, reducing activation work while keeping the view current after file changes.
+- Improved keyboard editing, theme, and cursor regression coverage for the live editor.
+
 ## 0.1.9 - 2026-07-24
 
 - Added writing and math-editing screenshots to the GitHub and Marketplace introduction.

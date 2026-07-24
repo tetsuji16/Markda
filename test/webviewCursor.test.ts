@@ -330,6 +330,35 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     expect(view.dom.textContent).not.toContain('***');
   });
 
+  it('exposes thematic-break and task Markdown while their lines are being edited', async () => {
+    vi.resetModules();
+    const text = ['Before', '', '___', '', '- [ ] Task', '', 'After'].join('\n');
+    setupEditor(text);
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    expect(view.dom.querySelector('.markda-thematic-break')).not.toBeNull();
+    expect(view.dom.querySelector('.markda-task-checkbox')).not.toBeNull();
+
+    view.dom.querySelector<HTMLElement>('.markda-thematic-break')!.click();
+    await tick();
+    expect(view.state.selection.main.head).toBe(text.indexOf('___'));
+    expect(view.dom.querySelector('.markda-thematic-break')).toBeNull();
+    expect(view.dom.textContent).toContain('___');
+
+    const taskFrom = text.indexOf('- [ ] Task');
+    view.dispatch({ selection: { anchor: taskFrom + 6 } });
+    await tick();
+    expect(view.dom.querySelector('.markda-task-checkbox')).toBeNull();
+    expect(view.dom.textContent).toContain('[ ] Task');
+
+    view.dispatch({ selection: { anchor: text.indexOf('After') } });
+    await tick();
+    expect(view.dom.querySelector('.markda-thematic-break')).not.toBeNull();
+    expect(view.dom.querySelector('.markda-task-checkbox')).not.toBeNull();
+  });
+
   it('renders the remaining supported inline Markdown forms in live view', async () => {
     vi.resetModules();
     setupEditor('_emphasis_ H~2~O x^2^ <https://example.com>');
@@ -464,19 +493,17 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     await tick();
 
     const view = __getEditorView();
+    view.contentDOM.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
     const boldFrom = text.indexOf('bold');
     view.dispatch({ selection: { anchor: boldFrom, head: boldFrom + 4 } });
-    await tick();
     expect(view.dom.querySelectorAll('.markda-meta-expanded')).toHaveLength(2);
 
     const mathFrom = text.indexOf('x^2');
     view.dispatch({ selection: { anchor: mathFrom, head: mathFrom + 3 } });
-    await tick();
     expect(view.dom.querySelector('.markda-inline-math-source')).not.toBeNull();
     expect(view.dom.querySelectorAll('.markda-meta-expanded')).toHaveLength(2);
 
     view.dispatch({ selection: { anchor: text.length } });
-    await tick();
     expect(view.dom.querySelector('.markda-meta-expanded')).toBeNull();
     expect(view.dom.querySelector('.markda-inline-math-source')).toBeNull();
     expect(view.dom.querySelector('.markda-inline-math')).not.toBeNull();
@@ -523,6 +550,11 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     await tick();
 
     const view = __getEditorView();
+    expect(view.state.selection.main.head).toBe(0);
+    expect(view.dom.querySelector('.markda-meta-expanded')).toBeNull();
+
+    view.focus();
+    await tick();
     expect(view.state.selection.main.head).toBe(0);
     expect(view.dom.querySelector('.markda-meta')).not.toBeNull();
     expect(view.dom.querySelector('.markda-meta-expanded')?.textContent).toBe('# ');
@@ -672,9 +704,9 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     vi.resetModules();
     setupEditor('Open [Markda](https://example.com) now.');
     const { __getEditorView } = await import('../src/webview/main.js');
-    await tick();
-
     const view = __getEditorView();
+    view.focus();
+    await tick();
     view.dispatch({ selection: { anchor: 12 } });
     await tick();
 

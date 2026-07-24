@@ -12,14 +12,22 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
   private filter = '';
   private recent: vscode.Uri[];
   private current = '';
+  private hasFetched = false;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.recent = context.globalState.get<string[]>('markda.recentFiles', []).map((value) => vscode.Uri.parse(value));
   }
 
   async refresh(): Promise<void> {
+    this.hasFetched = true;
     this.files = await vscode.workspace.findFiles(markdownPattern, '**/{node_modules,.git}/**', 5000);
     this.rebuild();
+  }
+
+  notifyFileChanges(): void {
+    if (this.hasFetched) {
+      void this.refresh();
+    }
   }
 
   setFilter(value: string): void {
@@ -35,7 +43,10 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
   }
 
   getTreeItem(element: Node): vscode.TreeItem { return element; }
-  getChildren(element?: Node): Node[] { return element instanceof FolderItem ? element.children : element ? [] : this.roots; }
+  async getChildren(element?: Node): Promise<Node[]> {
+    if (!this.hasFetched) await this.refresh();
+    return element instanceof FolderItem ? element.children : element ? [] : this.roots;
+  }
 
   private rebuild(): void {
     const root = new FolderItem('', '');

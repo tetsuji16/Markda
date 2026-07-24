@@ -35,8 +35,8 @@ describe('live Markdown webview', () => {
     expect(editor.querySelector('.markda-strong')?.textContent).toBe('Output');
     expect(editor.querySelector('.markda-link-text')?.textContent).toBe('GitHub Issues');
     expect(editor.querySelectorAll('.markda-meta')).toHaveLength(5);
-    const expanded = Array.from(editor.querySelectorAll<HTMLElement>('.markda-meta-expanded'));
-    expect(expanded).toHaveLength(1);
-    expect(expanded[0]?.textContent).toBe('# ');
+    // A logical CodeMirror selection exists before the editor is focused, but
+    // it must not expose Markdown source syntax on initial render.
+    expect(editor.querySelectorAll('.markda-meta-expanded')).toHaveLength(0);
   });
 });

@@ -33,6 +33,39 @@ export function markdownPairDeletion(source: string, position: number, math: boo
 
 export type HistoryShortcut = 'undo' | 'redo';
 
+export type DocumentLineSeparator = '\n' | '\r\n' | '\r';
+
+/**
+ * CodeMirror represents every line break as one logical `\n`, whereas VS Code
+ * text-document offsets count the actual file separator (two UTF-16 code units
+ * for CRLF). Keep that boundary explicit so edits do not drift after the first
+ * line of a CRLF document.
+ */
+export function documentLineSeparator(text: string): DocumentLineSeparator {
+  const match = text.match(/\r\n|\r|\n/u)?.[0];
+  return match === '\r\n' || match === '\r' ? match : '\n';
+}
+
+export function normalizeDocumentText(text: string): string {
+  return text.replace(/\r\n|\r/gu, '\n');
+}
+
+export function serializeDocumentText(text: string, separator: DocumentLineSeparator): string {
+  return separator === '\n' ? text : text.replace(/\n/gu, separator);
+}
+
+export function serializedDocumentOffset(
+  normalizedText: string, logicalOffset: number, separator: DocumentLineSeparator,
+): number {
+  const safeOffset = Math.max(0, Math.min(logicalOffset, normalizedText.length));
+  if (separator.length === 1) return safeOffset;
+  let lineBreaks = 0;
+  for (let index = normalizedText.indexOf('\n'); index >= 0 && index < safeOffset; index = normalizedText.indexOf('\n', index + 1)) {
+    lineBreaks++;
+  }
+  return safeOffset + lineBreaks * (separator.length - 1);
+}
+
 /**
  * Recognizes document-history shortcuts used while focus is inside one of the
  * live preview's contenteditable widgets. IME composition owns its keystrokes,
