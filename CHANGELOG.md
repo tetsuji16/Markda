@@ -2,6 +2,11 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.11 - 2026-07-25
+
+- Replaced the GitHub and Marketplace screenshots with current live-editor examples covering basic editing, tables, math, Mermaid diagrams, and the verification workflow.
+- Updated the README introduction to match the new screenshots and describe direct editing and local rendering more clearly.
+
 ## 0.1.10 - 2026-07-24
 
 - Preserved CRLF and CR-only document separators when synchronizing live-editor changes, preventing edits from drifting after line breaks.
