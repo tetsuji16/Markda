@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { ExportService } from './exportService.js';
+import type { ExportService } from './exportService.js';
 import { MarkdaEditorProvider } from './editorProvider.js';
 import { FileProvider } from './fileProvider.js';
 import { OutlineProvider } from './outlineProvider.js';
@@ -18,7 +18,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 80);
   status.command = 'markda.showStatistics';
   const editor = new MarkdaEditorProvider(context, outline, status, (uri) => files.recordOpen(uri));
-  const exporter = new ExportService();
+  let exporter: ExportService | undefined;
+  async function getExporter(): Promise<ExportService> {
+    if (!exporter) {
+      const module = await import('./exportService.js');
+      exporter = new module.ExportService();
+    }
+    return exporter;
+  }
 
   context.subscriptions.push(
     editor,
@@ -29,9 +36,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.window.registerTreeDataProvider('markda.outline', outline),
     vscode.window.registerTreeDataProvider('markda.files', files),
-    vscode.workspace.onDidCreateFiles(() => void files.refresh()),
-    vscode.workspace.onDidDeleteFiles(() => void files.refresh()),
-    vscode.workspace.onDidRenameFiles(() => void files.refresh()),
+    vscode.workspace.onDidCreateFiles(() => files.notifyFileChanges()),
+    vscode.workspace.onDidDeleteFiles(() => files.notifyFileChanges()),
+    vscode.workspace.onDidRenameFiles(() => files.notifyFileChanges()),
     register('markda.open', async (uri?: vscode.Uri) => openWithMarkda(uri, files)),
     register('markda.newFile', () => createMarkdownFile(files)),
     register('markda.duplicate', () => duplicateDocument(editor.getActiveDocument(), files)),
@@ -65,15 +72,14 @@ export function activate(context: vscode.ExtensionContext): void {
     register('markda.clearFormatting', () => editor.sendCommand('clearFormatting')),
     register('markda.focusHeading', (heading: Heading) => editor.sendCommand('focusHeading', heading)),
     register('markda.showStatistics', () => showStatistics(editor.getActiveDocument())),
-    register('markda.exportHtml', () => exportActive(editor, exporter, true)),
-    register('markda.exportHtmlBare', () => exportActive(editor, exporter, false)),
+    register('markda.exportHtml', async () => exportActive(editor, await getExporter(), true)),
+    register('markda.exportHtmlBare', async () => exportActive(editor, await getExporter(), false)),
     register('markda.exportWithPrevious', async () => {
       const document = editor.getActiveDocument();
-      if (document) await exporter.exportPrevious(document);
+      if (document) await (await getExporter()).exportPrevious(document);
     }),
     register('markda.openThemeFolder', () => openThemeFolder(context)),
   );
-  void files.refresh();
 }
 
 export function deactivate(): void {}

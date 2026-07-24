@@ -2,6 +2,9 @@
 
 import { userEvent } from '@vitest/browser/context';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  documentLineSeparator, normalizeDocumentText, serializeDocumentText,
+} from '../src/webview/editorLogic.js';
 
 import welcome from '../docs/showcase/01-welcome.md?raw';
 import taskBoard from '../docs/showcase/02-task-board.md?raw';
@@ -46,9 +49,11 @@ async function settle(): Promise<void> {
 }
 
 function latestEdit(postMessage: ReturnType<typeof vi.fn>):
-{ type: string; transactionId?: string } | undefined {
+{ type: string; transactionId?: string; changes?: Array<{ from: number; to: number; insert: string }> } | undefined {
   return postMessage.mock.calls
-    .map(([message]) => message as { type: string; transactionId?: string })
+    .map(([message]) => message as {
+      type: string; transactionId?: string; changes?: Array<{ from: number; to: number; insert: string }>;
+    })
     .reverse()
     .find((message) => message.type === 'edit');
 }
@@ -105,11 +110,15 @@ describe('showcase Markdown editing in Chromium', { timeout: 60_000 }, () => {
 
       const addition = '\n\nScreenshot check.';
       await userEvent.keyboard(addition);
-      expect(view.state.doc.toString(), fileName).toBe(`${original}${addition}`);
+      const normalizedOriginal = normalizeDocumentText(original);
+      const serializedAddition = serializeDocumentText(addition, documentLineSeparator(original));
+      expect(view.state.doc.toString(), fileName).toBe(`${normalizedOriginal}${addition}`);
       await vi.waitFor(() => expect(latestEdit(postMessage), fileName).toBeTruthy());
 
       const edit = latestEdit(postMessage);
       expect(edit?.transactionId, fileName).toBeTruthy();
+      expect(edit?.changes?.[0]?.from, `${fileName} edit offset`).toBe(original.length);
+      expect(edit?.changes?.[0]?.to, `${fileName} edit offset`).toBe(original.length);
       window.dispatchEvent(new MessageEvent('message', {
         data: {
           type: 'documentChanged',
@@ -121,16 +130,16 @@ describe('showcase Markdown editing in Chromium', { timeout: 60_000 }, () => {
       await userEvent.keyboard('{Control>}s{/Control}');
       expect(postMessage.mock.calls.at(-1)?.[0], fileName).toMatchObject({
         type: 'save',
-        expectedText: `${original}${addition}`,
-        text: `${original}${addition}`,
+        expectedText: `${original}${serializedAddition}`,
+        text: `${original}${serializedAddition}`,
       });
 
       postMessage.mockClear();
       await userEvent.keyboard('{Control>}z{/Control}');
-      expect(view.state.doc.toString(), fileName).toBe(`${original}\n`);
+      expect(view.state.doc.toString(), fileName).toBe(`${normalizedOriginal}\n`);
 
       await userEvent.keyboard('{Control>}z{/Control}');
-      expect(view.state.doc.toString(), fileName).toBe(original);
+      expect(view.state.doc.toString(), fileName).toBe(normalizedOriginal);
       window.dispatchEvent(new MessageEvent('message', {
         data: {
           type: 'documentChanged',

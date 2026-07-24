@@ -1,8 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  CompositionCommitGate, domFragmentToMarkdown, historyShortcut, liveEnterEdit,
-  markdownPairDeletion, markdownPairEdit,
+  CompositionCommitGate, documentLineSeparator, domFragmentToMarkdown, historyShortcut, liveEnterEdit,
+  markdownPairDeletion, markdownPairEdit, normalizeDocumentText, serializedDocumentOffset, serializeDocumentText,
 } from '../src/webview/editorLogic.js';
+
+describe('document line endings', () => {
+  it('round-trips LF, CRLF, and legacy CR documents through the normalized editor model', () => {
+    for (const source of ['one\ntwo', 'one\r\ntwo', 'one\rtwo']) {
+      const separator = documentLineSeparator(source);
+      expect(serializeDocumentText(normalizeDocumentText(source), separator)).toBe(source);
+    }
+  });
+
+  it('maps logical CodeMirror offsets to serialized CRLF offsets', () => {
+    const text = 'one\ntwo\nthree';
+    expect(serializedDocumentOffset(text, 0, '\r\n')).toBe(0);
+    expect(serializedDocumentOffset(text, 4, '\r\n')).toBe(5);
+    expect(serializedDocumentOffset(text, 8, '\r\n')).toBe(10);
+    expect(serializedDocumentOffset(text, text.length, '\r\n')).toBe(text.length + 2);
+  });
+});
 
 describe('historyShortcut', () => {
   const shortcut = (key: string, overrides: Partial<KeyboardEvent> = {}) => historyShortcut({
