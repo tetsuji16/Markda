@@ -49,6 +49,15 @@ function documentCharacterRect(view: ReturnType<typeof import('../src/webview/ma
   return new DOMRect(coordinates.left, coordinates.top, Math.max(1, coordinates.right - coordinates.left), coordinates.bottom - coordinates.top);
 }
 
+function renderedLineAt(
+  view: ReturnType<typeof import('../src/webview/main.js')['__getEditorView']>, position: number,
+): Element {
+  const point = view.domAtPos(position);
+  const line = (point.node instanceof Element ? point.node : point.node.parentElement)?.closest('.cm-line');
+  if (!line) throw new Error(`No rendered line at document position ${position}`);
+  return line;
+}
+
 describe('live Markdown pointer geometry in Chromium', () => {
   it('keeps normal and wrapped text under the pointer across block re-layout and scrolling', async () => {
     document.body.innerHTML = '<div id="app"></div>';
@@ -96,9 +105,44 @@ describe('live Markdown pointer geometry in Chromium', () => {
       expect(Math.abs(caretTop - documentCharacterRect(view, position).top)).toBeLessThanOrEqual(2);
     };
 
+    const thematicSource = ['Before', '', '___', '', 'After'].join('\n');
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: thematicSource },
+      selection: { anchor: 0 },
+    });
+    await settle();
+    const thematicBreak = view.dom.querySelector<HTMLElement>('.markda-thematic-break')!;
+    const ruleRect = thematicBreak.getBoundingClientRect();
+    const ruleX = ruleRect.left + ruleRect.width / 2;
+    const ruleY = ruleRect.top + ruleRect.height / 2;
+    thematicBreak.dispatchEvent(new MouseEvent('mousedown', {
+      bubbles: true, cancelable: true, button: 0, buttons: 1, detail: 1, clientX: ruleX, clientY: ruleY,
+    }));
+    window.dispatchEvent(new MouseEvent('mouseup', {
+      bubbles: true, cancelable: true, button: 0, detail: 1, clientX: ruleX, clientY: ruleY,
+    }));
+    thematicBreak.dispatchEvent(new MouseEvent('click', {
+      bubbles: true, cancelable: true, button: 0, detail: 1, clientX: ruleX, clientY: ruleY,
+    }));
+    await settle();
+    expect(view.state.selection.main.head).toBe(thematicSource.indexOf('___'));
+    expect(view.dom.querySelector('.markda-thematic-break')).toBeNull();
+    expect(view.dom.textContent).toContain('___');
+
+    const afterPosition = thematicSource.indexOf('After') + 2;
+    await clickPosition(afterPosition, renderedLineAt(view, afterPosition));
+    expect(view.dom.querySelector('.markda-thematic-break')).not.toBeNull();
+    expect(view.dom.textContent).not.toContain('___');
+
+    const ordinaryDocument = ['First ordinary paragraph.', 'Second ordinary paragraph.', 'Third ordinary paragraph.'].join('\n');
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: ordinaryDocument },
+      selection: { anchor: 0 },
+    });
+    await settle();
     const ordinaryPosition = view.state.doc.line(2).from + 7;
-    const ordinaryLine = view.contentDOM.querySelectorAll('.cm-line')[1]!;
-    await clickPosition(ordinaryPosition, ordinaryLine, 7);
+    const ordinaryLine = renderedLineAt(view, ordinaryPosition);
+    await clickPosition(ordinaryPosition, ordinaryLine);
 
     const inlineDocument = ['Before **bold** and [Link](https://example.com) after.', 'Destination line.'].join('\n');
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: inlineDocument }, selection: { anchor: 0 } });
@@ -109,8 +153,8 @@ describe('live Markdown pointer geometry in Chromium', () => {
     expect(view.dom.querySelectorAll('.markda-meta-expanded')).toHaveLength(2);
 
     const destinationPosition = inlineDocument.indexOf('Destination') + 4;
-    const destinationLine = view.contentDOM.querySelectorAll('.cm-line')[1]!;
-    await clickPosition(destinationPosition, destinationLine, 4);
+    const destinationLine = renderedLineAt(view, destinationPosition);
+    await clickPosition(destinationPosition, destinationLine);
     expect(view.dom.querySelector('.markda-meta-expanded')).toBeNull();
     expect(view.dom.querySelector('.markda-strong')?.textContent).toBe('bold');
 

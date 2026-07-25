@@ -416,6 +416,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       type: 'initialize', uri: view.document.uri.toString(),
       resourceBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(view.document.uri, '..')).toString()}/`,
       themeBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.globalStorageUri, 'themes')).toString()}/`,
+      assetBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist')).toString()}/`,
       version: view.document.version,
       text: view.document.getText(), settings: getEditorSettings(view.document.uri, this.themeMode),
     };

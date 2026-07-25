@@ -3,7 +3,10 @@ import { rm } from 'node:fs/promises';
 
 const watch = process.argv.includes('--watch');
 if (!watch) await rm(new URL('./dist/chunks', import.meta.url), { recursive: true, force: true });
-const common = { bundle: true, sourcemap: true, minify: false, logLevel: 'info' };
+// Keep watch builds readable, but ship compact bundles. The webview is loaded in
+// a fresh renderer the first time a Markdown file opens, so parse/compile cost is
+// directly visible as editor startup latency.
+const common = { bundle: true, sourcemap: true, minify: !watch, logLevel: 'info' };
 const builds = [
   {
     ...common,
@@ -29,6 +32,14 @@ const builds = [
     outfile: 'dist/katexLoader.js',
     platform: 'browser',
     format: 'esm',
+  },
+  {
+    ...common,
+    entryPoints: ['src/webview/katex.css'],
+    outfile: 'dist/katex.css',
+    platform: 'browser',
+    loader: { '.ttf': 'file', '.woff': 'file', '.woff2': 'file' },
+    assetNames: '[name]',
   },
   {
     ...common,

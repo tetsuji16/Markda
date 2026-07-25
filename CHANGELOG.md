@@ -2,6 +2,13 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.14 - 2026-07-25
+
+- Rendered paragraph soft breaks as spaces in live mode while preserving explicit hard breaks and block boundaries.
+- Loaded KaTeX styles on demand and minified production bundles to improve editor startup performance.
+- Matched block math and Mermaid source editors to their rendered height and expanded them as content grows.
+- Improved pointer-driven block refreshes and added Chromium regression coverage for cursor placement and live-editor layout.
+
 ## 0.1.13 - 2026-07-25
 
 - Removed the math and diagrams feature section from the Marketplace introduction.
