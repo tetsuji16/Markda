@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "A source-preserving live Markdown editor for VS Code: edit formatted Markdown in place while keeping ordinary, portable Markdown files.",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "publisher": "tetsuji16",
   "license": "MIT",
   "homepage": "https://github.com/tetsuji16/Markda#readme",
@@ -485,7 +485,11 @@
         "markda.editor.themeMode": {
           "type": "string",
           "default": "auto",
-          "enum": ["auto", "light", "dark"],
+          "enum": [
+            "auto",
+            "light",
+            "dark"
+          ],
           "enumDescriptions": [
             "Follow the VS Code color theme automatically.",
             "Always use the light editor theme.",

@@ -50,17 +50,27 @@ describe('rendered math and Mermaid editing in Chromium', () => {
 
     view.dispatch({ selection: { anchor: 0 } });
     await settle();
-    view.dom.querySelector<HTMLElement>('.markda-block-math')!.click();
+    const renderedMath = view.dom.querySelector<HTMLElement>('.markda-block-math')!;
+    renderedMath.style.height = '80px';
+    const renderedMathHeight = renderedMath.getBoundingClientRect().height;
+    renderedMath.click();
     const blockSource = view.dom.querySelector<HTMLTextAreaElement>('.markda-block-math-wrap .markda-block-source-editor')!;
     expect(blockSource.hidden).toBe(false);
+    expect(blockSource.getBoundingClientRect().height).toBeCloseTo(renderedMathHeight, 0);
+
+    blockSource.value = Array.from({ length: 12 }, (_, index) => `x_${index}^2`).join('\n');
+    blockSource.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    expect(blockSource.getBoundingClientRect().height).toBeGreaterThan(renderedMathHeight);
 
     view.contentDOM.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     await settle();
     const mermaid = view.dom.querySelector<HTMLElement>('[data-markda-renderer="mermaid"]')!;
+    const mermaidHeight = mermaid.getBoundingClientRect().height;
     mermaid.click();
     const mermaidSource = mermaid.parentElement!.querySelector<HTMLTextAreaElement>('.markda-block-source-editor')!;
     expect(mermaidSource.hidden).toBe(false);
     expect(document.activeElement).toBe(mermaidSource);
+    expect(Math.abs(mermaidSource.getBoundingClientRect().height - mermaidHeight)).toBeLessThanOrEqual(1);
 
     mermaidSource.value = 'graph TD; A-->C';
     mermaidSource.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));

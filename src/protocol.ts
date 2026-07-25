@@ -24,7 +24,16 @@ export interface EditorSettings {
 }
 
 export type HostToEditorMessage =
-  | { type: 'initialize'; uri: string; resourceBaseUri: string; themeBaseUri: string; version: number; text: string; settings: EditorSettings }
+  | {
+      type: 'initialize';
+      uri: string;
+      resourceBaseUri: string;
+      themeBaseUri: string;
+      assetBaseUri?: string;
+      version: number;
+      text: string;
+      settings: EditorSettings;
+    }
   | { type: 'documentChanged'; version: number; sourceTransactionId: string }
   | { type: 'documentChanged'; version: number; text: string; sourceTransactionId?: undefined }
   | { type: 'command'; command: EditorCommand; payload?: unknown }

@@ -8,7 +8,6 @@ import { Decoration, drawSelection, EditorView, highlightActiveLine, keymap, Vie
 import { tags } from '@lezer/highlight';
 import DOMPurify from 'dompurify';
 import { decodeHTML } from 'entities';
-import 'katex/dist/katex.css';
 import MarkdownIt from 'markdown-it';
 import footnote from 'markdown-it-footnote';
 import mark from 'markdown-it-mark';
@@ -69,6 +68,7 @@ const modeField = StateField.define<ViewState>({
 let documentUri = initialDocument?.uri ?? '';
 let resourceBaseUri = initialDocument?.resourceBaseUri ?? '';
 let themeBaseUri = initialDocument?.themeBaseUri ?? '';
+let assetBaseUri = initialDocument?.assetBaseUri ?? '';
 let documentVersion = initialDocument?.version ?? 0;
 let syncedText = initialDocument?.text ?? '';
 let inFlightTransaction: string | undefined;
@@ -84,6 +84,7 @@ let previewRenderVersion = 0;
 let clientRenderer: MarkdownIt | undefined;
 let mermaidPromise: Promise<typeof import('mermaid')['default']> | undefined;
 let katexPromise: Promise<typeof import('katex')['default']> | undefined;
+let katexStylesPromise: Promise<void> | undefined;
 let katexInstance: typeof import('katex')['default'] | undefined;
 let cachedDocumentText = '';
 let cachedTable: MarkdownTable | undefined;
@@ -182,6 +183,7 @@ document.querySelectorAll<HTMLButtonElement>('button[title]').forEach((button) =
 document.querySelectorAll<HTMLElement>('.toolbar-separator').forEach((separator) => separator.setAttribute('aria-hidden', 'true'));
 
 const setBlockDecorations = StateEffect.define<DecorationSet>();
+const setSoftBreakDecorations = StateEffect.define<DecorationSet>();
 
 /**
  * Block-level live-preview widgets (tables, fenced code blocks, images) live here
@@ -194,6 +196,17 @@ const blockDecorationsField = StateField.define<DecorationSet>({
   update(value, transaction) {
     for (const effect of transaction.effects) {
       if (effect.is(setBlockDecorations)) return effect.value;
+    }
+    return transaction.docChanged ? value.map(transaction.changes) : value;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+const softBreakDecorationsField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setSoftBreakDecorations)) return effect.value;
     }
     return transaction.docChanged ? value.map(transaction.changes) : value;
   },
@@ -224,6 +237,7 @@ const view = new EditorView({
       highlightActiveLine(),
       createLivePreviewPlugin(),
       blockDecorationsField,
+      softBreakDecorationsField,
       EditorView.updateListener.of(onEditorUpdate),
       Prec.high(EditorView.domEventHandlers({
         mousedown(event, editor) {
@@ -334,6 +348,7 @@ function onHostMessage(message: HostToEditorMessage): void {
       documentUri = message.uri;
       resourceBaseUri = message.resourceBaseUri;
       themeBaseUri = message.themeBaseUri;
+      assetBaseUri = message.assetBaseUri ?? '';
       documentVersion = message.version;
       settings = message.settings;
       syncedText = message.text;
@@ -1347,10 +1362,35 @@ function prepareMarkdownForPreview(source: string): string {
 }
 
 function loadKatex(): Promise<typeof import('katex')['default']> {
-  return katexPromise ??= import('./katexLoader.js').then((module) => {
+  return katexPromise ??= Promise.all([
+    import('./katexLoader.js'),
+    assetBaseUri
+      ? loadStylesheet(`${assetBaseUri}katex.css`, 'markda-katex-styles')
+      : Promise.resolve(),
+  ]).then(([module]) => {
     katexInstance = module.api;
     return module.api;
   });
+}
+
+function loadStylesheet(href: string, id: string): Promise<void> {
+  if (id === 'markda-katex-styles' && katexStylesPromise) return katexStylesPromise;
+  const promise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLLinkElement>(`#${id}`);
+    if (existing?.sheet) {
+      resolve();
+      return;
+    }
+    const link = existing ?? document.createElement('link');
+    link.id = id;
+    link.rel = 'stylesheet';
+    link.addEventListener('load', () => resolve(), { once: true });
+    link.addEventListener('error', () => reject(new Error(`Unable to load stylesheet: ${href}`)), { once: true });
+    link.href = href;
+    if (!existing) document.head.append(link);
+  });
+  if (id === 'markda-katex-styles') katexStylesPromise = promise;
+  return promise;
 }
 
 async function renderKatexInto(element: HTMLElement, source: string, displayMode: boolean): Promise<void> {
@@ -1485,6 +1525,16 @@ class ThematicBreakWidget extends WidgetType {
   }
   ignoreEvent(event: Event): boolean { return event.type !== 'click'; }
   eq(other: ThematicBreakWidget): boolean { return other.from === this.from; }
+}
+
+class SoftBreakWidget extends WidgetType {
+  toDOM(): HTMLElement {
+    const space = document.createElement('span');
+    space.className = 'markda-soft-break';
+    space.textContent = ' ';
+    space.setAttribute('aria-hidden', 'true');
+    return space;
+  }
 }
 
 class TrailingParagraphWidget extends WidgetType {
@@ -2538,6 +2588,7 @@ function createBlockSourceEditor(editor: EditorView, source: string, commit: (va
   const input = document.createElement('textarea');
   input.className = 'markda-block-source-editor';
   input.value = source;
+  input.rows = 1;
   input.spellcheck = false;
   input.setAttribute('aria-label', 'Block Markdown source');
   const gate = new CompositionCommitGate();
@@ -2572,6 +2623,38 @@ function bindWidgetEditor(
   editor: EditorView, input: HTMLElement, rendered: HTMLElement, boundary: HTMLElement,
 ): { toggle: () => void; dispose: () => void } {
   let listeningForOutsidePointer = false;
+  let renderedHeight = 0;
+  const blockSourceEditor = input instanceof HTMLTextAreaElement
+    && input.classList.contains('markda-block-source-editor') ? input : undefined;
+  const resizeBlockSourceEditor = () => {
+    if (!blockSourceEditor || blockSourceEditor.hidden) return;
+    // Chromium keeps textarea.scrollHeight at its native two-row minimum even
+    // when rows=1. A short-lived mirror gives us the actual wrapped source
+    // height, including trailing blank lines, without that artificial floor.
+    const styles = getComputedStyle(blockSourceEditor);
+    const mirror = document.createElement('div');
+    mirror.style.position = 'fixed';
+    mirror.style.visibility = 'hidden';
+    mirror.style.pointerEvents = 'none';
+    mirror.style.boxSizing = 'border-box';
+    mirror.style.width = `${blockSourceEditor.getBoundingClientRect().width}px`;
+    mirror.style.padding = styles.padding;
+    mirror.style.border = styles.border;
+    mirror.style.font = styles.font;
+    mirror.style.lineHeight = styles.lineHeight;
+    mirror.style.letterSpacing = styles.letterSpacing;
+    mirror.style.whiteSpace = 'pre-wrap';
+    mirror.style.overflowWrap = 'break-word';
+    mirror.style.tabSize = styles.tabSize;
+    mirror.textContent = `${blockSourceEditor.value}\u200b`;
+    document.body.append(mirror);
+    const sourceHeight = mirror.getBoundingClientRect().height;
+    mirror.remove();
+    const height = `${Math.ceil(Math.max(renderedHeight, sourceHeight))}px`;
+    blockSourceEditor.style.height = height;
+    blockSourceEditor.style.maxHeight = height;
+    editor.requestMeasure();
+  };
   const stopListeningForOutsidePointer = () => {
     if (!listeningForOutsidePointer) return;
     document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
@@ -2593,13 +2676,16 @@ function bindWidgetEditor(
     if (!boundary.contains(document.activeElement)) close();
   });
   boundary.addEventListener('focusout', closeAfterFocusLeaves);
+  blockSourceEditor?.addEventListener('input', resizeBlockSourceEditor);
   const toggle = () => {
     if (!input.hidden) {
       close();
       return;
     }
+    renderedHeight = rendered.getBoundingClientRect().height;
     input.hidden = false;
     rendered.hidden = true;
+    resizeBlockSourceEditor();
     const focusTarget = input.matches('input,textarea,select,[contenteditable="true"]')
       ? input
       : input.querySelector<HTMLElement>('input,textarea,select,[contenteditable="true"]');
@@ -2611,6 +2697,7 @@ function bindWidgetEditor(
   const dispose = () => {
     stopListeningForOutsidePointer();
     boundary.removeEventListener('focusout', closeAfterFocusLeaves);
+    blockSourceEditor?.removeEventListener('input', resizeBlockSourceEditor);
   };
   return { toggle, dispose };
 }
@@ -2732,8 +2819,11 @@ function createLivePreviewPlugin() {
       // Block widget contents do not depend on the outer selection. CodeMirror
       // still needs a refresh when the caret enters or leaves a replaceable
       // block, but ordinary paragraph cursor movement must stay on the cheap path.
-      if ((update.docChanged || modeChanged || refreshRequested
-        || ((update.selectionSet || settleRequested) && !this.pointerActive && selectionTouchesBlockCandidate(update)))
+      // A pointer gesture freezes decorations while its selection changes, so its
+      // settle transaction must always rebuild: by then startState no longer
+      // contains the line the pointer left and cannot identify that block itself.
+      if ((update.docChanged || modeChanged || refreshRequested || settleRequested
+        || (update.selectionSet && !this.pointerActive && selectionTouchesBlockCandidate(update)))
         && !this.applyingBlockRefresh && !this.blockRefreshQueued) {
         this.blockRefreshQueued = true;
         queueMicrotask(() => {
@@ -2741,7 +2831,14 @@ function createLivePreviewPlugin() {
           if (!update.view.dom.isConnected) return;
           this.applyingBlockRefresh = true;
           try {
-            update.view.dispatch({ effects: setBlockDecorations.of(buildBlockDecorations(update.view)) });
+            update.view.dispatch({
+              effects: [
+                setBlockDecorations.of(buildBlockDecorations(update.view)),
+                ...(update.docChanged || modeChanged || refreshRequested
+                  ? [setSoftBreakDecorations.of(buildSoftBreakDecorations(update.view))]
+                  : []),
+              ],
+            });
             update.view.requestMeasure();
           } finally {
             this.applyingBlockRefresh = false;
@@ -2763,8 +2860,8 @@ function isBlockCandidateLine(line: string): boolean {
 }
 
 function buildInlineDecorations(editor: EditorView): DecorationSet {
-  const decorations: { from: number; to?: number; decoration: Decoration }[] = [];
   const state = editor.state.field(modeField);
+  const decorations: { from: number; to?: number; decoration: Decoration }[] = [];
   const selection = editor.state.selection.main;
   // A blurred editor keeps its last logical selection. Source markers should be
   // exposed only while that selection still owns the visible editing focus.
@@ -2866,6 +2963,54 @@ function buildInlineDecorations(editor: EditorView): DecorationSet {
     }
   }
   return Decoration.set(decorations.map((item) => item.decoration.range(item.from, item.to ?? item.from)), true);
+}
+
+/**
+ * CommonMark treats a single newline inside a paragraph as a space. Replace
+ * those source-only soft breaks in live mode so prose hard-wrapped by another
+ * editor can use the full available width. Blank lines, hard breaks, and
+ * structural block boundaries remain visible.
+ */
+function buildSoftBreakDecorations(
+  editor: EditorView,
+): DecorationSet {
+  const mode = editor.state.field(modeField);
+  if (mode.sourceMode || settings.markdown.breaks) return Decoration.none;
+  const decorations: { from: number; to: number; decoration: Decoration }[] = [];
+  const tree = syntaxTree(editor.state);
+  for (let lineNumber = 1; lineNumber < editor.state.doc.lines; lineNumber++) {
+    const line = editor.state.doc.line(lineNumber);
+    const next = editor.state.doc.line(lineNumber + 1);
+    if (!line.text.trim() || !next.text.trim() || /(?: {2,}|\\)$/u.test(line.text)) continue;
+
+    const leftParagraph = paragraphRangeAt(tree, line.to, -1);
+    const rightParagraph = paragraphRangeAt(tree, next.from, 1);
+    if (!leftParagraph || !rightParagraph
+      || leftParagraph.from !== rightParagraph.from || leftParagraph.to !== rightParagraph.to) continue;
+
+    const paragraphSource = editor.state.sliceDoc(leftParagraph.from, leftParagraph.to);
+    // Display-math blocks are implemented outside the Markdown grammar and can
+    // otherwise look like one ordinary multi-line paragraph to Lezer.
+    if (/^\s*\$\$\s*$/mu.test(paragraphSource)) continue;
+
+    decorations.push({
+      from: line.to,
+      to: next.from,
+      decoration: Decoration.replace({ widget: new SoftBreakWidget() }),
+    });
+  }
+  return Decoration.set(decorations.map((item) => item.decoration.range(item.from, item.to)), true);
+}
+
+function paragraphRangeAt(
+  tree: ReturnType<typeof syntaxTree>, position: number, side: -1 | 1,
+): { from: number; to: number } | undefined {
+  let node = tree.resolveInner(position, side);
+  for (;;) {
+    if (node.name === 'Paragraph') return { from: node.from, to: node.to };
+    if (!node.parent) return undefined;
+    node = node.parent;
+  }
 }
 
 /**
@@ -3005,7 +3150,9 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
           const to = editor.state.doc.line(endLine).to;
           // Always render the block math as a widget so the raw $$ delimiters
           // and source are never shown alongside the rendered formula.
-          const source = editor.state.sliceDoc(line.to + 1, editor.state.doc.line(endLine).from);
+          const closingLine = editor.state.doc.line(endLine);
+          const contentRange = codeContentRange(editor.state, line.to, closingLine.from);
+          const source = editor.state.sliceDoc(contentRange.from, contentRange.to);
           decorations.push({ from, to: blockDecorationTo(editor.state, to), decoration: Decoration.replace({ widget: new MathWidget(source, true, editor, from), block: true }) });
           processedUntil = to + 1;
           continue;
@@ -3583,10 +3730,10 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
 .cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:16px;color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:30px var(--markda-padding-x,30px) 100px;line-height:1.6}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:1.6}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
 .markda-h1,.markda-h2,.markda-h3,.markda-h4,.markda-h5,.markda-h6{font-weight:700;margin-top:1rem;margin-bottom:1rem}.markda-h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}.markda-h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}.markda-h3{font-size:1.5em;line-height:1.43}.markda-h4{font-size:1.25em}.markda-h5{font-size:1em}.markda-h6{font-size:1em;color:var(--markda-muted)}.markda-setext-marker{height:0;min-height:0;line-height:0;overflow:hidden}.markda-quote{border-left:4px solid var(--markda-border);padding-left:15px!important;color:var(--markda-muted)}.markda-list-marker{color:var(--markda-muted)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--markda-fg);font-weight:700;text-align:center}
-.markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-subscript{font-size:.78em;vertical-align:sub}.markda-superscript{font-size:.78em;vertical-align:super}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--markda-font-mono);font-size:.9em;background:var(--markda-inline-code);padding:0 2px;border:1px solid color-mix(in srgb,var(--markda-border) 70%,transparent);border-radius:3px}.markda-inline-math{padding:0 2px}.markda-inline-html,.markda-entity{cursor:pointer}.markda-inline-image{display:inline-flex;align-items:center;max-width:min(18em,70vw);max-height:4em;margin:0 .2em;padding:2px;border:1px solid transparent;border-radius:4px;vertical-align:middle;cursor:pointer}.markda-inline-image:hover{border-color:var(--markda-border)}.markda-inline-image img{display:block;max-width:100%;max-height:3.5em}.markda-inline-image-blocked{padding:1px 5px;color:var(--markda-muted);background:var(--markda-surface)}.markda-image-alt,.markda-footnote-source{color:var(--markda-muted)}.markda-footnote-reference{display:inline-block;min-width:1em;padding:0 2px;color:var(--markda-link);font-size:.75em;line-height:1;vertical-align:super;cursor:pointer}.markda-thematic-break{width:100%;height:2px;margin:16px 0;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3,.source-mode .markda-h4,.source-mode .markda-h5,.source-mode .markda-h6{font-size:inherit;font-weight:inherit;line-height:inherit;color:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
+.markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-subscript{font-size:.78em;vertical-align:sub}.markda-superscript{font-size:.78em;vertical-align:super}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--markda-font-mono);font-size:.9em;background:var(--markda-inline-code);padding:0 2px;border:1px solid color-mix(in srgb,var(--markda-border) 70%,transparent);border-radius:3px}.markda-soft-break{white-space:pre}.markda-inline-math{padding:0 2px}.markda-inline-html,.markda-entity{cursor:pointer}.markda-inline-image{display:inline-flex;align-items:center;max-width:min(18em,70vw);max-height:4em;margin:0 .2em;padding:2px;border:1px solid transparent;border-radius:4px;vertical-align:middle;cursor:pointer}.markda-inline-image:hover{border-color:var(--markda-border)}.markda-inline-image img{display:block;max-width:100%;max-height:3.5em}.markda-inline-image-blocked{padding:1px 5px;color:var(--markda-muted);background:var(--markda-surface)}.markda-image-alt,.markda-footnote-source{color:var(--markda-muted)}.markda-footnote-reference{display:inline-block;min-width:1em;padding:0 2px;color:var(--markda-link);font-size:.75em;line-height:1;vertical-align:super;cursor:pointer}.markda-thematic-break{width:100%;height:2px;margin:16px 0;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3,.source-mode .markda-h4,.source-mode .markda-h5,.source-mode .markda-h6{font-size:inherit;font-weight:inherit;line-height:inherit;color:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
 .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em;accent-color:var(--markda-accent)}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--markda-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{color:var(--markda-muted);text-align:center;font-size:.9em}
 .markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
-.markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-source-editor{display:block;width:100%;min-height:120px;resize:vertical;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
+.markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-source-editor{display:block;width:100%;min-height:0;overflow-y:hidden;resize:none;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
 .markda-footnote-definition{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;margin:.45em 0;padding:6px 9px;color:var(--markda-muted);background:var(--markda-surface);border-radius:4px}.markda-footnote-definition-content{min-height:1.5em;white-space:pre-wrap;outline:none}.markda-reference-definition{display:grid;grid-template-columns:minmax(7em,.5fr) auto minmax(10em,1fr) minmax(8em,.7fr);gap:6px;align-items:center;margin:.45em 0;padding:6px 9px;background:var(--markda-surface);border-radius:4px}.markda-reference-definition input{min-width:0;padding:4px 6px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}
 .markda-html-block{margin:.6em 0;padding:8px;outline:none;border:1px solid transparent;border-radius:4px}.markda-html-block:focus{border-color:var(--markda-border)}.markda-html-empty{color:var(--markda-muted);font-style:italic}
 .markda-live-code{margin:15px 0;max-width:100%;overflow:auto;font-family:var(--markda-font-mono);font-size:.9em}.markda-live-code pre{margin:0;padding:8px 4px 6px;border:1px solid var(--markda-border);border-radius:3px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-code-rendered{padding:10px}
@@ -3612,6 +3759,3 @@ if (initialDocument) {
   scheduleDerivedStateUpdate();
 }
 vscode.postMessage({ type: 'ready' });
-loadKatex().then(() => {
-  view.dispatch({ effects: refreshLivePreview.of(null) });
-});

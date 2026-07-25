@@ -25,11 +25,18 @@ describe('live Markdown initialization in Chromium', () => {
       uri: 'file:///initialization.md',
       resourceBaseUri: 'http://localhost/',
       themeBaseUri: 'http://localhost/',
+      assetBaseUri: '/src/webview/',
       version: 1,
       text: [
         '# Live preview',
         '',
         'Destination line.',
+        '',
+        'Hard-wrapped prose should use',
+        'the remaining editor width.',
+        '',
+        'Explicit hard break.  ',
+        'Next visual line.',
         '',
         'Markdown: **bold text**',
         '',
@@ -69,6 +76,25 @@ describe('live Markdown initialization in Chromium', () => {
     expect(document.querySelector('.markda-inline-math')).not.toBeNull();
     expect(document.querySelector('.markda-live-table-wrap')).not.toBeNull();
     expect(document.querySelector('.markda-live-code')).not.toBeNull();
+
+    const textRect = (text: string): DOMRect => {
+      const walker = document.createTreeWalker(view.contentDOM, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const offset = node.textContent?.indexOf(text) ?? -1;
+        if (offset < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, offset);
+        range.setEnd(node, offset + 1);
+        return range.getBoundingClientRect();
+      }
+      throw new Error(`Unable to find rendered text: ${text}`);
+    };
+    const wrappedFirst = textRect('Hard-wrapped');
+    const wrappedSecond = textRect('the remaining');
+    expect(document.querySelectorAll('.markda-soft-break')).toHaveLength(1);
+    expect(Math.abs(wrappedFirst.top - wrappedSecond.top)).toBeLessThanOrEqual(2);
+    expect(wrappedSecond.left).toBeGreaterThan(wrappedFirst.left);
+    expect(Math.abs(textRect('Explicit hard break.').top - textRect('Next visual line.').top)).toBeGreaterThan(2);
 
     const accessibleMath = await waitForElement('.markda-inline-math .katex-mathml');
     const visualMath = await waitForElement('.markda-inline-math .katex-html');
