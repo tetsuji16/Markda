@@ -14,12 +14,6 @@ Markda is a calm, source-preserving Markdown editor for VS Code Desktop. Work di
 
 The VS Code text document remains the single source of truth. Markda applies focused edits to that document while preserving untouched content and Markdown syntax. Switch to full source whenever you want to inspect or change it directly.
 
-## Render math and diagrams locally
-
-![Markda rendering inline and display math, a Mermaid flowchart, and a verification checklist](media/screenshots/math-editing.png)
-
-Keep equations, Mermaid diagrams, and surrounding instructions together in one document. Click rendered math or diagrams to edit their source in place; all rendering stays local.
-
 ## Highlights
 
 - Edit supported CommonMark and Markda extension syntax in place—including reference links and images, footnotes, indented code, entities, and explicitly permitted HTML—or switch to the full source view.
