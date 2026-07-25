@@ -2,6 +2,10 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.13 - 2026-07-25
+
+- Removed the math and diagrams feature section from the Marketplace introduction.
+
 ## 0.1.12 - 2026-07-25
 
 - Refreshed the Marketplace introduction and specification-view screenshot to emphasize source-preserving Markdown editing.
