@@ -4,6 +4,12 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.18 - 2026-07-26
+
+- Preserved all live Markdown editing improvements while consolidating them on the latest `main` release line.
+- Removed full-document string allocation from Markdown delimiter pairing and empty-pair deletion.
+- Classified live-preview refresh effects in one pass on the latency-sensitive editing path.
+
 ## 0.1.17 - 2026-07-26
 
 - Added same-document and cross-document heading anchors plus source-preserving `[toc]` widgets.
