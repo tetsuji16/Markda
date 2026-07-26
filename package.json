@@ -128,6 +128,17 @@
         "category": "markda"
       },
       {
+        "command": "markda.reopenWith",
+        "title": "%command.reopenWith%",
+        "category": "markda",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "markda.configureFileAssociations",
+        "title": "%command.configureAssociations%",
+        "category": "markda"
+      },
+      {
         "command": "markda.newFile",
         "title": "%command.new%",
         "category": "markda"
@@ -307,6 +318,16 @@
         "category": "markda"
       },
       {
+        "command": "markda.exportPdf",
+        "title": "%command.exportPdf%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.exportExternal",
+        "title": "%command.exportExternal%",
+        "category": "markda"
+      },
+      {
         "command": "markda.exportWithPrevious",
         "title": "%command.exportPrevious%",
         "category": "markda"
@@ -320,14 +341,24 @@
     "menus": {
       "editor/title": [
         {
+          "command": "markda.reopenWith",
+          "when": "activeCustomEditorId == markda.editor",
+          "group": "navigation@1"
+        },
+        {
           "command": "markda.toggleSourceMode",
           "when": "activeCustomEditorId == markda.editor",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "markda.exportHtml",
           "when": "activeCustomEditorId == markda.editor",
-          "group": "navigation"
+          "group": "navigation@3"
+        },
+        {
+          "command": "markda.exportPdf",
+          "when": "activeCustomEditorId == markda.editor",
+          "group": "navigation@4"
         }
       ],
       "view/title": [
@@ -579,6 +610,44 @@
           "default": false,
           "scope": "resource"
         },
+        "markda.export.pdfBrowserPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Path to Microsoft Edge, Google Chrome, or Chromium for PDF export. Markda detects common installation locations automatically."
+        },
+        "markda.export.targets": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "description": "Trusted external export commands. Variables: ${source}, ${destination}, ${documentDir}, ${documentName}, ${workspaceFolder}.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "command"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "extension": {
+                "type": "string",
+                "description": "Output extension such as docx. Leave empty for commands without an output file."
+              }
+            }
+          }
+        },
         "markda.security.allowRemoteResources": {
           "type": "string",
           "enum": [
@@ -610,12 +679,14 @@
     "entities": "^4.5.0",
     "katex": "^0.16.22",
     "markdown-it": "^14.1.0",
+    "markdown-it-emoji": "^3.1.0",
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-mark": "^4.0.0",
     "markdown-it-sub": "^2.0.0",
     "markdown-it-sup": "^2.0.0",
     "markdown-it-task-lists": "^2.1.1",
-    "mermaid": "^11.7.0"
+    "mermaid": "^11.7.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",

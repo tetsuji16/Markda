@@ -19,4 +19,24 @@ describe('Markdown renderer', () => {
     expect(extractTitle('text\n# Project\n', 'fallback')).toBe('Project');
     expect(extractTitle('text', 'fallback')).toBe('fallback');
   });
+
+  it('renders heading anchors, a live TOC, emoji, and numbered math', () => {
+    const output = createMarkdownRenderer().render([
+      '# Start',
+      '',
+      '[toc]',
+      '',
+      'Ready :rocket: and $\\ref{energy}$.',
+      '',
+      '$$',
+      'E=mc^2\\label{energy}',
+      '$$',
+    ].join('\n'));
+    expect(output).toContain('<h1 id="start">');
+    expect(output).toContain('class="markda-toc"');
+    expect(output).toContain('href="#start"');
+    expect(output).toContain('🚀');
+    expect(output).toContain('tag');
+    expect(output).not.toContain('\\label{energy}');
+  });
 });

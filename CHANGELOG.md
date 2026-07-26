@@ -2,6 +2,14 @@
 
 All notable changes to Markda are documented in this file.
 
+## Unreleased
+
+- Added same-document and cross-document heading anchors plus source-preserving `[toc]` widgets.
+- Added lazily loaded YAML Front Matter fields and full emoji-shortcode rendering.
+- Added syntax-highlighted editable code blocks, labeled equation numbering, and `\ref` / `\eqref` resolution.
+- Mapped VS Code diagnostics into the live editor.
+- Added PDF export through Edge, Chrome, or Chromium and Workspace Trust-aware external export targets without shell execution.
+
 ## 0.1.16 - 2026-07-26
 
 - Added localized extension metadata and in-editor UI for Arabic, German, Spanish, French, Japanese, Korean, Brazilian Portuguese, Russian, Simplified Chinese, and Traditional Chinese.

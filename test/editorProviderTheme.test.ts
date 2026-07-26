@@ -27,6 +27,10 @@ vi.mock('vscode', () => ({
   window: {
     onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
   },
+  languages: {
+    onDidChangeDiagnostics: vi.fn(() => ({ dispose: vi.fn() })),
+    getDiagnostics: vi.fn(() => []),
+  },
   Uri: {
     joinPath: vi.fn((base: { toString(): string }, ...parts: string[]) => ({
       toString: () => `${base.toString()}/${parts.join('/')}`,

@@ -1,13 +1,14 @@
 import { isRtlLocale } from './localization.js';
 
-export function createHtmlDocument(title: string, body: string, locale = 'en'): string {
+export function createHtmlDocument(title: string, body: string, locale = 'en', additionalCss = '', baseHref = ''): string {
   return `<!doctype html>
 <html lang="${escapeHtml(locale)}" dir="${isRtlLocale(locale) ? 'rtl' : 'ltr'}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+${baseHref ? `<base href="${escapeHtml(baseHref)}">` : ''}
 <title>${escapeHtml(title)}</title>
-<style>${exportCss}</style>
+<style>${exportCss}${additionalCss}</style>
 </head>
 <body><main class="markda-export">${body}</main></body>
 </html>\n`;

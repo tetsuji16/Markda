@@ -39,7 +39,8 @@ export type HostToEditorMessage =
   | { type: 'documentChanged'; version: number; sourceTransactionId: string }
   | { type: 'documentChanged'; version: number; text: string; sourceTransactionId?: undefined }
   | { type: 'command'; command: EditorCommand; payload?: unknown }
-  | { type: 'configurationChanged'; settings: EditorSettings };
+  | { type: 'configurationChanged'; settings: EditorSettings }
+  | { type: 'diagnosticsChanged'; diagnostics: readonly EditorDiagnostic[] };
 
 export type EditorCommand =
   | 'toggleSourceMode'
@@ -66,7 +67,16 @@ export type EditorCommand =
   | 'clearFormatting'
   | 'replaceImageSource'
   | 'removeImageSource'
-  | 'focusHeading';
+  | 'focusHeading'
+  | 'focusAnchor';
+
+export interface EditorDiagnostic {
+  from: number;
+  to: number;
+  severity: 'error' | 'warning' | 'information' | 'hint';
+  message: string;
+  source?: string;
+}
 
 export type EditorToHostMessage =
   | {

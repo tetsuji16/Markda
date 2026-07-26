@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
-import { areValidTextChanges, decodeImageSource, parseEditorToHostMessage, type EditorCommand, type EditorToHostMessage, type HostToEditorMessage, type TextChange } from './protocol.js';
+import { areValidTextChanges, decodeImageSource, parseEditorToHostMessage, type EditorCommand, type EditorDiagnostic, type EditorToHostMessage, type HostToEditorMessage, type TextChange } from './protocol.js';
 import { getEditorSettings, getThemeMode } from './settings.js';
 import { getStatistics } from './statistics.js';
 import { findMinimalChange } from './textChange.js';
@@ -38,6 +38,13 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       }),
       vscode.window.onDidChangeActiveTextEditor(() => this.refreshStatus()),
     );
+    const languageApi = (vscode as typeof vscode & { languages?: typeof vscode.languages }).languages;
+    if (languageApi) {
+      this.disposables.push(languageApi.onDidChangeDiagnostics((event) => {
+        const changed = new Set(event.uris.map((uri) => uri.toString()));
+        for (const view of this.views) if (changed.has(view.document.uri.toString())) this.postDiagnostics(view);
+      }));
+    }
   }
 
   async resolveCustomTextEditor(
@@ -107,6 +114,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
         // recreated from older HTML, so always reconcile it with the current
         // in-memory settings when command messaging becomes live again.
         this.postSettings(view);
+        this.postDiagnostics(view);
         this.refreshStatus();
         return;
       case 'edit':
@@ -368,7 +376,13 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       await vscode.env.openExternal(vscode.Uri.parse(href));
       return;
     }
-    const target = vscode.Uri.joinPath(documentUri, '..', href.split('#')[0] ?? href);
+    const [pathPart = '', fragment] = href.split('#', 2);
+    if (!pathPart && fragment) {
+      const current = [...this.views].find((view) => view.document.uri.toString() === documentUri.toString());
+      if (current) this.post(current, { type: 'command', command: 'focusAnchor', payload: { fragment } });
+      return;
+    }
+    const target = vscode.Uri.joinPath(documentUri, '..', pathPart);
     if (target.scheme !== 'file') {
       void vscode.window.showWarningMessage(vscode.l10n.t('markda: Only local file links can be opened.'));
       return;
@@ -379,7 +393,25 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       void vscode.window.showWarningMessage(vscode.l10n.t('markda: Links outside the workspace cannot be opened.'));
       return;
     }
-    await vscode.commands.executeCommand('vscode.open', target);
+    await vscode.commands.executeCommand('vscode.openWith', target, MarkdaEditorProvider.viewType);
+    if (fragment) {
+      const opened = [...this.views].find((view) => view.document.uri.fsPath === target.fsPath);
+      if (opened) this.post(opened, { type: 'command', command: 'focusAnchor', payload: { fragment } });
+    }
+  }
+
+  private postDiagnostics(view: EditorView): void {
+    const languageApi = (vscode as typeof vscode & { languages?: typeof vscode.languages }).languages;
+    const diagnostics: EditorDiagnostic[] = (languageApi?.getDiagnostics(view.document.uri) ?? [])
+      .slice(0, 2_000)
+      .map((diagnostic) => ({
+        from: view.document.offsetAt(diagnostic.range.start),
+        to: view.document.offsetAt(diagnostic.range.end),
+        severity: diagnosticSeverity(diagnostic.severity),
+        message: diagnostic.message.slice(0, 4_096),
+        ...(diagnostic.source ? { source: diagnostic.source.slice(0, 128) } : {}),
+      }));
+    this.post(view, { type: 'diagnosticsChanged', diagnostics });
   }
 
   private refreshStatus(): void {
@@ -446,6 +478,15 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:${allowRemoteImages ? ' https:' : ''}; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src ${webview.cspSource} 'nonce-${nonce}';">
 <link rel="stylesheet" href="${styles}"><title>markda</title></head>
 <body><div id="app" role="application" aria-label="${escapeHtmlAttribute(vscode.l10n.t('markda Markdown editor'))}"></div><script nonce="${nonce}">globalThis.__markdaInitial=${initialData};</script><script type="module" nonce="${nonce}" src="${script}"></script></body></html>`;
+  }
+}
+
+function diagnosticSeverity(severity: vscode.DiagnosticSeverity): EditorDiagnostic['severity'] {
+  switch (severity) {
+    case vscode.DiagnosticSeverity.Error: return 'error';
+    case vscode.DiagnosticSeverity.Warning: return 'warning';
+    case vscode.DiagnosticSeverity.Information: return 'information';
+    default: return 'hint';
   }
 }
 

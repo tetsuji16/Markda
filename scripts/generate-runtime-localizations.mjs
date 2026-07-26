@@ -16,8 +16,28 @@ const common = {
   ar: ['تصفية العناوين','نص العنوان','تصفية ملفات Markdown','اسم الملف أو المجلد','إنشاء','تكرار','{0} كلمة · {1} حرفًا · {2} سطرًا · {3} دقيقة قراءة','markda: لا يوجد مستند markda نشط.','تصدير','markda: تم تصدير {0}','markda: لا يحتوي هذا المستند على تصدير سابق.','الحالي','الأخيرة','الانتقال إلى العنوان','محرر Markdown من markda','{0} كلمة','{0} كلمة · {1} حرفًا'],
 };
 const keys = ['Filter headings','Heading text','Filter Markdown files','File or folder name','Create','Duplicate','{0} words · {1} characters · {2} lines · {3} min read','markda: No active markda document.','Export','markda: Exported {0}','markda: This document has no previous export.','current','Recent','Go to heading','markda Markdown editor','{0} words','{0} words · {1} characters'];
+const extras = {
+  ja: {
+    'VS Code Text Editor': 'VS Codeテキストエディター',
+    'Open this file once with the default text editor': '今回だけ既定のテキストエディターで開きます',
+    'Choose Another Editor...': '別のエディターを選択...',
+    'Select from all editors available for this file': 'このファイルで利用可能なすべてのエディターから選択します',
+    'Configure File Associations...': 'ファイルの関連付けを構成...',
+    'Choose which file types open with markda by default': 'markdaで既定で開くファイル形式を選択します',
+    'Reopen with another editor': '別のエディターで開き直す',
+    'Select file types to open with markda by default': 'markdaで既定で開くファイル形式を選択してください',
+    'markda File Associations': 'markda ファイルの関連付け',
+    'User': 'ユーザー',
+    'Use these associations in every workspace': 'すべてのワークスペースでこの関連付けを使用します',
+    'Workspace': 'ワークスペース',
+    'Use these associations only in this workspace': 'このワークスペースだけでこの関連付けを使用します',
+    'Where should these file associations be saved?': 'ファイルの関連付けをどこに保存しますか?',
+    'Open Settings': '設定を開く',
+    'markda file associations were saved in VS Code settings.': 'markdaのファイル関連付けをVS Codeの設定に保存しました。',
+  },
+};
 const folder = join(root, 'l10n');
 await mkdir(folder, { recursive: true });
 for (const [locale, values] of Object.entries(common)) {
-  await writeFile(join(folder, `bundle.l10n.${locale}.json`), `${JSON.stringify(Object.fromEntries(keys.map((key, index) => [key, values[index]])), null, 2)}\n`, 'utf8');
+  await writeFile(join(folder, `bundle.l10n.${locale}.json`), `${JSON.stringify({ ...Object.fromEntries(keys.map((key, index) => [key, values[index]])), ...(extras[locale] ?? {}) }, null, 2)}\n`, 'utf8');
 }

@@ -15,5 +15,21 @@
   "Go to heading": "見出しへ移動",
   "markda Markdown editor": "markda Markdownエディター",
   "{0} words": "{0}語",
-  "{0} words · {1} characters": "{0}語 · {1}文字"
+  "{0} words · {1} characters": "{0}語 · {1}文字",
+  "VS Code Text Editor": "VS Codeテキストエディター",
+  "Open this file once with the default text editor": "今回だけ既定のテキストエディターで開きます",
+  "Choose Another Editor...": "別のエディターを選択...",
+  "Select from all editors available for this file": "このファイルで利用可能なすべてのエディターから選択します",
+  "Configure File Associations...": "ファイルの関連付けを構成...",
+  "Choose which file types open with markda by default": "markdaで既定で開くファイル形式を選択します",
+  "Reopen with another editor": "別のエディターで開き直す",
+  "Select file types to open with markda by default": "markdaで既定で開くファイル形式を選択してください",
+  "markda File Associations": "markda ファイルの関連付け",
+  "User": "ユーザー",
+  "Use these associations in every workspace": "すべてのワークスペースでこの関連付けを使用します",
+  "Workspace": "ワークスペース",
+  "Use these associations only in this workspace": "このワークスペースだけでこの関連付けを使用します",
+  "Where should these file associations be saved?": "ファイルの関連付けをどこに保存しますか?",
+  "Open Settings": "設定を開く",
+  "markda file associations were saved in VS Code settings.": "markdaのファイル関連付けをVS Codeの設定に保存しました。"
 }
