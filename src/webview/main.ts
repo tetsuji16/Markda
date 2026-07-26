@@ -434,6 +434,36 @@ function onHostMessage(message: HostToEditorMessage): void {
   }
 }
 
+function enhanceSearchPanel(panel: HTMLElement): void {
+  if (panel.querySelector('.markda-replace-toggle')) return;
+  const searchInput = panel.querySelector<HTMLInputElement>('input[name=search]');
+  const replaceInput = panel.querySelector<HTMLInputElement>('input[name=replace]');
+  if (!searchInput || !replaceInput) return;
+  replaceInput.id ||= 'markda-search-replace';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'markda-replace-toggle';
+  toggle.setAttribute('aria-controls', replaceInput.id);
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-label', replaceInput.placeholder || 'Replace');
+  toggle.title = replaceInput.placeholder || 'Replace';
+  panel.classList.add('markda-replace-collapsed');
+  toggle.addEventListener('click', () => {
+    const expanded = panel.classList.toggle('markda-replace-collapsed') === false;
+    toggle.setAttribute('aria-expanded', String(expanded));
+  });
+  panel.prepend(toggle);
+}
+
+function openMarkdaSearchPanel(editor: EditorView): boolean {
+  const opened = openSearchPanel(editor);
+  queueMicrotask(() => {
+    const panel = editor.dom.querySelector<HTMLElement>('.cm-panel.cm-search');
+    if (panel) enhanceSearchPanel(panel);
+  });
+  return opened;
+}
+
 function onEditorUpdate(update: ViewUpdate): void {
   if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(externalUpdate))) {
     if (pendingChanges) {
@@ -605,7 +635,7 @@ function runCommand(command: EditorCommand, payload?: unknown): void {
       return;
     }
     case 'showSearch':
-      openSearchPanel(view);
+      openMarkdaSearchPanel(view);
       return;
     case 'toggleBold':
       wrapSelection(view, '**', '**');
@@ -1047,6 +1077,7 @@ function moveCursorVertically(editor: EditorView, dir: 1 | -1, extend: boolean):
 
 function createMarkdaKeymap() {
   return [
+    { key: 'Mod-f', run: openMarkdaSearchPanel },
     { key: 'Enter', run: (editor: EditorView) => insertLiveLineBreak(editor, false) },
     { key: 'Shift-Enter', run: (editor: EditorView) => insertLiveLineBreak(editor, true) },
     { key: 'Backspace', run: deleteEmptyMarkdownPair },
@@ -4274,18 +4305,20 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .markda-shell{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr)}.markda-toolbar{grid-area:1/1;min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--markda-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
 .table-toolbar{grid-area:2/1;align-self:start;z-index:300;display:none;width:100%;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{grid-area:2/1;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
-.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:16px;color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:30px var(--markda-padding-x,30px) 100px;line-height:1.6}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:1.6}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
+.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:16px;color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:30px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:1.6}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:1.6}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
 .cm-editor .cm-panels-top:has(.cm-search){position:absolute;top:0;right:14px;left:auto;z-index:400;color:var(--markda-fg);background:transparent;border:0}
-.cm-editor .cm-panel.cm-search{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) repeat(6,24px);grid-template-rows:24px 24px;gap:3px;width:min(430px,calc(100vw - 32px));padding:4px 28px 4px 4px;color:var(--markda-fg);background:var(--markda-find-widget);border:1px solid var(--markda-border);border-top:0;box-shadow:0 2px 8px var(--markda-widget-shadow);font:13px/1 var(--markda-font-body)}
+.cm-editor .cm-panel.cm-search{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) repeat(6,24px);grid-template-rows:24px 24px;gap:3px;width:min(454px,calc(100vw - 32px));padding:4px 28px;color:var(--markda-fg);background:var(--markda-find-widget);border:1px solid var(--markda-border);border-top:0;box-shadow:0 2px 8px var(--markda-widget-shadow);font:13px/1 var(--markda-font-body)}
+.cm-editor .cm-panel.cm-search.markda-replace-collapsed{grid-template-rows:24px}.cm-search.markda-replace-collapsed input[name=replace],.cm-search.markda-replace-collapsed button[name=replace],.cm-search.markda-replace-collapsed button[name=replaceAll]{display:none!important}
 .cm-search .cm-textfield{min-width:0;height:24px;margin:0!important;padding:2px 6px;color:var(--markda-fg);background:var(--markda-find-input);border:1px solid var(--markda-border);border-radius:0;font:inherit}.cm-search .cm-textfield:focus{outline:1px solid var(--markda-focus);outline-offset:-1px;border-color:var(--markda-focus)}
 .cm-search input[name=search]{grid-area:1/1}.cm-search input[name=replace]{grid-area:2/1}.cm-search br{display:none}
-.cm-search button,.cm-search label{display:grid;place-items:center;width:24px;height:24px;min-height:24px;margin:0!important;padding:0;border:0;border-radius:2px;color:var(--markda-fg);background:transparent;font-size:0;cursor:pointer}
+.cm-editor .cm-panel.cm-search>button,.cm-editor .cm-panel.cm-search>label{display:grid;place-items:center;width:24px;height:24px;min-height:24px;margin:0!important;padding:0;border:0;border-radius:2px;color:var(--markda-fg);background:transparent;font-size:0!important;line-height:0;cursor:pointer}
 .cm-search button:hover,.cm-search label:hover{background:var(--markda-hover)}.cm-search button:focus-visible,.cm-search label:focus-within{outline:1px solid var(--markda-focus);outline-offset:-1px}
-.cm-search button{font-size:0}.cm-search button::before,.cm-search label::after{font:16px/1 codicon}
+.cm-search button::before,.cm-search label::after{font:16px/1 codicon}
 .cm-search button[name=prev]{grid-area:1/5}.cm-search button[name=prev]::before{content:"\eab7"}.cm-search button[name=next]{grid-area:1/6}.cm-search button[name=next]::before{content:"\eab4"}.cm-search button[name=select]{grid-area:1/7}.cm-search button[name=select]::before{content:"\eb85"}
 .cm-search label:has(input[name=case]){grid-area:1/2}.cm-search label:has(input[name=case])::after{content:"\eab1"}.cm-search label:has(input[name=word]){grid-area:1/3}.cm-search label:has(input[name=word])::after{content:"\eb7e"}.cm-search label:has(input[name=re]){grid-area:1/4}.cm-search label:has(input[name=re])::after{content:"\eb38"}
-.cm-search label input[type=checkbox]{position:absolute;width:1px;height:1px;margin:0!important;opacity:0}.cm-search label:has(input:checked){color:var(--markda-accent);background:var(--markda-active);outline:1px solid var(--markda-focus);outline-offset:-1px}
+.cm-editor .cm-panel.cm-search>label>input[type=checkbox]{position:absolute;width:1px;height:1px;margin:0!important;opacity:0}.cm-search label:has(input:checked){color:var(--markda-accent);background:var(--markda-active);outline:1px solid var(--markda-focus);outline-offset:-1px}
 .cm-search button[name=replace]{grid-area:2/5}.cm-search button[name=replace]::before{content:"\eb3d"}.cm-search button[name=replaceAll]{grid-area:2/6}.cm-search button[name=replaceAll]::before{content:"\eb3c"}
+.cm-search button.markda-replace-toggle{position:absolute!important;top:4px!important;left:3px!important;margin:0!important}.cm-search button.markda-replace-toggle::before{content:"\eab4"}.cm-search.markda-replace-collapsed button.markda-replace-toggle::before{content:"\eab6"}
 .cm-search button[name=close]{position:absolute!important;top:4px!important;right:3px!important;margin:0!important}.cm-search button[name=close]::before{content:"\ea76"}.cm-search button[name=close]{color:transparent!important}.cm-search button[name=close]::before{color:var(--markda-fg)}
 .cm-editor .cm-searchMatch{background:var(--markda-find-match)!important}.cm-editor .cm-searchMatch-selected{background:var(--markda-find-match-selected)!important;outline:1px solid var(--markda-accent)}
 .markda-h1,.markda-h2,.markda-h3,.markda-h4,.markda-h5,.markda-h6{font-weight:700;margin-top:1rem;margin-bottom:1rem}.markda-h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}.markda-h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}.markda-h3{font-size:1.5em;line-height:1.43}.markda-h4{font-size:1.25em}.markda-h5{font-size:1em}.markda-h6{font-size:1em;color:var(--markda-muted)}.markda-setext-marker{height:0;min-height:0;line-height:0;overflow:hidden}.markda-quote{border-left:4px solid var(--markda-border);padding-left:15px!important;color:var(--markda-muted)}.markda-list-marker{color:var(--markda-muted)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--markda-fg);font-weight:700;text-align:center}

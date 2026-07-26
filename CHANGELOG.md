@@ -4,11 +4,16 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.17 - 2026-07-26
+
 - Added same-document and cross-document heading anchors plus source-preserving `[toc]` widgets.
 - Added lazily loaded YAML Front Matter fields and full emoji-shortcode rendering.
 - Added syntax-highlighted editable code blocks, labeled equation numbering, and `\ref` / `\eqref` resolution.
 - Mapped VS Code diagnostics into the live editor.
 - Added PDF export through Edge, Chrome, or Chromium and Workspace Trust-aware external export targets without shell execution.
+- Restyled document search to match VS Code, including a collapsed replace row and compact icon controls.
+- Kept Enter and Shift+Enter inside the search field while navigating matches, then restored editing at the selected match on Escape.
+- Removed repeated search-panel DOM scans from ordinary editor updates and hardened CodeMirror layout overrides.
 
 ## 0.1.16 - 2026-07-26
 

@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "%extension.description%",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "publisher": "tetsuji16",
   "license": "MIT",
   "l10n": "./l10n",

@@ -44,6 +44,7 @@ describe('Markda theme colors in Chromium', () => {
     const tableCode = document.querySelector<HTMLElement>('.markda-live-table-wrap code')!;
     const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
     const content = document.querySelector<HTMLElement>('.cm-content')!;
+    const line = document.querySelector<HTMLElement>('.cm-line')!;
     expect(root.dataset.markdaColorMode).toBe('light');
     expect(getComputedStyle(document.body).backgroundColor).toBe('rgb(255, 255, 255)');
     expect(getComputedStyle(document.body).color).toBe('rgb(51, 51, 51)');
@@ -62,10 +63,13 @@ describe('Markda theme colors in Chromium', () => {
     expect(getComputedStyle(liveRows[1]!).backgroundColor).toBe('rgb(248, 248, 248)');
     expect(getComputedStyle(activeLine).backgroundColor).toBe('rgba(0, 0, 0, 0)');
     expect(getComputedStyle(scroller).scrollbarColor).toContain('rgba(31, 35, 40, 0.28)');
+    expect(getComputedStyle(scroller).fontFamily).toContain('Open Sans');
+    expect(getComputedStyle(scroller).lineHeight).toBe('25.6px');
     expect(getComputedStyle(content).fontSize).toBe('16px');
     expect(getComputedStyle(content).lineHeight).toBe('25.6px');
     expect(getComputedStyle(content).fontFamily).toContain('Open Sans');
     expect(getComputedStyle(content).marginLeft).toBe(getComputedStyle(content).marginRight);
+    expect(getComputedStyle(line).padding).toBe('0px');
     const lightTypography = {
       fontFamily: getComputedStyle(content).fontFamily,
       fontSize: getComputedStyle(content).fontSize,
@@ -104,6 +108,7 @@ describe('Markda theme colors in Chromium', () => {
     const cursor = document.querySelector<HTMLElement>('.cm-cursor')!;
     expect(getComputedStyle(cursor).borderLeftColor).toBe('rgb(212, 212, 212)');
     expect(getComputedStyle(cursor).borderLeftWidth).toBe('2px');
+    expect(getComputedStyle(cursor).marginLeft).toBe('-1px');
     expect(getComputedStyle(cursor).boxShadow).toBe('none');
     expect(getComputedStyle(activeLine).backgroundColor).toBe('rgba(0, 0, 0, 0)');
     const selectionSample = document.createElement('span');
