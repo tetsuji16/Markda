@@ -1,0 +1,19 @@
+{
+  "Filter headings": "見出しを絞り込み",
+  "Heading text": "見出しテキスト",
+  "Filter Markdown files": "Markdownファイルを絞り込み",
+  "File or folder name": "ファイル名またはフォルダー名",
+  "Create": "作成",
+  "Duplicate": "複製",
+  "{0} words · {1} characters · {2} lines · {3} min read": "{0}語 · {1}文字 · {2}行 · 読了{3}分",
+  "markda: No active markda document.": "markda: アクティブなmarkda文書がありません。",
+  "Export": "エクスポート",
+  "markda: Exported {0}": "markda: {0} をエクスポートしました",
+  "markda: This document has no previous export.": "markda: この文書には前回のエクスポートがありません。",
+  "current": "現在",
+  "Recent": "最近使用したファイル",
+  "Go to heading": "見出しへ移動",
+  "markda Markdown editor": "markda Markdownエディター",
+  "{0} words": "{0}語",
+  "{0} words · {1} characters": "{0}語 · {1}文字"
+}

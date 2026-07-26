@@ -30,6 +30,8 @@ export type HostToEditorMessage =
       resourceBaseUri: string;
       themeBaseUri: string;
       assetBaseUri?: string;
+      locale: string;
+      direction: 'ltr' | 'rtl';
       version: number;
       text: string;
       settings: EditorSettings;

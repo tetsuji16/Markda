@@ -1,0 +1,19 @@
+{
+  "Filter headings": "筛选标题",
+  "Heading text": "标题文本",
+  "Filter Markdown files": "筛选 Markdown 文件",
+  "File or folder name": "文件或文件夹名称",
+  "Create": "创建",
+  "Duplicate": "复制",
+  "{0} words · {1} characters · {2} lines · {3} min read": "{0} 个词 · {1} 个字符 · {2} 行 · 阅读 {3} 分钟",
+  "markda: No active markda document.": "markda: 没有活动的 markda 文档。",
+  "Export": "导出",
+  "markda: Exported {0}": "markda: 已导出 {0}",
+  "markda: This document has no previous export.": "markda: 此文档没有上次导出。",
+  "current": "当前",
+  "Recent": "最近",
+  "Go to heading": "转到标题",
+  "markda Markdown editor": "markda Markdown 编辑器",
+  "{0} words": "{0} 个词",
+  "{0} words · {1} characters": "{0} 个词 · {1} 个字符"
+}

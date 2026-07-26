@@ -9,7 +9,7 @@ import { getStatistics } from './statistics.js';
 
 export function activate(context: vscode.ExtensionContext): void {
   if (vscode.env.uiKind !== vscode.UIKind.Desktop || vscode.env.remoteName) {
-    void vscode.window.showWarningMessage('markda supports local VS Code Desktop workspaces only.');
+    void vscode.window.showWarningMessage(vscode.l10n.t('markda supports local VS Code Desktop workspaces only.'));
     return;
   }
 
@@ -47,11 +47,11 @@ export function activate(context: vscode.ExtensionContext): void {
     register('markda.toggleTypewriterMode', () => editor.sendCommand('toggleTypewriterMode')),
     register('markda.showOutline', () => vscode.commands.executeCommand('markda.outline.focus')),
     register('markda.showFiles', () => vscode.commands.executeCommand('markda.files.focus')),
-    register('markda.filterOutline', async () => outline.setFilter(await vscode.window.showInputBox({ prompt: 'Filter headings', placeHolder: 'Heading text' }) ?? '')),
+    register('markda.filterOutline', async () => outline.setFilter(await vscode.window.showInputBox({ prompt: vscode.l10n.t('Filter headings'), placeHolder: vscode.l10n.t('Heading text') }) ?? '')),
     register('markda.clearOutlineFilter', () => outline.setFilter('')),
     register('markda.searchWorkspace', () => vscode.commands.executeCommand('workbench.action.findInFiles')),
     register('markda.quickOpen', () => vscode.commands.executeCommand('workbench.action.quickOpen')),
-    register('markda.filterFiles', async () => files.setFilter(await vscode.window.showInputBox({ prompt: 'Filter Markdown files', placeHolder: 'File or folder name' }) ?? '')),
+    register('markda.filterFiles', async () => files.setFilter(await vscode.window.showInputBox({ prompt: vscode.l10n.t('Filter Markdown files'), placeHolder: vscode.l10n.t('File or folder name') }) ?? '')),
     register('markda.clearFileFilter', () => files.setFilter('')),
     register('markda.showSearch', () => editor.sendCommand('showSearch')),
     register('markda.copyAsMarkdown', () => editor.sendCommand('copyAsMarkdown')),
@@ -103,7 +103,7 @@ async function pickMarkdownFile(): Promise<vscode.Uri | undefined> {
 }
 
 async function createMarkdownFile(files: FileProvider): Promise<void> {
-  const target = await vscode.window.showSaveDialog({ filters: { Markdown: ['md', 'markdown'] }, saveLabel: 'Create' });
+  const target = await vscode.window.showSaveDialog({ filters: { Markdown: ['md', 'markdown'] }, saveLabel: vscode.l10n.t('Create') });
   if (!target) return;
   await vscode.workspace.fs.writeFile(target, new Uint8Array());
   await openWithMarkda(target, files);
@@ -115,7 +115,7 @@ async function duplicateDocument(document: vscode.TextDocument | undefined, file
   const target = await vscode.window.showSaveDialog({
     defaultUri: document.uri.with({ path: path.join(parsed.dir, `${parsed.name}-copy${parsed.ext || '.md'}`) }),
     filters: { Markdown: ['md', 'markdown', 'txt'] },
-    saveLabel: 'Duplicate',
+    saveLabel: vscode.l10n.t('Duplicate'),
   });
   if (!target) return;
   await vscode.workspace.fs.writeFile(target, Buffer.from(document.getText(), 'utf8'));
@@ -126,7 +126,7 @@ async function showStatistics(document?: vscode.TextDocument): Promise<void> {
   if (!document) return;
   const stat = getStatistics(document.getText());
   await vscode.window.showInformationMessage(
-    `${stat.words} words · ${stat.characters} characters · ${stat.lines} lines · ${stat.readingMinutes} min read`,
+    vscode.l10n.t('{0} words · {1} characters · {2} lines · {3} min read', stat.words, stat.characters, stat.lines, stat.readingMinutes),
     { modal: false },
   );
 }
@@ -134,7 +134,7 @@ async function showStatistics(document?: vscode.TextDocument): Promise<void> {
 async function exportActive(editor: MarkdaEditorProvider, exporter: ExportService, styled: boolean): Promise<void> {
   const document = editor.getActiveDocument();
   if (!document) {
-    void vscode.window.showWarningMessage('markda: No active markda document.');
+    void vscode.window.showWarningMessage(vscode.l10n.t('markda: No active markda document.'));
     return;
   }
   await exporter.exportHtml(document, styled);

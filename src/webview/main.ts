@@ -19,6 +19,7 @@ import type {
 } from '../protocol.js';
 import { analyzeDocument, getStatistics } from '../statistics.js';
 import { findMinimalChange } from '../textChange.js';
+import { translate } from '../localization.js';
 import {
   addTableColumn, addTableRow, alignTableColumn, deleteTableColumn, deleteTableRow,
   findMarkdownTable, serializeMarkdownTable, tableCursor, type MarkdownTable, type TableAlignment,
@@ -45,6 +46,8 @@ interface ViewState {
 
 type InitializationMessage = Extract<HostToEditorMessage, { type: 'initialize' }>;
 const initialDocument = (globalThis as typeof globalThis & { __markdaInitial?: InitializationMessage }).__markdaInitial;
+const locale = initialDocument?.locale ?? 'en';
+const t = (key: Parameters<typeof translate>[1], ...values: readonly (string | number)[]) => translate(locale, key, ...values);
 
 const vscode = acquireVsCodeApi<ViewState>();
 const savedViewState = vscode.getState();
@@ -137,41 +140,40 @@ function createSyntaxHighlightStyle(dark: boolean): HighlightStyle {
 
 document.body.innerHTML = `<style>${getStyles()}</style>
 <div class="markda-shell">
-  <header class="markda-toolbar" aria-label="Editor controls">
-    <button data-command="toggleSourceMode" title="Source Code Mode (Ctrl+/)" aria-label="Toggle source code mode" aria-pressed="false"><i class="codicon codicon-code" aria-hidden="true"></i><span>Source</span></button>
-    <button data-command="toggleFocusMode" title="Focus Mode (F8)" aria-label="Toggle focus mode" aria-pressed="false"><i class="codicon codicon-target" aria-hidden="true"></i><span>Focus</span></button>
-    <button data-command="toggleTypewriterMode" title="Typewriter Mode (F9)" aria-label="Toggle typewriter mode" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i><span>Typewriter</span></button>
+  <header class="markda-toolbar" aria-label="${t('editorControls')}">
+    <button data-command="toggleSourceMode" title="${t('sourceMode')}" aria-label="${t('toggleSourceMode')}" aria-pressed="false"><i class="codicon codicon-code" aria-hidden="true"></i><span>${t('source')}</span></button>
+    <button data-command="toggleFocusMode" title="${t('focusMode')}" aria-label="${t('toggleFocusMode')}" aria-pressed="false"><i class="codicon codicon-target" aria-hidden="true"></i><span>${t('focus')}</span></button>
+    <button data-command="toggleTypewriterMode" title="${t('typewriterMode')}" aria-label="${t('toggleTypewriterMode')}" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i><span>${t('typewriter')}</span></button>
     <span class="toolbar-separator"></span>
-    <button data-command="toggleBold" title="Bold (Ctrl+B)" aria-label="Bold"><i class="codicon codicon-bold" aria-hidden="true"></i></button>
-    <button data-command="toggleItalic" title="Italic (Ctrl+I)" aria-label="Italic"><i class="codicon codicon-italic" aria-hidden="true"></i></button>
-    <button data-command="toggleInlineCode" title="Inline Code" aria-label="Inline code"><i class="codicon codicon-code" aria-hidden="true"></i></button>
-    <button data-command="insertLink" title="Link (Ctrl+K)" aria-label="Insert link"><i class="codicon codicon-link" aria-hidden="true"></i></button>
-    <button data-command="toggleBulletList" title="Bulleted List" aria-label="Toggle bulleted list"><i class="codicon codicon-list-unordered" aria-hidden="true"></i></button>
-    <button data-command="toggleTaskList" title="Task List" aria-label="Toggle task list"><i class="codicon codicon-checklist" aria-hidden="true"></i></button>
+    <button data-command="toggleBold" title="${t('bold')} (Ctrl+B)" aria-label="${t('bold')}"><i class="codicon codicon-bold" aria-hidden="true"></i></button>
+    <button data-command="toggleItalic" title="${t('italic')} (Ctrl+I)" aria-label="${t('italic')}"><i class="codicon codicon-italic" aria-hidden="true"></i></button>
+    <button data-command="toggleInlineCode" title="${t('inlineCode')}" aria-label="${t('inlineCode')}"><i class="codicon codicon-code" aria-hidden="true"></i></button>
+    <button data-command="insertLink" title="${t('insertLink')} (Ctrl+K)" aria-label="${t('insertLink')}"><i class="codicon codicon-link" aria-hidden="true"></i></button>
+    <button data-command="toggleBulletList" title="${t('bulletedList')}" aria-label="${t('bulletedList')}"><i class="codicon codicon-list-unordered" aria-hidden="true"></i></button>
+    <button data-command="toggleTaskList" title="${t('taskList')}" aria-label="${t('taskList')}"><i class="codicon codicon-checklist" aria-hidden="true"></i></button>
     <span class="toolbar-separator"></span>
-    <button data-command="insertTable" title="Insert Table" aria-label="Insert table"><i class="codicon codicon-table" aria-hidden="true"></i></button>
-    <button data-command="insertImage" title="Insert Images" aria-label="Insert images"><i class="codicon codicon-file-media" aria-hidden="true"></i></button>
-    <button data-command="insertMathBlock" title="Insert Math Block" aria-label="Insert math block"><span class="math-icon" aria-hidden="true">∑</span></button>
+    <button data-command="insertTable" title="${t('insertTable')}" aria-label="${t('insertTable')}"><i class="codicon codicon-table" aria-hidden="true"></i></button>
+    <button data-command="insertImage" title="${t('insertImages')}" aria-label="${t('insertImages')}"><i class="codicon codicon-file-media" aria-hidden="true"></i></button>
+    <button data-command="insertMathBlock" title="${t('insertMath')}" aria-label="${t('insertMath')}"><span class="math-icon" aria-hidden="true">∑</span></button>
     <span class="toolbar-spacer"></span>
-    <button id="theme-toggle" title="Toggle theme (auto → light → dark)" aria-label="Toggle theme" aria-pressed="false"><i class="codicon codicon-color-mode" aria-hidden="true"></i><span>Theme</span></button>
-    <button id="preview-button" title="Rendered Preview" aria-label="Toggle rendered preview" aria-pressed="false"><i class="codicon codicon-preview" aria-hidden="true"></i><span>Preview</span></button>
+    <button id="theme-toggle" title="${t('toggleTheme')}" aria-label="${t('toggleTheme')}" aria-pressed="false"><i class="codicon codicon-color-mode" aria-hidden="true"></i><span>${t('theme')}</span></button>
   </header>
-  <div id="table-toolbar" class="table-toolbar" aria-label="Table controls">
-    <span>Table</span>
-    <button data-table-command="row-before" title="Insert row before"><i class="codicon codicon-arrow-up"></i> Row</button>
-    <button data-table-command="row-after" title="Insert row after"><i class="codicon codicon-arrow-down"></i> Row</button>
-    <button data-table-command="row-delete" title="Delete row"><i class="codicon codicon-trash"></i> Row</button>
+  <div id="table-toolbar" class="table-toolbar" aria-label="${t('tableControls')}">
+    <span>${t('table')}</span>
+    <button data-table-command="row-before" title="${t('rowBefore')}"><i class="codicon codicon-arrow-up"></i> ${t('row')}</button>
+    <button data-table-command="row-after" title="${t('rowAfter')}"><i class="codicon codicon-arrow-down"></i> ${t('row')}</button>
+    <button data-table-command="row-delete" title="${t('deleteRow')}"><i class="codicon codicon-trash"></i> ${t('row')}</button>
     <span class="toolbar-separator"></span>
-    <button data-table-command="column-left" title="Insert column left"><i class="codicon codicon-arrow-left"></i> Col</button>
-    <button data-table-command="column-right" title="Insert column right"><i class="codicon codicon-arrow-right"></i> Col</button>
-    <button data-table-command="column-delete" title="Delete column"><i class="codicon codicon-trash"></i> Col</button>
+    <button data-table-command="column-left" title="${t('columnLeft')}"><i class="codicon codicon-arrow-left"></i> ${t('columnShort')}</button>
+    <button data-table-command="column-right" title="${t('columnRight')}"><i class="codicon codicon-arrow-right"></i> ${t('columnShort')}</button>
+    <button data-table-command="column-delete" title="${t('deleteColumn')}"><i class="codicon codicon-trash"></i> ${t('columnShort')}</button>
     <span class="toolbar-separator"></span>
-    <button data-table-command="align-left" title="Align left"><i class="codicon codicon-list-unordered"></i></button>
-    <button data-table-command="align-center" title="Align center">↔</button>
-    <button data-table-command="align-right" title="Align right"><i class="codicon codicon-list-ordered"></i></button>
+    <button data-table-command="align-left" title="${t('alignLeft')}"><i class="codicon codicon-list-unordered"></i></button>
+    <button data-table-command="align-center" title="${t('alignCenter')}">↔</button>
+    <button data-table-command="align-right" title="${t('alignRight')}"><i class="codicon codicon-list-ordered"></i></button>
   </div>
-  <div class="markda-workspace"><div id="editor"></div><aside id="preview" aria-label="Rendered preview"></aside></div>
-  <dialog id="table-dialog" aria-labelledby="table-dialog-title"><form method="dialog"><h2 id="table-dialog-title">Insert table</h2><label>Columns <input id="table-columns" type="number" min="1" max="20" value="2"></label><label>Rows <input id="table-rows" type="number" min="1" max="100" value="2"></label><div><button value="cancel">Cancel</button><button id="table-insert-confirm" value="default">Insert</button></div></form></dialog>
+  <div class="markda-workspace"><div id="editor"></div><aside id="preview" aria-label="${t('renderedPreview')}"></aside></div>
+  <dialog id="table-dialog" aria-labelledby="table-dialog-title"><form method="dialog"><h2 id="table-dialog-title">${t('insertTable')}</h2><label>${t('columns')} <input id="table-columns" type="number" min="1" max="20" value="2"></label><label>${t('rows')} <input id="table-rows" type="number" min="1" max="100" value="2"></label><div><button value="cancel">${t('cancel')}</button><button id="table-insert-confirm" value="default">${t('insert')}</button></div></form></dialog>
 </div>`;
 
 const appRoot = document.querySelector<HTMLElement>('.markda-shell')!;
@@ -279,7 +281,6 @@ document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((button) 
 document.querySelectorAll<HTMLButtonElement>('[data-table-command]').forEach((button) => {
   button.addEventListener('click', () => runTableCommand(button.dataset.tableCommand ?? ''));
 });
-document.querySelector('#preview-button')?.addEventListener('click', () => togglePreview());
 const themeToggleButton = document.querySelector<HTMLButtonElement>('#theme-toggle');
 function updateThemeToggleLabel(): void {
   if (!themeToggleButton) return;
@@ -634,12 +635,6 @@ function updateMode(change: Partial<ViewState>): void {
   vscode.postMessage({ type: 'state', sourceMode: next.sourceMode, focusMode: next.focusMode, typewriterMode: next.typewriterMode });
 }
 
-function togglePreview(): void {
-  const mode = view.state.field(modeField);
-  updateMode({ previewVisible: !mode.previewVisible });
-  if (!mode.previewVisible) renderPreview();
-}
-
 function applyViewState(state: ViewState): void {
   appRoot.classList.toggle('source-mode', state.sourceMode);
   appRoot.classList.toggle('focus-mode', state.focusMode);
@@ -651,9 +646,6 @@ function applyViewState(state: ViewState): void {
     button?.classList.toggle('active', active);
     button?.setAttribute('aria-pressed', String(active));
   }
-  const previewButton = document.querySelector<HTMLButtonElement>('#preview-button');
-  previewButton?.classList.toggle('active', state.previewVisible);
-  previewButton?.setAttribute('aria-pressed', String(state.previewVisible));
 }
 
 function applySettings(refreshDecorations = false): void {
@@ -1321,7 +1313,7 @@ function secureImage(image: HTMLImageElement): void {
     if (settings.security.allowRemoteResources === 'always') return;
     const blocked = document.createElement('span');
     blocked.className = 'markda-remote-blocked';
-    blocked.textContent = `Remote image blocked: ${image.alt || source}`;
+    blocked.textContent = t('remoteImageBlocked', image.alt || source);
     blocked.title = source;
     image.replaceWith(blocked);
     return;
@@ -1553,7 +1545,7 @@ class TrailingParagraphWidget extends WidgetType {
     target.className = 'markda-trailing-paragraph';
     target.tabIndex = 0;
     target.setAttribute('role', 'button');
-    target.setAttribute('aria-label', 'Add paragraph after block');
+    target.setAttribute('aria-label', t('addParagraph'));
     target.title = 'Click to add a paragraph after this block';
     const append = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
@@ -1608,11 +1600,11 @@ class InlineImageWidget extends WidgetType {
     container.className = 'markda-inline-image';
     container.tabIndex = 0;
     container.setAttribute('role', 'button');
-    container.setAttribute('aria-label', `Image: ${this.alt || this.source}. Activate to edit Markdown.`);
+    container.setAttribute('aria-label', t('imageEdit', this.alt || this.source));
     container.title = 'Click to edit image Markdown';
     if (/^https?:/iu.test(this.source) && settings.security.allowRemoteResources !== 'always') {
       container.classList.add('markda-inline-image-blocked');
-      container.textContent = this.alt || 'Remote image';
+      container.textContent = this.alt || t('remoteImage');
     } else {
       const image = document.createElement('img');
       image.alt = this.alt;
@@ -1651,7 +1643,7 @@ class FootnoteReferenceWidget extends WidgetType {
     reference.className = 'markda-footnote-reference';
     reference.tabIndex = 0;
     reference.setAttribute('role', 'button');
-    reference.setAttribute('aria-label', `Footnote ${this.label}. Activate to edit.`);
+    reference.setAttribute('aria-label', t('footnoteEdit', this.label));
     reference.title = 'Click to edit footnote reference';
     reference.textContent = this.label;
     const edit = (event: Event) => {
@@ -1678,7 +1670,7 @@ class InlineHtmlWidget extends WidgetType {
     container.className = 'markda-inline-html';
     container.tabIndex = 0;
     container.setAttribute('role', 'button');
-    container.setAttribute('aria-label', 'Rendered inline HTML. Activate to edit source.');
+    container.setAttribute('aria-label', t('inlineHtmlEdit'));
     container.title = 'Click to edit HTML source';
     container.innerHTML = DOMPurify.sanitize(this.source, { USE_PROFILES: { html: true } });
     const edit = (event: Event) => {
@@ -1706,7 +1698,7 @@ class EntityWidget extends WidgetType {
     value.className = 'markda-entity';
     value.tabIndex = 0;
     value.setAttribute('role', 'button');
-    value.setAttribute('aria-label', `${decoded}. Activate to edit entity source.`);
+    value.setAttribute('aria-label', t('entityEdit', decoded));
     value.title = 'Click to edit character entity';
     value.textContent = decoded;
     const edit = () => {
@@ -1741,7 +1733,7 @@ class FootnoteDefinitionWidget extends WidgetType {
     content.className = 'markda-footnote-definition-content';
     content.contentEditable = 'true';
     content.spellcheck = true;
-    content.setAttribute('aria-label', `Footnote ${this.label} content`);
+    content.setAttribute('aria-label', t('footnoteContent', this.label));
     content.textContent = this.content;
     const gate = new CompositionCommitGate();
     let timer: number | undefined;
@@ -1797,14 +1789,14 @@ class ReferenceDefinitionWidget extends WidgetType {
     container.className = 'markda-reference-definition';
     const labelInput = document.createElement('input');
     labelInput.value = this.label;
-    labelInput.setAttribute('aria-label', 'Reference label');
+    labelInput.setAttribute('aria-label', t('referenceLabel'));
     const destinationInput = document.createElement('input');
     destinationInput.value = this.definition.destination;
-    destinationInput.setAttribute('aria-label', 'Reference destination');
+    destinationInput.setAttribute('aria-label', t('referenceDestination'));
     const titleInput = document.createElement('input');
     titleInput.value = this.definition.title ?? '';
     titleInput.placeholder = 'Optional title';
-    titleInput.setAttribute('aria-label', 'Reference title');
+    titleInput.setAttribute('aria-label', t('referenceTitle'));
     const commit = () => commitReferenceDefinition(
       this.editor, this.from, labelInput.value, destinationInput.value, titleInput.value,
     );
@@ -1835,12 +1827,12 @@ class HtmlBlockWidget extends WidgetType {
     container.className = 'markda-html-block';
     container.contentEditable = 'true';
     container.spellcheck = true;
-    container.setAttribute('aria-label', 'Rendered HTML block');
+    container.setAttribute('aria-label', t('htmlBlock'));
     container.innerHTML = DOMPurify.sanitize(this.source, { USE_PROFILES: { html: true } });
     if (!container.childNodes.length) {
       const placeholder = document.createElement('span');
       placeholder.className = 'markda-html-empty';
-      placeholder.textContent = 'HTML block has no visible safe content';
+      placeholder.textContent = t('emptyHtmlBlock');
       container.append(placeholder);
     }
     const gate = new CompositionCommitGate();
@@ -1898,7 +1890,7 @@ class ImageWidget extends WidgetType {
     if (/^https?:/iu.test(this.source) && settings.security.allowRemoteResources !== 'always') {
       const blocked = document.createElement('span');
       blocked.className = 'markda-remote-blocked';
-      blocked.textContent = `Remote image blocked: ${this.alt || this.source}`;
+      blocked.textContent = t('remoteImageBlocked', this.alt || this.source);
       figure.append(blocked);
     } else {
       try { image.src = /^(?:data:|vscode-webview:)/iu.test(this.source) ? this.source : new URL(this.source, resourceBaseUri).toString(); }
@@ -1906,7 +1898,7 @@ class ImageWidget extends WidgetType {
       figure.append(image);
     }
     const caption = document.createElement('figcaption');
-    caption.textContent = this.alt || 'Image';
+    caption.textContent = this.alt || t('image');
     figure.append(caption);
     if (!/^(?:https?:|data:|vscode-webview:)/iu.test(this.source)) {
       const controls = document.createElement('div');
@@ -1979,7 +1971,7 @@ class IndentedCodeWidget extends WidgetType {
     const code = document.createElement('code');
     code.contentEditable = 'true';
     code.spellcheck = false;
-    code.setAttribute('aria-label', 'Indented code content');
+    code.setAttribute('aria-label', t('indentedCode'));
     code.textContent = this.source;
     const gate = new CompositionCommitGate();
     let timer: number | undefined;
@@ -2087,7 +2079,7 @@ class CodeBlockWidget extends WidgetType {
       code.textContent = this.source;
       code.contentEditable = 'true';
       code.spellcheck = false;
-      code.setAttribute('aria-label', 'Code content');
+      code.setAttribute('aria-label', t('codeContent'));
       const gate = new CompositionCommitGate();
       let timer: number | undefined;
       let dirty = false;
@@ -2199,15 +2191,15 @@ class TableWidget extends WidgetType {
     container.className = 'markda-live-table-wrap';
     container.dataset.tableFrom = String(this.table.from);
     container.setAttribute('role', 'group');
-    container.setAttribute('aria-label', 'Editable Markdown table');
+    container.setAttribute('aria-label', t('editableTable'));
     const cellCount = (this.table.rows.length + 1) * this.table.header.length;
     if (cellCount > settings.liveTableMaxCells) {
       container.classList.add('markda-large-table');
       const summary = document.createElement('span');
-      summary.textContent = `Large table (${this.table.rows.length + 1} rows × ${this.table.header.length} columns)`;
+      summary.textContent = t('largeTable', this.table.rows.length + 1, this.table.header.length);
       const edit = document.createElement('button');
       edit.type = 'button';
-      edit.textContent = 'Edit here';
+      edit.textContent = t('editHere');
       const sourceEditor = createBlockSourceEditor(this.editor, serializeMarkdownTable(this.table), (value) => {
         const current = findMarkdownTable(this.editor.state.doc.toString(), this.table.from,
           this.editor.state.doc.lineAt(this.table.from).number - 1);
@@ -2600,7 +2592,7 @@ function createBlockSourceEditor(editor: EditorView, source: string, commit: (va
   input.value = source;
   input.rows = 1;
   input.spellcheck = false;
-  input.setAttribute('aria-label', 'Block Markdown source');
+  input.setAttribute('aria-label', t('blockSource'));
   const gate = new CompositionCommitGate();
   let timer: number | undefined;
   let dirty = false;
@@ -3449,7 +3441,7 @@ function addInlineDecorations(
         class: 'markda-link-text',
         attributes: {
           'data-href': href,
-          title: 'Click to edit; Ctrl/Cmd+click to open',
+          title: t('editOrOpenLink'),
         },
       }),
     });
@@ -3517,7 +3509,7 @@ function addInlineDecorations(
         class: 'markda-link-text',
         attributes: {
           'data-href': href,
-          title: 'Click to edit; Ctrl/Cmd+click to open',
+          title: t('editOrOpenLink'),
         },
       }),
     });
@@ -3534,7 +3526,7 @@ function addInlineDecorations(
       to: end,
       decoration: Decoration.mark({
         class: 'markda-link-text',
-        attributes: { 'data-href': raw, title: 'Ctrl/Cmd+click to open' },
+        attributes: { 'data-href': raw, title: t('openLinkHint') },
       }),
     });
   }

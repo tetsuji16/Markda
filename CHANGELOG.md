@@ -2,6 +2,12 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.16 - 2026-07-26
+
+- Added localized extension metadata and in-editor UI for Arabic, German, Spanish, French, Japanese, Korean, Brazilian Portuguese, Russian, Simplified Chinese, and Traditional Chinese.
+- Preserved Mermaid's diagram-level lazy chunks so opening a diagram no longer compiles the entire 3.3 MB renderer bundle.
+- Refreshed the Marketplace showcase image to present Markda's primary editing modes and Markdown features more clearly.
+
 ## 0.1.15 - 2026-07-26
 
 - Reduced first-file activation cost by splitting the HTML export renderer out of the extension startup bundle.

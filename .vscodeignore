@@ -1,6 +1,8 @@
 .git/**
 .github/**
 .vscode/**
+.playwright-cli/**
+media/videos/**
 .gitignore
 clean.diff
 diff_main.txt
@@ -22,5 +24,7 @@ media/.edge-preview-profile/**
 dist/*.map
 dist/**/*.map
 docs/DEMO.md
+docs/MARKDA_SHOWCASE.md
+docs/MARKDA_VIDEO_PLAN.md
 docs/PUBLISHING.md
 docs/undo-redo.md

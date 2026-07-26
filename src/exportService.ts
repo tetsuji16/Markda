@@ -23,16 +23,16 @@ export class ExportService {
     });
     const body = renderer.render(markdown);
     const html = styled
-      ? createHtmlDocument(extractTitle(markdown, path.basename(document.fileName)), body)
+      ? createHtmlDocument(extractTitle(markdown, path.basename(document.fileName)), body, vscode.env.language)
       : body;
     await vscode.workspace.fs.writeFile(target, Buffer.from(html, 'utf8'));
     this.previous = { source: document.uri.toString(), destination: target.toString(), styled };
-    void vscode.window.showInformationMessage(`markda: Exported ${path.basename(target.fsPath)}`);
+    void vscode.window.showInformationMessage(vscode.l10n.t('markda: Exported {0}', path.basename(target.fsPath)));
   }
 
   async exportPrevious(document: vscode.TextDocument): Promise<void> {
     if (!this.previous || this.previous.source !== document.uri.toString()) {
-      void vscode.window.showWarningMessage('markda: This document has no previous export.');
+      void vscode.window.showWarningMessage(vscode.l10n.t('markda: This document has no previous export.'));
       return;
     }
     await this.exportHtml(document, this.previous.styled, vscode.Uri.parse(this.previous.destination));
@@ -46,7 +46,7 @@ export class ExportService {
     return vscode.window.showSaveDialog({
       defaultUri: suggested,
       filters: { HTML: ['html', 'htm'] },
-      saveLabel: 'Export',
+      saveLabel: vscode.l10n.t('Export'),
     });
   }
 }

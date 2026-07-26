@@ -42,9 +42,16 @@ describe('Mermaid rendering in Chromium', () => {
         security: { allowRemoteResources: 'never', allowUnsafeHtml: false },
       },
     };
-    vi.stubGlobal('acquireVsCodeApi', () => ({ getState: () => undefined, setState: vi.fn(), postMessage: vi.fn() }));
+    vi.stubGlobal('acquireVsCodeApi', () => ({
+      getState: () => ({
+        schemaVersion: 2, sourceMode: false, focusMode: false, typewriterMode: false, previewVisible: true,
+      }),
+      setState: vi.fn(),
+      postMessage: vi.fn(),
+    }));
 
     await import('../src/webview/main.js');
+    expect(document.querySelector('#preview-button')).toBeNull();
     const rendered = await waitForMermaid('[data-markda-renderer="mermaid"]');
 
     expect(rendered.querySelector('foreignObject')).toBeNull();
@@ -53,7 +60,6 @@ describe('Mermaid rendering in Chromium', () => {
     expect(rendered.textContent).toContain('Save file');
     expectVisibleLabels(rendered);
 
-    document.querySelector<HTMLButtonElement>('#preview-button')!.click();
     const previewDiagram = await waitForMermaid('#preview .markda-diagram');
     expect(previewDiagram.textContent).toContain('Edit Markdown');
     expect(previewDiagram.textContent).toContain('Update preview');

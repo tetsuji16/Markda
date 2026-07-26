@@ -10,7 +10,7 @@ Markda is a calm, source-preserving Markdown editor for VS Code Desktop. Work di
 
 ## Source-preserving by design
 
-![Markda rendering its specification in the live editor, with document scope and synchronization rules shown as formatted Markdown](media/screenshots/live-editing.png)
+![Markda's compact product showcase in the live editor, demonstrating source mode, focus and typewriter modes, tables, tasks, math, code, and local Markdown rendering](media/screenshots/live-editing.png)
 
 The VS Code text document remains the single source of truth. Markda applies focused edits to that document while preserving untouched content and Markdown syntax. Switch to full source whenever you want to inspect or change it directly.
 

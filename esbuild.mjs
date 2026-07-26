@@ -54,10 +54,18 @@ const builds = [
   },
   {
     ...common,
-    entryPoints: ['src/webview/mermaidLoader.ts'],
-    outfile: 'dist/mermaidLoader.js',
+    entryPoints: { mermaidLoader: 'src/webview/mermaidLoader.ts' },
+    outdir: 'dist',
     platform: 'browser',
     format: 'esm',
+    // Mermaid discovers diagram implementations through dynamic imports. An
+    // `outfile` build collapses every implementation (including heavy
+    // Cytoscape-based diagrams) into one 3.3 MB startup file. Preserve those
+    // boundaries so opening a flowchart downloads and compiles only the core
+    // plus the requested diagram.
+    splitting: true,
+    chunkNames: 'chunks/[name]-[hash]',
+    metafile: true,
   },
 ];
 
@@ -65,7 +73,7 @@ if (watch) {
   const contexts = await Promise.all(builds.map((options) => esbuild.context(options)));
   await Promise.all(contexts.map((context) => context.watch()));
 } else {
-  await Promise.all(builds.map((options) => esbuild.build(options)));
+  const results = await Promise.all(builds.map((options) => esbuild.build(options)));
   // Opening the first document must not silently pull optional language
   // parsers or renderers back into the startup bundle. This budget catches the
   // exact regression where markdown() added the full HTML/CSS/JS stack.
@@ -78,5 +86,32 @@ if (watch) {
   const activationBundleBudget = 64 * 1024;
   if (extensionBytes > activationBundleBudget) {
     throw new Error(`Extension activation bundle is ${extensionBytes} bytes; budget is ${activationBundleBudget} bytes.`);
+  }
+  const mermaidLoaderBytes = (await stat(new URL('./dist/mermaidLoader.js', import.meta.url))).size;
+  const mermaidLoaderBudget = 128 * 1024;
+  if (mermaidLoaderBytes > mermaidLoaderBudget) {
+    throw new Error(`Mermaid entry bundle is ${mermaidLoaderBytes} bytes; budget is ${mermaidLoaderBudget} bytes.`);
+  }
+  const mermaidMetadata = results.find((result) =>
+    Object.values(result.metafile?.outputs ?? {}).some((output) => output.entryPoint === 'src/webview/mermaidLoader.ts'),
+  )?.metafile;
+  if (!mermaidMetadata) throw new Error('Mermaid build metadata is missing.');
+  const mermaidEntry = Object.entries(mermaidMetadata.outputs)
+    .find(([, output]) => output.entryPoint === 'src/webview/mermaidLoader.ts')?.[0];
+  if (!mermaidEntry) throw new Error('Mermaid entry output is missing.');
+  const visited = new Set();
+  const staticModuleBytes = (outputPath) => {
+    if (visited.has(outputPath)) return 0;
+    visited.add(outputPath);
+    const output = mermaidMetadata.outputs[outputPath];
+    if (!output) return 0;
+    return output.bytes + output.imports
+      .filter((dependency) => dependency.kind !== 'dynamic-import' && !dependency.external)
+      .reduce((total, dependency) => total + staticModuleBytes(dependency.path), 0);
+  };
+  const mermaidStartupBytes = staticModuleBytes(mermaidEntry);
+  const mermaidStartupBudget = 1024 * 1024;
+  if (mermaidStartupBytes > mermaidStartupBudget) {
+    throw new Error(`Mermaid startup graph is ${mermaidStartupBytes} bytes; budget is ${mermaidStartupBudget} bytes.`);
   }
 }

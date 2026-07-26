@@ -17,6 +17,8 @@ const { getConfiguration, persistedTheme, updateThemeMode } = vi.hoisted(() => {
 });
 
 vi.mock('vscode', () => ({
+  env: { language: 'en' },
+  l10n: { t: (message: string) => message },
   workspace: {
     getConfiguration,
     onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),

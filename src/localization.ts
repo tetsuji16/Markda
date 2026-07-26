@@ -1,0 +1,208 @@
+export const supportedLocales = ['en', 'ja', 'zh-cn', 'zh-tw', 'ko', 'es', 'fr', 'de', 'pt-br', 'ru', 'ar'] as const;
+export type SupportedLocale = typeof supportedLocales[number];
+
+const en = {
+  editorControls: 'Editor controls',
+  sourceMode: 'Source Code Mode (Ctrl+/)', toggleSourceMode: 'Toggle source code mode', source: 'Source',
+  focusMode: 'Focus Mode (F8)', toggleFocusMode: 'Toggle focus mode', focus: 'Focus',
+  typewriterMode: 'Typewriter Mode (F9)', toggleTypewriterMode: 'Toggle typewriter mode', typewriter: 'Typewriter',
+  bold: 'Bold', italic: 'Italic', inlineCode: 'Inline code', insertLink: 'Insert link',
+  bulletedList: 'Bulleted list', taskList: 'Task list', insertTable: 'Insert table',
+  insertImages: 'Insert images', insertMath: 'Insert math block',
+  toggleTheme: 'Toggle theme (auto → light → dark)', theme: 'Theme',
+  renderedPreview: 'Rendered preview', togglePreview: 'Toggle rendered preview', preview: 'Preview',
+  tableControls: 'Table controls', table: 'Table', row: 'Row', columnShort: 'Col',
+  rowBefore: 'Insert row before', rowAfter: 'Insert row after', deleteRow: 'Delete row',
+  columnLeft: 'Insert column left', columnRight: 'Insert column right', deleteColumn: 'Delete column',
+  alignLeft: 'Align left', alignCenter: 'Align center', alignRight: 'Align right',
+  columns: 'Columns', rows: 'Rows', cancel: 'Cancel', insert: 'Insert',
+  addParagraph: 'Add paragraph after block', remoteImageBlocked: 'Remote image blocked: {0}',
+  remoteImage: 'Remote image', image: 'Image', imageEdit: 'Image: {0}. Activate to edit Markdown.',
+  footnoteEdit: 'Footnote {0}. Activate to edit.', footnoteContent: 'Footnote {0} content',
+  inlineHtmlEdit: 'Rendered inline HTML. Activate to edit source.',
+  entityEdit: '{0}. Activate to edit entity source.', referenceLabel: 'Reference label',
+  referenceDestination: 'Reference destination', referenceTitle: 'Reference title',
+  htmlBlock: 'Rendered HTML block', emptyHtmlBlock: 'HTML block has no visible safe content',
+  indentedCode: 'Indented code content', codeContent: 'Code content', editableTable: 'Editable Markdown table',
+  largeTable: 'Large table ({0} rows × {1} columns)', editHere: 'Edit here', blockSource: 'Block Markdown source',
+  editOrOpenLink: 'Click to edit; Ctrl/Cmd+click to open', openLinkHint: 'Ctrl/Cmd+click to open',
+  markdownEditor: 'markda Markdown editor',
+  saveChanged: 'markda: The document changed while saving. Review the latest contents and save again.',
+  saveSyncFailed: 'markda: Could not synchronize the latest edit before saving.',
+  saveFailed: 'markda: The document could not be saved.',
+  imageFolderOutside: 'markda: The configured image folder must stay inside the workspace.',
+  imageFolderAbsolute: 'markda: Absolute image folders are not allowed. Use a workspace-relative folder.',
+  localImagesOnly: 'markda: Only local image files can be managed.', invalidImagePath: 'markda: The image path is invalid.',
+  imageOutsideWorkspace: 'markda: Image management is restricted to the current workspace.',
+  moveImage: 'Move image to trash?\n{0}', moveToTrash: 'Move to Trash',
+  destinationExists: 'markda: The selected destination already exists.',
+  openExternal: 'Open external link?\n{0}', open: 'Open',
+  localLinksOnly: 'markda: Only local file links can be opened.',
+  linkOutsideWorkspace: 'markda: Links outside the workspace cannot be opened.',
+  filterHeadings: 'Filter headings', headingText: 'Heading text',
+  filterFiles: 'Filter Markdown files', fileOrFolder: 'File or folder name',
+  create: 'Create', duplicate: 'Duplicate', export: 'Export',
+  noActiveDocument: 'markda: No active markda document.',
+  statistics: '{0} words · {1} characters · {2} lines · {3} min read',
+  statusWords: '{0} words', statusTooltip: '{0} words · {1} characters',
+  exported: 'markda: Exported {0}', noPreviousExport: 'markda: This document has no previous export.',
+  current: 'current', recent: 'Recent', goToHeading: 'Go to heading',
+  headingAccessibility: '{0}, heading level {1}{2}', currentSection: ', current section',
+} as const;
+
+type MessageKey = keyof typeof en;
+type Messages = Partial<Record<MessageKey, string>>;
+
+const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
+  ja: {
+    editorControls:'エディター操作',sourceMode:'ソースコードモード (Ctrl+/)',toggleSourceMode:'ソースコードモードを切り替え',source:'ソース',
+    focusMode:'フォーカスモード (F8)',toggleFocusMode:'フォーカスモードを切り替え',focus:'フォーカス',
+    typewriterMode:'タイプライターモード (F9)',toggleTypewriterMode:'タイプライターモードを切り替え',typewriter:'タイプライター',
+    bold:'太字',italic:'斜体',inlineCode:'インラインコード',insertLink:'リンクを挿入',bulletedList:'箇条書き',taskList:'タスクリスト',
+    insertTable:'表を挿入',insertImages:'画像を挿入',insertMath:'数式ブロックを挿入',toggleTheme:'テーマを切り替え（自動 → ライト → ダーク）',
+    theme:'テーマ',renderedPreview:'レンダリングプレビュー',togglePreview:'プレビューを切り替え',preview:'プレビュー',
+    tableControls:'表の操作',table:'表',row:'行',columnShort:'列',rowBefore:'前に行を挿入',rowAfter:'後に行を挿入',deleteRow:'行を削除',
+    columnLeft:'左に列を挿入',columnRight:'右に列を挿入',deleteColumn:'列を削除',alignLeft:'左揃え',alignCenter:'中央揃え',alignRight:'右揃え',
+    columns:'列数',rows:'行数',cancel:'キャンセル',insert:'挿入',addParagraph:'ブロックの後に段落を追加',
+    remoteImageBlocked:'リモート画像をブロックしました: {0}',remoteImage:'リモート画像',image:'画像',imageEdit:'画像: {0}。操作してMarkdownを編集。',
+    footnoteEdit:'脚注 {0}。操作して編集。',footnoteContent:'脚注 {0} の内容',inlineHtmlEdit:'レンダリング済みインラインHTML。操作してソースを編集。',
+    entityEdit:'{0}。操作してエンティティのソースを編集。',referenceLabel:'参照ラベル',referenceDestination:'参照先',referenceTitle:'参照タイトル',
+    htmlBlock:'レンダリング済みHTMLブロック',emptyHtmlBlock:'HTMLブロックに表示可能な安全な内容がありません',indentedCode:'インデントコードの内容',
+    codeContent:'コードの内容',editableTable:'編集可能なMarkdown表',largeTable:'大きな表（{0}行 × {1}列）',editHere:'ここで編集',blockSource:'ブロックのMarkdownソース',
+    editOrOpenLink:'クリックして編集、Ctrl/Cmd+クリックで開く',openLinkHint:'Ctrl/Cmd+クリックで開く',
+    markdownEditor:'markda Markdownエディター',saveChanged:'markda: 保存中に文書が変更されました。最新の内容を確認して再度保存してください。',
+    saveSyncFailed:'markda: 保存前に最新の編集を同期できませんでした。',saveFailed:'markda: 文書を保存できませんでした。',
+    imageFolderOutside:'markda: 画像フォルダーはワークスペース内に指定してください。',imageFolderAbsolute:'markda: 画像フォルダーに絶対パスは使用できません。ワークスペース相対パスを使用してください。',
+    localImagesOnly:'markda: 管理できるのはローカル画像ファイルのみです。',invalidImagePath:'markda: 画像パスが無効です。',
+    imageOutsideWorkspace:'markda: 画像の管理は現在のワークスペース内に制限されています。',moveImage:'画像をゴミ箱に移動しますか？\n{0}',moveToTrash:'ゴミ箱に移動',
+    destinationExists:'markda: 選択した保存先は既に存在します。',openExternal:'外部リンクを開きますか？\n{0}',open:'開く',
+    localLinksOnly:'markda: ローカルファイルのリンクのみ開けます。',linkOutsideWorkspace:'markda: ワークスペース外のリンクは開けません。',
+    filterHeadings:'見出しを絞り込み',headingText:'見出しテキスト',filterFiles:'Markdownファイルを絞り込み',fileOrFolder:'ファイル名またはフォルダー名',
+    create:'作成',duplicate:'複製',export:'エクスポート',noActiveDocument:'markda: アクティブなmarkda文書がありません。',
+    statistics:'{0}語 · {1}文字 · {2}行 · 読了{3}分',statusWords:'{0}語',statusTooltip:'{0}語 · {1}文字',exported:'markda: {0} をエクスポートしました',noPreviousExport:'markda: この文書には前回のエクスポートがありません。',
+    current:'現在',recent:'最近使用したファイル',goToHeading:'見出しへ移動',headingAccessibility:'{0}、見出しレベル{1}{2}',currentSection:'、現在のセクション',
+  },
+  'zh-cn': {
+    editorControls:'编辑器控件',sourceMode:'源代码模式 (Ctrl+/)',toggleSourceMode:'切换源代码模式',source:'源码',focusMode:'专注模式 (F8)',toggleFocusMode:'切换专注模式',focus:'专注',
+    typewriterMode:'打字机模式 (F9)',toggleTypewriterMode:'切换打字机模式',typewriter:'打字机',bold:'粗体',italic:'斜体',inlineCode:'行内代码',insertLink:'插入链接',
+    bulletedList:'项目符号列表',taskList:'任务列表',insertTable:'插入表格',insertImages:'插入图片',insertMath:'插入数学块',toggleTheme:'切换主题（自动 → 浅色 → 深色）',
+    theme:'主题',renderedPreview:'渲染预览',togglePreview:'切换渲染预览',preview:'预览',tableControls:'表格控件',table:'表格',row:'行',columnShort:'列',
+    rowBefore:'在前面插入行',rowAfter:'在后面插入行',deleteRow:'删除行',columnLeft:'在左侧插入列',columnRight:'在右侧插入列',deleteColumn:'删除列',
+    alignLeft:'左对齐',alignCenter:'居中',alignRight:'右对齐',columns:'列数',rows:'行数',cancel:'取消',insert:'插入',
+    markdownEditor:'markda Markdown 编辑器',filterHeadings:'筛选标题',headingText:'标题文本',filterFiles:'筛选 Markdown 文件',fileOrFolder:'文件或文件夹名称',
+    create:'创建',duplicate:'复制',export:'导出',noActiveDocument:'markda: 没有活动的 markda 文档。',statistics:'{0} 个词 · {1} 个字符 · {2} 行 · 阅读 {3} 分钟',
+    exported:'markda: 已导出 {0}',noPreviousExport:'markda: 此文档没有上次导出。',current:'当前',recent:'最近',goToHeading:'转到标题',
+  },
+  'zh-tw': {
+    editorControls:'編輯器控制項',sourceMode:'原始碼模式 (Ctrl+/)',toggleSourceMode:'切換原始碼模式',source:'原始碼',focusMode:'專注模式 (F8)',toggleFocusMode:'切換專注模式',focus:'專注',
+    typewriterMode:'打字機模式 (F9)',toggleTypewriterMode:'切換打字機模式',typewriter:'打字機',bold:'粗體',italic:'斜體',inlineCode:'行內程式碼',insertLink:'插入連結',
+    bulletedList:'項目符號清單',taskList:'工作清單',insertTable:'插入表格',insertImages:'插入圖片',insertMath:'插入數學區塊',toggleTheme:'切換佈景主題（自動 → 淺色 → 深色）',
+    theme:'佈景主題',renderedPreview:'轉譯預覽',togglePreview:'切換轉譯預覽',preview:'預覽',tableControls:'表格控制項',table:'表格',row:'列',columnShort:'欄',
+    rowBefore:'在前面插入列',rowAfter:'在後面插入列',deleteRow:'刪除列',columnLeft:'在左側插入欄',columnRight:'在右側插入欄',deleteColumn:'刪除欄',
+    alignLeft:'靠左對齊',alignCenter:'置中',alignRight:'靠右對齊',columns:'欄數',rows:'列數',cancel:'取消',insert:'插入',
+    markdownEditor:'markda Markdown 編輯器',filterHeadings:'篩選標題',headingText:'標題文字',filterFiles:'篩選 Markdown 檔案',fileOrFolder:'檔案或資料夾名稱',
+    create:'建立',duplicate:'複製',export:'匯出',noActiveDocument:'markda: 沒有作用中的 markda 文件。',statistics:'{0} 個詞 · {1} 個字元 · {2} 列 · 閱讀 {3} 分鐘',
+    exported:'markda: 已匯出 {0}',noPreviousExport:'markda: 此文件沒有上次匯出。',current:'目前',recent:'最近',goToHeading:'移至標題',
+  },
+  ko: {
+    editorControls:'편집기 컨트롤',sourceMode:'소스 코드 모드 (Ctrl+/)',toggleSourceMode:'소스 코드 모드 전환',source:'소스',focusMode:'집중 모드 (F8)',toggleFocusMode:'집중 모드 전환',focus:'집중',
+    typewriterMode:'타자기 모드 (F9)',toggleTypewriterMode:'타자기 모드 전환',typewriter:'타자기',bold:'굵게',italic:'기울임꼴',inlineCode:'인라인 코드',insertLink:'링크 삽입',
+    bulletedList:'글머리 기호 목록',taskList:'작업 목록',insertTable:'표 삽입',insertImages:'이미지 삽입',insertMath:'수식 블록 삽입',toggleTheme:'테마 전환(자동 → 밝게 → 어둡게)',
+    theme:'테마',renderedPreview:'렌더링된 미리 보기',togglePreview:'미리 보기 전환',preview:'미리 보기',tableControls:'표 컨트롤',table:'표',row:'행',columnShort:'열',
+    rowBefore:'앞에 행 삽입',rowAfter:'뒤에 행 삽입',deleteRow:'행 삭제',columnLeft:'왼쪽에 열 삽입',columnRight:'오른쪽에 열 삽입',deleteColumn:'열 삭제',
+    alignLeft:'왼쪽 맞춤',alignCenter:'가운데 맞춤',alignRight:'오른쪽 맞춤',columns:'열',rows:'행',cancel:'취소',insert:'삽입',
+    markdownEditor:'markda Markdown 편집기',filterHeadings:'제목 필터',headingText:'제목 텍스트',filterFiles:'Markdown 파일 필터',fileOrFolder:'파일 또는 폴더 이름',
+    create:'만들기',duplicate:'복제',export:'내보내기',noActiveDocument:'markda: 활성 markda 문서가 없습니다.',statistics:'단어 {0}개 · 문자 {1}개 · {2}줄 · 읽기 {3}분',
+    exported:'markda: {0} 내보냄',noPreviousExport:'markda: 이 문서에는 이전 내보내기가 없습니다.',current:'현재',recent:'최근',goToHeading:'제목으로 이동',
+  },
+  es: {
+    editorControls:'Controles del editor',sourceMode:'Modo de código fuente (Ctrl+/)',toggleSourceMode:'Alternar modo de código fuente',source:'Fuente',focusMode:'Modo de concentración (F8)',toggleFocusMode:'Alternar modo de concentración',focus:'Concentración',
+    typewriterMode:'Modo máquina de escribir (F9)',toggleTypewriterMode:'Alternar modo máquina de escribir',typewriter:'Máquina de escribir',bold:'Negrita',italic:'Cursiva',inlineCode:'Código en línea',insertLink:'Insertar vínculo',
+    bulletedList:'Lista con viñetas',taskList:'Lista de tareas',insertTable:'Insertar tabla',insertImages:'Insertar imágenes',insertMath:'Insertar bloque matemático',toggleTheme:'Cambiar tema (automático → claro → oscuro)',
+    theme:'Tema',renderedPreview:'Vista previa renderizada',togglePreview:'Alternar vista previa',preview:'Vista previa',tableControls:'Controles de tabla',table:'Tabla',row:'Fila',columnShort:'Col.',
+    rowBefore:'Insertar fila antes',rowAfter:'Insertar fila después',deleteRow:'Eliminar fila',columnLeft:'Insertar columna a la izquierda',columnRight:'Insertar columna a la derecha',deleteColumn:'Eliminar columna',
+    alignLeft:'Alinear a la izquierda',alignCenter:'Centrar',alignRight:'Alinear a la derecha',columns:'Columnas',rows:'Filas',cancel:'Cancelar',insert:'Insertar',
+    markdownEditor:'Editor Markdown de markda',filterHeadings:'Filtrar encabezados',headingText:'Texto del encabezado',filterFiles:'Filtrar archivos Markdown',fileOrFolder:'Nombre de archivo o carpeta',
+    create:'Crear',duplicate:'Duplicar',export:'Exportar',noActiveDocument:'markda: No hay ningún documento markda activo.',statistics:'{0} palabras · {1} caracteres · {2} líneas · {3} min de lectura',
+    exported:'markda: Se exportó {0}',noPreviousExport:'markda: Este documento no tiene una exportación anterior.',current:'actual',recent:'Recientes',goToHeading:'Ir al encabezado',
+  },
+  fr: {
+    editorControls:'Commandes de l’éditeur',sourceMode:'Mode code source (Ctrl+/)',toggleSourceMode:'Activer/désactiver le mode source',source:'Source',focusMode:'Mode concentration (F8)',toggleFocusMode:'Activer/désactiver le mode concentration',focus:'Concentration',
+    typewriterMode:'Mode machine à écrire (F9)',toggleTypewriterMode:'Activer/désactiver le mode machine à écrire',typewriter:'Machine à écrire',bold:'Gras',italic:'Italique',inlineCode:'Code en ligne',insertLink:'Insérer un lien',
+    bulletedList:'Liste à puces',taskList:'Liste de tâches',insertTable:'Insérer un tableau',insertImages:'Insérer des images',insertMath:'Insérer un bloc mathématique',toggleTheme:'Changer de thème (auto → clair → sombre)',
+    theme:'Thème',renderedPreview:'Aperçu rendu',togglePreview:'Activer/désactiver l’aperçu',preview:'Aperçu',tableControls:'Commandes du tableau',table:'Tableau',row:'Ligne',columnShort:'Col.',
+    rowBefore:'Insérer une ligne avant',rowAfter:'Insérer une ligne après',deleteRow:'Supprimer la ligne',columnLeft:'Insérer une colonne à gauche',columnRight:'Insérer une colonne à droite',deleteColumn:'Supprimer la colonne',
+    alignLeft:'Aligner à gauche',alignCenter:'Centrer',alignRight:'Aligner à droite',columns:'Colonnes',rows:'Lignes',cancel:'Annuler',insert:'Insérer',
+    markdownEditor:'Éditeur Markdown markda',filterHeadings:'Filtrer les titres',headingText:'Texte du titre',filterFiles:'Filtrer les fichiers Markdown',fileOrFolder:'Nom du fichier ou dossier',
+    create:'Créer',duplicate:'Dupliquer',export:'Exporter',noActiveDocument:'markda : Aucun document markda actif.',statistics:'{0} mots · {1} caractères · {2} lignes · {3} min de lecture',
+    exported:'markda : {0} exporté',noPreviousExport:'markda : Ce document n’a aucune exportation précédente.',current:'actuel',recent:'Récents',goToHeading:'Accéder au titre',
+  },
+  de: {
+    editorControls:'Editorsteuerelemente',sourceMode:'Quelltextmodus (Ctrl+/)',toggleSourceMode:'Quelltextmodus umschalten',source:'Quelle',focusMode:'Fokusmodus (F8)',toggleFocusMode:'Fokusmodus umschalten',focus:'Fokus',
+    typewriterMode:'Schreibmaschinenmodus (F9)',toggleTypewriterMode:'Schreibmaschinenmodus umschalten',typewriter:'Schreibmaschine',bold:'Fett',italic:'Kursiv',inlineCode:'Inlinecode',insertLink:'Link einfügen',
+    bulletedList:'Aufzählung',taskList:'Aufgabenliste',insertTable:'Tabelle einfügen',insertImages:'Bilder einfügen',insertMath:'Mathematikblock einfügen',toggleTheme:'Design wechseln (automatisch → hell → dunkel)',
+    theme:'Design',renderedPreview:'Gerenderte Vorschau',togglePreview:'Vorschau umschalten',preview:'Vorschau',tableControls:'Tabellensteuerelemente',table:'Tabelle',row:'Zeile',columnShort:'Sp.',
+    rowBefore:'Zeile davor einfügen',rowAfter:'Zeile danach einfügen',deleteRow:'Zeile löschen',columnLeft:'Spalte links einfügen',columnRight:'Spalte rechts einfügen',deleteColumn:'Spalte löschen',
+    alignLeft:'Linksbündig',alignCenter:'Zentriert',alignRight:'Rechtsbündig',columns:'Spalten',rows:'Zeilen',cancel:'Abbrechen',insert:'Einfügen',
+    markdownEditor:'markda Markdown-Editor',filterHeadings:'Überschriften filtern',headingText:'Überschriftentext',filterFiles:'Markdown-Dateien filtern',fileOrFolder:'Datei- oder Ordnername',
+    create:'Erstellen',duplicate:'Duplizieren',export:'Exportieren',noActiveDocument:'markda: Kein aktives markda-Dokument.',statistics:'{0} Wörter · {1} Zeichen · {2} Zeilen · {3} Min. Lesezeit',
+    exported:'markda: {0} exportiert',noPreviousExport:'markda: Dieses Dokument hat keinen vorherigen Export.',current:'aktuell',recent:'Zuletzt verwendet',goToHeading:'Zur Überschrift',
+  },
+  'pt-br': {
+    editorControls:'Controles do editor',sourceMode:'Modo de código-fonte (Ctrl+/)',toggleSourceMode:'Alternar modo de código-fonte',source:'Fonte',focusMode:'Modo de foco (F8)',toggleFocusMode:'Alternar modo de foco',focus:'Foco',
+    typewriterMode:'Modo máquina de escrever (F9)',toggleTypewriterMode:'Alternar modo máquina de escrever',typewriter:'Máquina de escrever',bold:'Negrito',italic:'Itálico',inlineCode:'Código embutido',insertLink:'Inserir link',
+    bulletedList:'Lista com marcadores',taskList:'Lista de tarefas',insertTable:'Inserir tabela',insertImages:'Inserir imagens',insertMath:'Inserir bloco matemático',toggleTheme:'Alternar tema (automático → claro → escuro)',
+    theme:'Tema',renderedPreview:'Visualização renderizada',togglePreview:'Alternar visualização',preview:'Visualização',tableControls:'Controles da tabela',table:'Tabela',row:'Linha',columnShort:'Col.',
+    rowBefore:'Inserir linha antes',rowAfter:'Inserir linha depois',deleteRow:'Excluir linha',columnLeft:'Inserir coluna à esquerda',columnRight:'Inserir coluna à direita',deleteColumn:'Excluir coluna',
+    alignLeft:'Alinhar à esquerda',alignCenter:'Centralizar',alignRight:'Alinhar à direita',columns:'Colunas',rows:'Linhas',cancel:'Cancelar',insert:'Inserir',
+    markdownEditor:'Editor Markdown do markda',filterHeadings:'Filtrar títulos',headingText:'Texto do título',filterFiles:'Filtrar arquivos Markdown',fileOrFolder:'Nome do arquivo ou pasta',
+    create:'Criar',duplicate:'Duplicar',export:'Exportar',noActiveDocument:'markda: Nenhum documento markda ativo.',statistics:'{0} palavras · {1} caracteres · {2} linhas · {3} min de leitura',
+    exported:'markda: {0} exportado',noPreviousExport:'markda: Este documento não tem exportação anterior.',current:'atual',recent:'Recentes',goToHeading:'Ir para o título',
+  },
+  ru: {
+    editorControls:'Элементы управления редактором',sourceMode:'Режим исходного кода (Ctrl+/)',toggleSourceMode:'Переключить режим исходного кода',source:'Код',focusMode:'Режим фокусировки (F8)',toggleFocusMode:'Переключить режим фокусировки',focus:'Фокус',
+    typewriterMode:'Режим пишущей машинки (F9)',toggleTypewriterMode:'Переключить режим пишущей машинки',typewriter:'Машинка',bold:'Полужирный',italic:'Курсив',inlineCode:'Встроенный код',insertLink:'Вставить ссылку',
+    bulletedList:'Маркированный список',taskList:'Список задач',insertTable:'Вставить таблицу',insertImages:'Вставить изображения',insertMath:'Вставить математический блок',toggleTheme:'Переключить тему (авто → светлая → тёмная)',
+    theme:'Тема',renderedPreview:'Предпросмотр',togglePreview:'Переключить предпросмотр',preview:'Предпросмотр',tableControls:'Управление таблицей',table:'Таблица',row:'Строка',columnShort:'Стлб.',
+    rowBefore:'Вставить строку выше',rowAfter:'Вставить строку ниже',deleteRow:'Удалить строку',columnLeft:'Вставить столбец слева',columnRight:'Вставить столбец справа',deleteColumn:'Удалить столбец',
+    alignLeft:'По левому краю',alignCenter:'По центру',alignRight:'По правому краю',columns:'Столбцы',rows:'Строки',cancel:'Отмена',insert:'Вставить',
+    markdownEditor:'Редактор Markdown markda',filterHeadings:'Фильтр заголовков',headingText:'Текст заголовка',filterFiles:'Фильтр файлов Markdown',fileOrFolder:'Имя файла или папки',
+    create:'Создать',duplicate:'Дублировать',export:'Экспорт',noActiveDocument:'markda: Нет активного документа markda.',statistics:'{0} слов · {1} символов · {2} строк · {3} мин чтения',
+    exported:'markda: Экспортирован {0}',noPreviousExport:'markda: У этого документа нет предыдущего экспорта.',current:'текущий',recent:'Недавние',goToHeading:'Перейти к заголовку',
+  },
+  ar: {
+    editorControls:'عناصر تحكم المحرر',sourceMode:'وضع الشفرة المصدرية (Ctrl+/)',toggleSourceMode:'تبديل وضع الشفرة المصدرية',source:'المصدر',
+    focusMode:'وضع التركيز (F8)',toggleFocusMode:'تبديل وضع التركيز',focus:'تركيز',typewriterMode:'وضع الآلة الكاتبة (F9)',toggleTypewriterMode:'تبديل وضع الآلة الكاتبة',typewriter:'آلة كاتبة',
+    bold:'غامق',italic:'مائل',inlineCode:'شفرة مضمنة',insertLink:'إدراج رابط',bulletedList:'قائمة نقطية',taskList:'قائمة مهام',insertTable:'إدراج جدول',
+    insertImages:'إدراج صور',insertMath:'إدراج كتلة رياضية',toggleTheme:'تبديل النسق (تلقائي ← فاتح ← داكن)',theme:'النسق',
+    renderedPreview:'معاينة منسّقة',togglePreview:'تبديل المعاينة',preview:'معاينة',tableControls:'عناصر تحكم الجدول',table:'جدول',row:'صف',columnShort:'عمود',
+    rowBefore:'إدراج صف قبله',rowAfter:'إدراج صف بعده',deleteRow:'حذف الصف',columnLeft:'إدراج عمود إلى اليسار',columnRight:'إدراج عمود إلى اليمين',deleteColumn:'حذف العمود',
+    alignLeft:'محاذاة لليسار',alignCenter:'توسيط',alignRight:'محاذاة لليمين',columns:'الأعمدة',rows:'الصفوف',cancel:'إلغاء',insert:'إدراج',
+    markdownEditor:'محرر Markdown من markda',filterHeadings:'تصفية العناوين',headingText:'نص العنوان',filterFiles:'تصفية ملفات Markdown',fileOrFolder:'اسم الملف أو المجلد',
+    create:'إنشاء',duplicate:'تكرار',export:'تصدير',noActiveDocument:'markda: لا يوجد مستند markda نشط.',statistics:'{0} كلمة · {1} حرفًا · {2} سطرًا · {3} دقيقة قراءة',
+    exported:'markda: تم تصدير {0}',noPreviousExport:'markda: لا يحتوي هذا المستند على تصدير سابق.',current:'الحالي',recent:'الأخيرة',goToHeading:'الانتقال إلى العنوان',
+  },
+};
+
+export function resolveLocale(locale: string): SupportedLocale {
+  const normalized = locale.trim().toLowerCase().replace(/_/gu, '-');
+  if (normalized === 'zh-hans' || normalized.startsWith('zh-cn') || normalized.startsWith('zh-sg')) return 'zh-cn';
+  if (normalized === 'zh-hant' || normalized.startsWith('zh-tw') || normalized.startsWith('zh-hk') || normalized.startsWith('zh-mo')) return 'zh-tw';
+  if (normalized.startsWith('pt')) return 'pt-br';
+  const exact = supportedLocales.find((candidate) => candidate === normalized);
+  if (exact) return exact;
+  const language = normalized.split('-')[0];
+  return supportedLocales.find((candidate) => candidate === language) ?? 'en';
+}
+
+export function translate(locale: string, key: MessageKey, ...values: readonly (string | number)[]): string {
+  const resolved = resolveLocale(locale);
+  const template = resolved === 'en' ? en[key] : catalogs[resolved][key] ?? en[key];
+  let result: string = template;
+  for (const [index, value] of values.entries()) result = result.replaceAll(`{${index}}`, String(value));
+  return result;
+}
+
+export function isRtlLocale(locale: string): boolean {
+  return /^(?:ar|fa|he|ur)(?:-|$)/iu.test(locale.trim());
+}

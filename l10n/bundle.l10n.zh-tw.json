@@ -1,0 +1,19 @@
+{
+  "Filter headings": "篩選標題",
+  "Heading text": "標題文字",
+  "Filter Markdown files": "篩選 Markdown 檔案",
+  "File or folder name": "檔案或資料夾名稱",
+  "Create": "建立",
+  "Duplicate": "複製",
+  "{0} words · {1} characters · {2} lines · {3} min read": "{0} 個詞 · {1} 個字元 · {2} 列 · 閱讀 {3} 分鐘",
+  "markda: No active markda document.": "markda: 沒有作用中的 markda 文件。",
+  "Export": "匯出",
+  "markda: Exported {0}": "markda: 已匯出 {0}",
+  "markda: This document has no previous export.": "markda: 此文件沒有上次匯出。",
+  "current": "目前",
+  "Recent": "最近",
+  "Go to heading": "移至標題",
+  "markda Markdown editor": "markda Markdown 編輯器",
+  "{0} words": "{0} 個詞",
+  "{0} words · {1} characters": "{0} 個詞 · {1} 個字元"
+}

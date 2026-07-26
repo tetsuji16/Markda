@@ -1,0 +1,19 @@
+{
+  "Filter headings": "Фильтр заголовков",
+  "Heading text": "Текст заголовка",
+  "Filter Markdown files": "Фильтр файлов Markdown",
+  "File or folder name": "Имя файла или папки",
+  "Create": "Создать",
+  "Duplicate": "Дублировать",
+  "{0} words · {1} characters · {2} lines · {3} min read": "{0} слов · {1} символов · {2} строк · {3} мин чтения",
+  "markda: No active markda document.": "markda: Нет активного документа markda.",
+  "Export": "Экспорт",
+  "markda: Exported {0}": "markda: Экспортирован {0}",
+  "markda: This document has no previous export.": "markda: У этого документа нет предыдущего экспорта.",
+  "current": "текущий",
+  "Recent": "Недавние",
+  "Go to heading": "Перейти к заголовку",
+  "markda Markdown editor": "Редактор Markdown markda",
+  "{0} words": "{0} слов",
+  "{0} words · {1} characters": "{0} слов · {1} символов"
+}

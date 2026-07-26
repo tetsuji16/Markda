@@ -1,0 +1,19 @@
+{
+  "Filter headings": "Überschriften filtern",
+  "Heading text": "Überschriftentext",
+  "Filter Markdown files": "Markdown-Dateien filtern",
+  "File or folder name": "Datei- oder Ordnername",
+  "Create": "Erstellen",
+  "Duplicate": "Duplizieren",
+  "{0} words · {1} characters · {2} lines · {3} min read": "{0} Wörter · {1} Zeichen · {2} Zeilen · {3} Min. Lesezeit",
+  "markda: No active markda document.": "markda: Kein aktives markda-Dokument.",
+  "Export": "Exportieren",
+  "markda: Exported {0}": "markda: {0} exportiert",
+  "markda: This document has no previous export.": "markda: Dieses Dokument hat keinen vorherigen Export.",
+  "current": "aktuell",
+  "Recent": "Zuletzt verwendet",
+  "Go to heading": "Zur Überschrift",
+  "markda Markdown editor": "markda Markdown-Editor",
+  "{0} words": "{0} Wörter",
+  "{0} words · {1} characters": "{0} Wörter · {1} Zeichen"
+}

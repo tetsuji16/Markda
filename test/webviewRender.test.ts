@@ -13,7 +13,7 @@ describe('live Markdown webview', () => {
     const text = '# Support\n\nUse **Output** and open [GitHub Issues](https://example.com/issues).';
     (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial = {
       type: 'initialize', uri: 'file:///support.md', resourceBaseUri: 'file:///', themeBaseUri: 'data:text/css,',
-      version: 1, text,
+      locale: 'ja', direction: 'ltr', version: 1, text,
       settings: {
         contentWidth: 860, autoPairMarkdown: true, typewriterKeepCentered: true,
         previewUpdateDelay: 500, liveTableMaxCells: 600,
@@ -38,5 +38,7 @@ describe('live Markdown webview', () => {
     // A logical CodeMirror selection exists before the editor is focused, but
     // it must not expose Markdown source syntax on initial render.
     expect(editor.querySelectorAll('.markda-meta-expanded')).toHaveLength(0);
+    expect(document.querySelector('[data-command="insertTable"]')?.getAttribute('title')).toBe('表を挿入');
+    expect(document.querySelector('#table-dialog-title')?.textContent).toBe('表を挿入');
   });
 });
