@@ -41,15 +41,40 @@ describe('VS Code-style document search in Chromium', () => {
     const panel = document.querySelector<HTMLElement>('.cm-panel.cm-search')!;
     const panels = panel.parentElement!;
     const search = panel.querySelector<HTMLInputElement>('input[name=search]')!;
+    const replace = panel.querySelector<HTMLInputElement>('input[name=replace]')!;
+    const replaceToggle = panel.querySelector<HTMLButtonElement>('.markda-replace-toggle')!;
     expect(panel).not.toBeNull();
     expect(getComputedStyle(panels).position).toBe('absolute');
     expect(getComputedStyle(panel).display).toBe('grid');
     expect(getComputedStyle(panel).backgroundColor).toBe('rgb(243, 243, 243)');
     expect(getComputedStyle(panel).boxShadow).not.toBe('none');
     expect(getComputedStyle(search).height).toBe('24px');
+    expect(panel.classList.contains('markda-replace-collapsed')).toBe(true);
+    expect(replaceToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(getComputedStyle(replace).display).toBe('none');
+    expect(replaceToggle.getBoundingClientRect().left).toBeLessThan(search.getBoundingClientRect().left);
+    for (const control of panel.querySelectorAll<HTMLElement>('button, label')) {
+      expect(getComputedStyle(control).fontSize).toBe('0px');
+      if (getComputedStyle(control).display === 'none') continue;
+      expect(control.getBoundingClientRect().width).toBe(24);
+      expect(control.getBoundingClientRect().height).toBe(24);
+    }
 
     await userEvent.keyboard('alpha');
     await settle();
+    expect(document.querySelectorAll('.cm-searchMatch')).toHaveLength(3);
+
+    const textBeforeNavigation = content.textContent;
+    await userEvent.keyboard('{Enter}');
+    await settle();
+    expect(document.activeElement).toBe(search);
+    expect(document.querySelectorAll('.cm-searchMatch-selected')).toHaveLength(1);
+    const firstMatchLeft = document.querySelector<HTMLElement>('.cm-searchMatch-selected')!.getBoundingClientRect().left;
+    await userEvent.keyboard('{Enter}');
+    await settle();
+    expect(document.activeElement).toBe(search);
+    expect(document.querySelector<HTMLElement>('.cm-searchMatch-selected')!.getBoundingClientRect().left).toBeGreaterThan(firstMatchLeft);
+    expect(content.textContent).toBe(textBeforeNavigation);
     expect(document.querySelectorAll('.cm-searchMatch')).toHaveLength(3);
 
     const caseToggle = panel.querySelector<HTMLInputElement>('input[name=case]')!;
@@ -58,12 +83,31 @@ describe('VS Code-style document search in Chromium', () => {
     expect(caseToggle.checked).toBe(true);
     expect(document.querySelectorAll('.cm-searchMatch')).toHaveLength(2);
 
+    await userEvent.click(panel.querySelector<HTMLButtonElement>('button[name=next]')!);
+    await settle();
+    expect(panel.contains(document.activeElement)).toBe(true);
+    expect(document.querySelectorAll('.cm-searchMatch-selected')).toHaveLength(1);
+
+    const collapsedHeight = panel.getBoundingClientRect().height;
+    await userEvent.click(replaceToggle);
+    await settle();
+    expect(panel.classList.contains('markda-replace-collapsed')).toBe(false);
+    expect(replaceToggle.getAttribute('aria-expanded')).toBe('true');
+    expect(getComputedStyle(replace).display).not.toBe('none');
+    expect(panel.getBoundingClientRect().height).toBeGreaterThan(collapsedHeight);
+    expect(replace.getBoundingClientRect().top).toBeGreaterThan(search.getBoundingClientRect().top);
+
     document.querySelector<HTMLButtonElement>('#theme-toggle')!.click();
     await settle();
     expect(getComputedStyle(panel).backgroundColor).toBe('rgb(37, 37, 38)');
 
+    search.focus();
     await userEvent.keyboard('{Escape}');
     await settle();
     expect(document.querySelector('.cm-panel.cm-search')).toBeNull();
+    expect(document.activeElement).toBe(content);
+    await userEvent.keyboard('omega');
+    await settle();
+    expect(content.textContent).toContain('omega');
   });
 });
