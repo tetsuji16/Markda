@@ -32,7 +32,7 @@ import {
 import {
   CompositionCommitGate, documentLineSeparator, editablePlainText, historyShortcut, htmlFragmentToMarkdown, liveEnterEdit,
   markdownPairDeletion, markdownPairEdit, normalizeDocumentText, serializedDocumentOffset, serializeDocumentText,
-  type DocumentLineSeparator,
+  type DocumentLineSeparator, type TextEdit,
 } from './editorLogic.js';
 
 declare function acquireVsCodeApi<T = unknown>(): {
@@ -1022,28 +1022,35 @@ function currentSelection(): { anchor: number; head: number } {
   return { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head };
 }
 
-function createMarkdownPairing() { return EditorView.inputHandler.of((editor, from, to, text) => {
-  if (!settings.autoPairMarkdown) return false;
-  const edit = markdownPairEdit(editor.state.doc.toString(), from, to, text, settings.markdown.math);
+function applyRelativeTextEdit(editor: EditorView, offset: number, edit: TextEdit | undefined): boolean {
   if (!edit) return false;
   editor.dispatch({
-    changes: { from: edit.from, to: edit.to, insert: edit.insert },
-    selection: EditorSelection.cursor(edit.cursor),
+    changes: { from: offset + edit.from, to: offset + edit.to, insert: edit.insert },
+    selection: EditorSelection.cursor(offset + edit.cursor),
   });
   return true;
+}
+
+function createMarkdownPairing() { return EditorView.inputHandler.of((editor, from, to, text) => {
+  if (!settings.autoPairMarkdown) return false;
+  const selectionLength = to - from;
+  // Pairing only depends on the selected text and the next character. Avoid
+  // materializing the complete document on every ordinary text input.
+  const context = editor.state.sliceDoc(from, Math.min(editor.state.doc.length, to + 1));
+  return applyRelativeTextEdit(
+    editor,
+    from,
+    markdownPairEdit(context, 0, selectionLength, text, settings.markdown.math),
+  );
 }); }
 
 function deleteEmptyMarkdownPair(editor: EditorView): boolean {
   if (!settings.autoPairMarkdown) return false;
   const selection = editor.state.selection.main;
-  if (!selection.empty) return false;
-  const edit = markdownPairDeletion(editor.state.doc.toString(), selection.head, settings.markdown.math);
-  if (!edit) return false;
-  editor.dispatch({
-    changes: { from: edit.from, to: edit.to, insert: edit.insert },
-    selection: EditorSelection.cursor(edit.cursor),
-  });
-  return true;
+  if (!selection.empty || selection.head <= 0 || selection.head >= editor.state.doc.length) return false;
+  const offset = selection.head - 1;
+  const context = editor.state.sliceDoc(offset, selection.head + 1);
+  return applyRelativeTextEdit(editor, offset, markdownPairDeletion(context, 1, settings.markdown.math));
 }
 
 function skipAutomaticCloser(editor: EditorView, character: string): boolean {
@@ -3288,11 +3295,20 @@ function createLivePreviewPlugin() {
       };
     }
     update(update: ViewUpdate): void {
-      const modeChanged = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(setMode)));
-      const refreshRequested = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(refreshLivePreview)));
-      const inlineRefreshRequested = update.transactions.some((transaction) =>
-        transaction.effects.some((effect) => effect.is(refreshInlinePreview)));
-      const settleRequested = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(settleLivePreview)));
+      let modeChanged = false;
+      let refreshRequested = false;
+      let inlineRefreshRequested = false;
+      let settleRequested = false;
+      // A view update may contain several transactions. Classify their effects
+      // in one pass instead of rescanning every effect for each refresh kind.
+      for (const transaction of update.transactions) {
+        for (const effect of transaction.effects) {
+          if (effect.is(setMode)) modeChanged = true;
+          else if (effect.is(refreshLivePreview)) refreshRequested = true;
+          else if (effect.is(refreshInlinePreview)) inlineRefreshRequested = true;
+          else if (effect.is(settleLivePreview)) settleRequested = true;
+        }
+      }
       if (settleRequested) this.pointerActive = false;
 
       // Keep the exact DOM geometry that CodeMirror used for its pointer hit-test
