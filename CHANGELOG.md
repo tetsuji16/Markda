@@ -2,6 +2,14 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.15 - 2026-07-26
+
+- Reduced first-file activation cost by splitting the HTML export renderer out of the extension startup bundle.
+- Removed unused HTML, CSS, and JavaScript language parsers from the editor startup path and enforced bundle-size budgets.
+- Eliminated duplicate initial live-preview work and kept theme updates from rebuilding unchanged syntax highlighting.
+- Updated the Files view incrementally instead of rescanning or rebuilding the complete workspace tree when opening and changing Markdown files.
+- Added large-document and sub-second Chromium startup regression coverage.
+
 ## 0.1.14 - 2026-07-25
 
 - Rendered paragraph soft breaks as spaces in live mode while preserving explicit hard breaks and block boundaries.

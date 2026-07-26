@@ -68,10 +68,13 @@ describe('live Markdown initialization in Chromium', () => {
       postMessage: vi.fn(),
     }));
 
+    const startupStarted = performance.now();
     const { __getEditorView } = await import('../src/webview/main.js');
     await settle();
+    const startupElapsed = performance.now() - startupStarted;
 
     const view = __getEditorView();
+    expect(startupElapsed).toBeLessThan(1_000);
     expect(document.querySelector('.markda-meta')).not.toBeNull();
     expect(document.querySelector('.markda-inline-math')).not.toBeNull();
     expect(document.querySelector('.markda-live-table-wrap')).not.toBeNull();

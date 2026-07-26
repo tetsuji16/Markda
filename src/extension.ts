@@ -36,9 +36,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.window.registerTreeDataProvider('markda.outline', outline),
     vscode.window.registerTreeDataProvider('markda.files', files),
-    vscode.workspace.onDidCreateFiles(() => files.notifyFileChanges()),
-    vscode.workspace.onDidDeleteFiles(() => files.notifyFileChanges()),
-    vscode.workspace.onDidRenameFiles(() => files.notifyFileChanges()),
+    vscode.workspace.onDidCreateFiles((event) => files.addFiles(event.files)),
+    vscode.workspace.onDidDeleteFiles((event) => files.deleteFiles(event.files)),
+    vscode.workspace.onDidRenameFiles((event) => files.renameFiles(event.files)),
     register('markda.open', async (uri?: vscode.Uri) => openWithMarkda(uri, files)),
     register('markda.newFile', () => createMarkdownFile(files)),
     register('markda.duplicate', () => duplicateDocument(editor.getActiveDocument(), files)),
@@ -92,7 +92,6 @@ async function openWithMarkda(uri: vscode.Uri | undefined, files: FileProvider):
   const resource = uri ?? vscode.window.activeTextEditor?.document.uri ?? await pickMarkdownFile();
   if (resource) {
     await vscode.commands.executeCommand('vscode.openWith', resource, MarkdaEditorProvider.viewType);
-    files.recordOpen(resource);
   }
 }
 

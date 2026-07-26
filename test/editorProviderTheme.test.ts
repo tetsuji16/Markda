@@ -33,12 +33,16 @@ vi.mock('vscode', () => ({
   ConfigurationTarget: { Global: 1 },
 }));
 
-import { MarkdaEditorProvider } from '../src/editorProvider.js';
+import { escapeEmbeddedJson, MarkdaEditorProvider } from '../src/editorProvider.js';
 
 describe('editor provider theme synchronization', () => {
   beforeEach(() => {
     persistedTheme.value = 'dark';
     updateThemeMode.mockClear();
+  });
+
+  it('escapes executable HTML characters in one embedded JSON pass', () => {
+    expect(escapeEmbeddedJson('a<&>\u2028\u2029z')).toBe('a\\u003c\\u0026\\u003e\\u2028\\u2029z');
   });
 
   it('re-sends the selected theme whenever another editor tab becomes active', async () => {

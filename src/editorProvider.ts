@@ -171,10 +171,11 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
   }
 
   private async applyFinalSync(view: EditorView, uri: string, expectedText: string, text: string): Promise<void> {
-    if (uri !== view.document.uri.toString() || text === view.document.getText()) return;
+    const documentText = view.document.getText();
+    if (uri !== view.document.uri.toString() || text === documentText) return;
     // Only finish a local tail when all preceding queued local edits produced the
     // exact state predicted by the webview. Never overwrite an external change.
-    if (view.document.getText() !== expectedText) {
+    if (documentText !== expectedText) {
       this.resync(view);
       return;
     }
@@ -186,12 +187,13 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
 
   private async saveDocument(view: EditorView, uri: string, expectedText: string, text: string): Promise<void> {
     if (uri !== view.document.uri.toString()) return;
-    if (text !== view.document.getText()) {
+    const documentText = view.document.getText();
+    if (text !== documentText) {
       // The save snapshot is queued after any edits already posted by the
       // webview. It may therefore fill only the local, not-yet-posted tail. If
       // something else changed the document first, preserve that change and
       // ask the webview to reconcile instead of overwriting it.
-      if (view.document.getText() !== expectedText) {
+      if (documentText !== expectedText) {
         this.resync(view);
         void vscode.window.showWarningMessage('markda: The document changed while saving. Review the latest contents and save again.');
         return;
@@ -211,8 +213,10 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
   }
 
   private onDocumentChanged(event: vscode.TextDocumentChangeEvent): void {
+    const documentUri = event.document.uri.toString();
+    let documentText: string | undefined;
     for (const view of this.views) {
-      if (view.document.uri.toString() !== event.document.uri.toString()) continue;
+      if (view.document.uri.toString() !== documentUri) continue;
       const sourceTransactionId = event && (view.pendingTransactions.size > 0 ? this.matchPendingTransaction(view, event) : undefined);
       if (sourceTransactionId) view.pendingTransactions.delete(sourceTransactionId);
       // The originating webview already owns the submitted text. A lightweight
@@ -220,7 +224,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       // after every keystroke. Other views still receive the authoritative text.
       this.post(view, sourceTransactionId
         ? { type: 'documentChanged', version: event.document.version, sourceTransactionId }
-        : { type: 'documentChanged', version: event.document.version, text: event.document.getText() });
+        : { type: 'documentChanged', version: event.document.version, text: documentText ??= event.document.getText() });
     }
   }
 
@@ -431,15 +435,25 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const allowRemoteImages = vscode.workspace.getConfiguration('markda', documentUri).get<string>('security.allowRemoteResources', 'prompt') === 'always';
     const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'));
     const styles = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'));
-    const initialData = JSON.stringify(initialization)
-      .replace(/&/gu, '\\u0026').replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e')
-      .replace(/\u2028/gu, '\\u2028').replace(/\u2029/gu, '\\u2029');
+    const initialData = escapeEmbeddedJson(JSON.stringify(initialization));
     return `<!doctype html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:${allowRemoteImages ? ' https:' : ''}; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src ${webview.cspSource} 'nonce-${nonce}';">
 <link rel="stylesheet" href="${styles}"><title>markda</title></head>
 <body><div id="app" role="application" aria-label="markda Markdown editor"></div><script nonce="${nonce}">globalThis.__markdaInitial=${initialData};</script><script type="module" nonce="${nonce}" src="${script}"></script></body></html>`;
   }
+}
+
+const embeddedJsonEscapes: Readonly<Record<string, string>> = {
+  '&': '\\u0026',
+  '<': '\\u003c',
+  '>': '\\u003e',
+  '\u2028': '\\u2028',
+  '\u2029': '\\u2029',
+};
+
+export function escapeEmbeddedJson(value: string): string {
+  return value.replace(/[&<>\u2028\u2029]/gu, (character) => embeddedJsonEscapes[character] ?? character);
 }
 
 function createNonce(): string {
