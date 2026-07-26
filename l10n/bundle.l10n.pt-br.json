@@ -1,0 +1,19 @@
+{
+  "Filter headings": "Filtrar títulos",
+  "Heading text": "Texto do título",
+  "Filter Markdown files": "Filtrar arquivos Markdown",
+  "File or folder name": "Nome do arquivo ou pasta",
+  "Create": "Criar",
+  "Duplicate": "Duplicar",
+  "{0} words · {1} characters · {2} lines · {3} min read": "{0} palavras · {1} caracteres · {2} linhas · {3} min de leitura",
+  "markda: No active markda document.": "markda: Nenhum documento markda ativo.",
+  "Export": "Exportar",
+  "markda: Exported {0}": "markda: {0} exportado",
+  "markda: This document has no previous export.": "markda: Este documento não tem exportação anterior.",
+  "current": "atual",
+  "Recent": "Recentes",
+  "Go to heading": "Ir para o título",
+  "markda Markdown editor": "Editor Markdown do markda",
+  "{0} words": "{0} palavras",
+  "{0} words · {1} characters": "{0} palavras · {1} caracteres"
+}

@@ -14,11 +14,17 @@ import mark from 'markdown-it-mark';
 import sub from 'markdown-it-sub';
 import sup from 'markdown-it-sup';
 import taskLists from 'markdown-it-task-lists';
+import { light as lightEmojiPlugin } from 'markdown-it-emoji';
+import lightEmojiNames from 'markdown-it-emoji/lib/data/light.mjs';
 import type {
-  DocumentStatistics, EditorCommand, EditorSettings, EditorToHostMessage, Heading, HostToEditorMessage, TextChange,
+  DocumentStatistics, EditorCommand, EditorDiagnostic, EditorSettings, EditorToHostMessage, Heading, HostToEditorMessage, TextChange,
 } from '../protocol.js';
+import {
+  collectMathReferences, headingAnchors, installDocumentFeatures, prepareMathExpression,
+} from '../markdownFeatures.js';
 import { analyzeDocument, getStatistics } from '../statistics.js';
 import { findMinimalChange } from '../textChange.js';
+import { translate } from '../localization.js';
 import {
   addTableColumn, addTableRow, alignTableColumn, deleteTableColumn, deleteTableRow,
   findMarkdownTable, serializeMarkdownTable, tableCursor, type MarkdownTable, type TableAlignment,
@@ -45,6 +51,8 @@ interface ViewState {
 
 type InitializationMessage = Extract<HostToEditorMessage, { type: 'initialize' }>;
 const initialDocument = (globalThis as typeof globalThis & { __markdaInitial?: InitializationMessage }).__markdaInitial;
+const locale = initialDocument?.locale ?? 'en';
+const t = (key: Parameters<typeof translate>[1], ...values: readonly (string | number)[]) => translate(locale, key, ...values);
 
 const vscode = acquireVsCodeApi<ViewState>();
 const savedViewState = vscode.getState();
@@ -86,6 +94,10 @@ let mermaidPromise: Promise<typeof import('mermaid')['default']> | undefined;
 let katexPromise: Promise<typeof import('katex')['default']> | undefined;
 let katexStylesPromise: Promise<void> | undefined;
 let katexInstance: typeof import('katex')['default'] | undefined;
+let yamlPromise: Promise<typeof import('yaml')> | undefined;
+let emojiPromise: Promise<void> | undefined;
+let emojiPlugin = lightEmojiPlugin;
+let emojiNames: Readonly<Record<string, string>> = lightEmojiNames;
 let cachedDocumentText = '';
 let cachedTable: MarkdownTable | undefined;
 let activeTableFrom: number | undefined;
@@ -95,6 +107,8 @@ let activeImageFrom: number | undefined;
 let activeMathFrom: number | undefined;
 let activeCalloutFrom: number | undefined;
 let activeHtmlFrom: number | undefined;
+let activeFrontMatterFrom: number | undefined;
+let mathReferenceCache: { source: string; references: ReturnType<typeof collectMathReferences> } | undefined;
 let referenceDefinitionCache: {
   doc: EditorState['doc'];
   definitions: ReadonlyMap<string, MarkdownReferenceDefinition>;
@@ -121,57 +135,56 @@ function usesDarkColors(): boolean {
 
 function createSyntaxHighlightStyle(dark: boolean): HighlightStyle {
   return HighlightStyle.define([
-    { tag: [tags.meta, tags.comment], color: dark ? '#9da5b4' : '#777777' },
-    { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: dark ? '#c586c0' : '#7f0055' },
-    { tag: [tags.string, tags.special(tags.string), tags.regexp], color: dark ? '#ce9178' : '#a31515' },
-    { tag: [tags.number, tags.bool, tags.null], color: dark ? '#b5cea8' : '#067d17' },
-    { tag: [tags.typeName, tags.className, tags.namespace], color: dark ? '#4ec9b0' : '#1f6f85' },
-    { tag: [tags.variableName, tags.propertyName, tags.labelName], color: dark ? '#9cdcfe' : '#001080' },
-    { tag: [tags.definition(tags.variableName), tags.function(tags.variableName)], color: dark ? '#dcdcaa' : '#795e26' },
+    { tag: [tags.meta, tags.comment], color: dark ? '#8b949e' : '#6e7781' },
+    { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: dark ? '#ff7b72' : '#cf222e' },
+    { tag: [tags.string, tags.special(tags.string), tags.regexp], color: dark ? '#a5d6ff' : '#0a3069' },
+    { tag: [tags.number, tags.bool, tags.null], color: dark ? '#79c0ff' : '#0550ae' },
+    { tag: [tags.typeName, tags.className, tags.namespace], color: dark ? '#d2a8ff' : '#8250df' },
+    { tag: [tags.variableName, tags.propertyName, tags.labelName], color: dark ? '#ffa657' : '#953800' },
+    { tag: [tags.definition(tags.variableName), tags.function(tags.variableName)], color: dark ? '#d2a8ff' : '#8250df' },
     { tag: [tags.heading, tags.strong], fontWeight: '700' },
     { tag: tags.emphasis, fontStyle: 'italic' },
-    { tag: [tags.link, tags.url], color: dark ? '#75beff' : '#4183c4', textDecoration: 'underline' },
-    { tag: tags.invalid, color: dark ? '#f48771' : '#cf222e' },
+    { tag: [tags.link, tags.url], color: dark ? '#a5d6ff' : '#0969da', textDecoration: 'underline' },
+    { tag: tags.invalid, color: dark ? '#f0f6fc' : '#82071e' },
   ]);
 }
 
 document.body.innerHTML = `<style>${getStyles()}</style>
 <div class="markda-shell">
-  <header class="markda-toolbar" aria-label="Editor controls">
-    <button data-command="toggleSourceMode" title="Source Code Mode (Ctrl+/)" aria-label="Toggle source code mode" aria-pressed="false"><i class="codicon codicon-code" aria-hidden="true"></i><span>Source</span></button>
-    <button data-command="toggleFocusMode" title="Focus Mode (F8)" aria-label="Toggle focus mode" aria-pressed="false"><i class="codicon codicon-target" aria-hidden="true"></i><span>Focus</span></button>
-    <button data-command="toggleTypewriterMode" title="Typewriter Mode (F9)" aria-label="Toggle typewriter mode" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i><span>Typewriter</span></button>
+  <header class="markda-toolbar" aria-label="${t('editorControls')}">
+    <button data-command="toggleSourceMode" title="${t('sourceMode')}" aria-label="${t('toggleSourceMode')}" aria-pressed="false"><i class="codicon codicon-code" aria-hidden="true"></i><span>${t('source')}</span></button>
+    <button data-command="toggleFocusMode" title="${t('focusMode')}" aria-label="${t('toggleFocusMode')}" aria-pressed="false"><i class="codicon codicon-target" aria-hidden="true"></i><span>${t('focus')}</span></button>
+    <button data-command="toggleTypewriterMode" title="${t('typewriterMode')}" aria-label="${t('toggleTypewriterMode')}" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i><span>${t('typewriter')}</span></button>
     <span class="toolbar-separator"></span>
-    <button data-command="toggleBold" title="Bold (Ctrl+B)" aria-label="Bold"><i class="codicon codicon-bold" aria-hidden="true"></i></button>
-    <button data-command="toggleItalic" title="Italic (Ctrl+I)" aria-label="Italic"><i class="codicon codicon-italic" aria-hidden="true"></i></button>
-    <button data-command="toggleInlineCode" title="Inline Code" aria-label="Inline code"><i class="codicon codicon-code" aria-hidden="true"></i></button>
-    <button data-command="insertLink" title="Link (Ctrl+K)" aria-label="Insert link"><i class="codicon codicon-link" aria-hidden="true"></i></button>
-    <button data-command="toggleBulletList" title="Bulleted List" aria-label="Toggle bulleted list"><i class="codicon codicon-list-unordered" aria-hidden="true"></i></button>
-    <button data-command="toggleTaskList" title="Task List" aria-label="Toggle task list"><i class="codicon codicon-checklist" aria-hidden="true"></i></button>
+    <button data-command="toggleBold" title="${t('bold')} (Ctrl+B)" aria-label="${t('bold')}"><i class="codicon codicon-bold" aria-hidden="true"></i></button>
+    <button data-command="toggleItalic" title="${t('italic')} (Ctrl+I)" aria-label="${t('italic')}"><i class="codicon codicon-italic" aria-hidden="true"></i></button>
+    <button data-command="toggleInlineCode" title="${t('inlineCode')}" aria-label="${t('inlineCode')}"><i class="codicon codicon-code" aria-hidden="true"></i></button>
+    <button data-command="insertLink" title="${t('insertLink')} (Ctrl+K)" aria-label="${t('insertLink')}"><i class="codicon codicon-link" aria-hidden="true"></i></button>
+    <button data-command="toggleBulletList" title="${t('bulletedList')}" aria-label="${t('bulletedList')}"><i class="codicon codicon-list-unordered" aria-hidden="true"></i></button>
+    <button data-command="toggleTaskList" title="${t('taskList')}" aria-label="${t('taskList')}"><i class="codicon codicon-checklist" aria-hidden="true"></i></button>
     <span class="toolbar-separator"></span>
-    <button data-command="insertTable" title="Insert Table" aria-label="Insert table"><i class="codicon codicon-table" aria-hidden="true"></i></button>
-    <button data-command="insertImage" title="Insert Images" aria-label="Insert images"><i class="codicon codicon-file-media" aria-hidden="true"></i></button>
-    <button data-command="insertMathBlock" title="Insert Math Block" aria-label="Insert math block"><span class="math-icon" aria-hidden="true">∑</span></button>
+    <button data-command="insertTable" title="${t('insertTable')}" aria-label="${t('insertTable')}"><i class="codicon codicon-table" aria-hidden="true"></i></button>
+    <button data-command="insertImage" title="${t('insertImages')}" aria-label="${t('insertImages')}"><i class="codicon codicon-file-media" aria-hidden="true"></i></button>
+    <button data-command="insertMathBlock" title="${t('insertMath')}" aria-label="${t('insertMath')}"><span class="math-icon" aria-hidden="true">∑</span></button>
     <span class="toolbar-spacer"></span>
-    <button id="theme-toggle" title="Toggle theme (auto → light → dark)" aria-label="Toggle theme" aria-pressed="false"><i class="codicon codicon-color-mode" aria-hidden="true"></i><span>Theme</span></button>
-    <button id="preview-button" title="Rendered Preview" aria-label="Toggle rendered preview" aria-pressed="false"><i class="codicon codicon-preview" aria-hidden="true"></i><span>Preview</span></button>
+    <button id="theme-toggle" title="${t('toggleTheme')}" aria-label="${t('toggleTheme')}" aria-pressed="false"><i class="codicon codicon-color-mode" aria-hidden="true"></i><span>${t('theme')}</span></button>
   </header>
-  <div id="table-toolbar" class="table-toolbar" aria-label="Table controls">
-    <span>Table</span>
-    <button data-table-command="row-before" title="Insert row before"><i class="codicon codicon-arrow-up"></i> Row</button>
-    <button data-table-command="row-after" title="Insert row after"><i class="codicon codicon-arrow-down"></i> Row</button>
-    <button data-table-command="row-delete" title="Delete row"><i class="codicon codicon-trash"></i> Row</button>
+  <div id="table-toolbar" class="table-toolbar" aria-label="${t('tableControls')}">
+    <span>${t('table')}</span>
+    <button data-table-command="row-before" title="${t('rowBefore')}"><i class="codicon codicon-arrow-up"></i> ${t('row')}</button>
+    <button data-table-command="row-after" title="${t('rowAfter')}"><i class="codicon codicon-arrow-down"></i> ${t('row')}</button>
+    <button data-table-command="row-delete" title="${t('deleteRow')}"><i class="codicon codicon-trash"></i> ${t('row')}</button>
     <span class="toolbar-separator"></span>
-    <button data-table-command="column-left" title="Insert column left"><i class="codicon codicon-arrow-left"></i> Col</button>
-    <button data-table-command="column-right" title="Insert column right"><i class="codicon codicon-arrow-right"></i> Col</button>
-    <button data-table-command="column-delete" title="Delete column"><i class="codicon codicon-trash"></i> Col</button>
+    <button data-table-command="column-left" title="${t('columnLeft')}"><i class="codicon codicon-arrow-left"></i> ${t('columnShort')}</button>
+    <button data-table-command="column-right" title="${t('columnRight')}"><i class="codicon codicon-arrow-right"></i> ${t('columnShort')}</button>
+    <button data-table-command="column-delete" title="${t('deleteColumn')}"><i class="codicon codicon-trash"></i> ${t('columnShort')}</button>
     <span class="toolbar-separator"></span>
-    <button data-table-command="align-left" title="Align left"><i class="codicon codicon-list-unordered"></i></button>
-    <button data-table-command="align-center" title="Align center">↔</button>
-    <button data-table-command="align-right" title="Align right"><i class="codicon codicon-list-ordered"></i></button>
+    <button data-table-command="align-left" title="${t('alignLeft')}"><i class="codicon codicon-list-unordered"></i></button>
+    <button data-table-command="align-center" title="${t('alignCenter')}">↔</button>
+    <button data-table-command="align-right" title="${t('alignRight')}"><i class="codicon codicon-list-ordered"></i></button>
   </div>
-  <div class="markda-workspace"><div id="editor"></div><aside id="preview" aria-label="Rendered preview"></aside></div>
-  <dialog id="table-dialog" aria-labelledby="table-dialog-title"><form method="dialog"><h2 id="table-dialog-title">Insert table</h2><label>Columns <input id="table-columns" type="number" min="1" max="20" value="2"></label><label>Rows <input id="table-rows" type="number" min="1" max="100" value="2"></label><div><button value="cancel">Cancel</button><button id="table-insert-confirm" value="default">Insert</button></div></form></dialog>
+  <div class="markda-workspace"><div id="editor"></div><aside id="preview" aria-label="${t('renderedPreview')}"></aside></div>
+  <dialog id="table-dialog" aria-labelledby="table-dialog-title"><form method="dialog"><h2 id="table-dialog-title">${t('insertTable')}</h2><label>${t('columns')} <input id="table-columns" type="number" min="1" max="20" value="2"></label><label>${t('rows')} <input id="table-rows" type="number" min="1" max="100" value="2"></label><div><button value="cancel">${t('cancel')}</button><button id="table-insert-confirm" value="default">${t('insert')}</button></div></form></dialog>
 </div>`;
 
 const appRoot = document.querySelector<HTMLElement>('.markda-shell')!;
@@ -185,6 +198,7 @@ document.querySelectorAll<HTMLElement>('.toolbar-separator').forEach((separator)
 
 const setBlockDecorations = StateEffect.define<DecorationSet>();
 const setSoftBreakDecorations = StateEffect.define<DecorationSet>();
+const setDiagnosticDecorations = StateEffect.define<DecorationSet>();
 
 /**
  * Block-level live-preview widgets (tables, fenced code blocks, images) live here
@@ -214,6 +228,17 @@ const softBreakDecorationsField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
+const diagnosticDecorationsField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setDiagnosticDecorations)) return effect.value;
+    }
+    return transaction.docChanged ? value.map(transaction.changes) : value;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 const view = new EditorView({
   parent: document.querySelector<HTMLElement>('#editor')!,
   state: EditorState.create({
@@ -228,7 +253,7 @@ const view = new EditorView({
       // parsers from the startup bundle and its first-file compile path.
       markdownLanguage,
       syntaxThemeCompartment.of(syntaxHighlighting(createSyntaxHighlightStyle(appliedSyntaxDark), { fallback: true })),
-      search(),
+      search({ top: true }),
       keymap.of([
         ...createMarkdaKeymap(),
         ...markdownKeymap,
@@ -244,6 +269,7 @@ const view = new EditorView({
       createLivePreviewPlugin(),
       blockDecorationsField,
       softBreakDecorationsField,
+      diagnosticDecorationsField,
       EditorView.updateListener.of(onEditorUpdate),
       Prec.high(EditorView.domEventHandlers({
         mousedown(event, editor) {
@@ -257,7 +283,7 @@ const view = new EditorView({
           const link = target instanceof Element ? target.closest<HTMLElement>('.markda-link-text[data-href]') : null;
           if (link?.dataset.href && (event.ctrlKey || event.metaKey)) {
             event.preventDefault();
-            vscode.postMessage({ type: 'openLink', href: link.dataset.href });
+            openDocumentLink(link.dataset.href);
             return true;
           }
           return false;
@@ -279,7 +305,6 @@ document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((button) 
 document.querySelectorAll<HTMLButtonElement>('[data-table-command]').forEach((button) => {
   button.addEventListener('click', () => runTableCommand(button.dataset.tableCommand ?? ''));
 });
-document.querySelector('#preview-button')?.addEventListener('click', () => togglePreview());
 const themeToggleButton = document.querySelector<HTMLButtonElement>('#theme-toggle');
 function updateThemeToggleLabel(): void {
   if (!themeToggleButton) return;
@@ -331,6 +356,12 @@ preview.addEventListener('keydown', (event) => {
     event.preventDefault();
     (event.target as HTMLElement).click();
   }
+});
+preview.addEventListener('click', (event) => {
+  const link = event.target instanceof Element ? event.target.closest<HTMLElement>('a[data-href]') : undefined;
+  if (!link?.dataset.href) return;
+  event.preventDefault();
+  openDocumentLink(link.dataset.href);
 });
 window.addEventListener('message', (event: MessageEvent<HostToEditorMessage>) => onHostMessage(event.data));
 window.addEventListener('keydown', (event) => {
@@ -389,6 +420,9 @@ function onHostMessage(message: HostToEditorMessage): void {
       applySettings(true);
       renderPreview();
       return;
+    case 'diagnosticsChanged':
+      applyDiagnostics(message.diagnostics);
+      return;
     case 'command':
       runCommand(message.command, message.payload);
   }
@@ -411,6 +445,9 @@ function onEditorUpdate(update: ViewUpdate): void {
     updateTableToolbar();
     scheduleDerivedStateUpdate();
     if (update.state.field(modeField).previewVisible) schedulePreviewRender();
+    if (!emojiPromise && update.state.sliceDoc(Math.max(0, update.state.selection.main.head - 64), Math.min(update.state.doc.length, update.state.selection.main.head + 64)).includes(':')) {
+      void loadFullEmoji();
+    }
   }
   else if (update.selectionSet) {
     updateTableToolbar();
@@ -622,8 +659,45 @@ function runCommand(command: EditorCommand, payload?: unknown): void {
         view.dispatch({ selection: EditorSelection.cursor(position), effects: EditorView.scrollIntoView(position, { y: 'center' }) });
         view.focus();
       }
+      return;
+    }
+    case 'focusAnchor': {
+      const fragment = payload && typeof payload === 'object' && 'fragment' in payload
+        ? String(payload.fragment)
+        : '';
+      focusDocumentAnchor(fragment);
+      return;
     }
   }
+}
+
+function applyDiagnostics(diagnostics: readonly EditorDiagnostic[]): void {
+  const ranges = diagnostics.flatMap((diagnostic) => {
+    const from = Math.max(0, Math.min(diagnostic.from, view.state.doc.length));
+    const to = Math.max(from, Math.min(diagnostic.to, view.state.doc.length));
+    if (to <= from) return [];
+    const title = `${diagnostic.source ? `${diagnostic.source}: ` : ''}${diagnostic.message}`;
+    return [Decoration.mark({
+      class: `markda-diagnostic markda-diagnostic-${diagnostic.severity}`,
+      attributes: { title, 'aria-label': title },
+    }).range(from, to)];
+  });
+  view.dispatch({ effects: setDiagnosticDecorations.of(Decoration.set(ranges, true)) });
+}
+
+function focusDocumentAnchor(fragment: string): void {
+  let decoded = fragment;
+  try { decoded = decodeURIComponent(fragment); } catch { /* Keep the literal fragment. */ }
+  const heading = headingAnchors(view.state.doc.toString()).find((candidate) => candidate.slug === decoded);
+  if (!heading) return;
+  const position = Math.max(0, Math.min(heading.from, view.state.doc.length));
+  view.dispatch({ selection: EditorSelection.cursor(position), effects: EditorView.scrollIntoView(position, { y: 'center' }) });
+  view.focus();
+}
+
+function openDocumentLink(href: string): void {
+  if (href.startsWith('#')) focusDocumentAnchor(href.slice(1));
+  else vscode.postMessage({ type: 'openLink', href });
 }
 
 function updateMode(change: Partial<ViewState>): void {
@@ -632,12 +706,6 @@ function updateMode(change: Partial<ViewState>): void {
   applyViewState(next);
   vscode.setState(next);
   vscode.postMessage({ type: 'state', sourceMode: next.sourceMode, focusMode: next.focusMode, typewriterMode: next.typewriterMode });
-}
-
-function togglePreview(): void {
-  const mode = view.state.field(modeField);
-  updateMode({ previewVisible: !mode.previewVisible });
-  if (!mode.previewVisible) renderPreview();
 }
 
 function applyViewState(state: ViewState): void {
@@ -651,9 +719,6 @@ function applyViewState(state: ViewState): void {
     button?.classList.toggle('active', active);
     button?.setAttribute('aria-pressed', String(active));
   }
-  const previewButton = document.querySelector<HTMLButtonElement>('#preview-button');
-  previewButton?.classList.toggle('active', state.previewVisible);
-  previewButton?.setAttribute('aria-pressed', String(state.previewVisible));
 }
 
 function applySettings(refreshDecorations = false): void {
@@ -1321,7 +1386,7 @@ function secureImage(image: HTMLImageElement): void {
     if (settings.security.allowRemoteResources === 'always') return;
     const blocked = document.createElement('span');
     blocked.className = 'markda-remote-blocked';
-    blocked.textContent = `Remote image blocked: ${image.alt || source}`;
+    blocked.textContent = t('remoteImageBlocked', image.alt || source);
     blocked.title = source;
     image.replaceWith(blocked);
     return;
@@ -1336,7 +1401,8 @@ function secureImage(image: HTMLImageElement): void {
 
 function createClientRenderer(): MarkdownIt {
   const renderer = new MarkdownIt({ breaks: settings.markdown.breaks, html: settings.markdown.html && settings.security.allowUnsafeHtml, linkify: true });
-  renderer.use(footnote).use(mark).use(sub).use(sup).use(taskLists, { enabled: true, label: true });
+  renderer.use(footnote).use(mark).use(sub).use(sup).use(taskLists, { enabled: true, label: true }).use(emojiPlugin);
+  installDocumentFeatures(renderer);
   if (settings.markdown.math) installMath(renderer);
   return renderer;
 }
@@ -1382,6 +1448,16 @@ function loadKatex(): Promise<typeof import('katex')['default']> {
   });
 }
 
+function loadFullEmoji(): Promise<void> {
+  return emojiPromise ??= import('./emojiLoader.js').then((module) => {
+    emojiPlugin = module.api.plugin;
+    emojiNames = module.api.data;
+    clientRenderer = undefined;
+    view.dispatch({ effects: refreshLivePreview.of(null) });
+    if (view.state.field(modeField).previewVisible) renderPreview();
+  });
+}
+
 function loadStylesheet(href: string, id: string): Promise<void> {
   if (id === 'markda-katex-styles' && katexStylesPromise) return katexStylesPromise;
   const promise = new Promise<void>((resolve, reject) => {
@@ -1406,7 +1482,7 @@ async function renderKatexInto(element: HTMLElement, source: string, displayMode
   try {
     const katex = await loadKatex();
     if (!element.isConnected) return;
-    katex.render(source, element, { displayMode, throwOnError: false, strict: 'warn', trust: false });
+    katex.render(prepareLiveMath(source, displayMode), element, { displayMode, throwOnError: false, strict: 'warn', trust: false });
   } catch (error) {
     if (element.isConnected) {
       element.classList.add('markda-render-error');
@@ -1514,6 +1590,184 @@ async function renderLiveMermaid(container: HTMLElement, source: string): Promis
   }
 }
 
+class TocWidget extends WidgetType {
+  private readonly headings;
+  private readonly signature;
+  constructor(private readonly editor: EditorView, private readonly from: number) {
+    super();
+    this.headings = headingAnchors(editor.state.doc.toString());
+    this.signature = this.headings.map((heading) => `${heading.level}:${heading.slug}:${heading.text}`).join('\n');
+  }
+  toDOM(): HTMLElement {
+    const nav = document.createElement('nav');
+    nav.className = 'markda-live-toc';
+    nav.setAttribute('aria-label', 'Table of contents');
+    const title = document.createElement('strong');
+    title.textContent = 'Table of contents';
+    const list = document.createElement('ol');
+    const headings = this.headings;
+    const minimum = headings.length ? Math.min(...headings.map((heading) => heading.level)) : 1;
+    for (const heading of headings) {
+      const item = document.createElement('li');
+      item.style.setProperty('--markda-toc-depth', String(Math.max(0, heading.level - minimum)));
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = heading.text;
+      button.addEventListener('click', () => {
+        this.editor.dispatch({
+          selection: EditorSelection.cursor(heading.from),
+          effects: EditorView.scrollIntoView(heading.from, { y: 'center' }),
+        });
+        this.editor.focus();
+      });
+      item.append(button);
+      list.append(item);
+    }
+    if (!headings.length) {
+      const empty = document.createElement('span');
+      empty.className = 'markda-toc-empty';
+      empty.textContent = 'Add headings to build this table of contents.';
+      nav.append(title, empty);
+    } else {
+      nav.append(title, list);
+    }
+    return nav;
+  }
+  ignoreEvent(): boolean { return true; }
+  eq(other: TocWidget): boolean {
+    return other.from === this.from && other.signature === this.signature;
+  }
+}
+
+class EmojiWidget extends WidgetType {
+  constructor(private readonly value: string, private readonly name: string) { super(); }
+  toDOM(): HTMLElement {
+    const span = document.createElement('span');
+    span.className = 'markda-emoji';
+    span.textContent = this.value;
+    span.title = `:${this.name}:`;
+    span.setAttribute('aria-label', this.name.replaceAll('_', ' '));
+    return span;
+  }
+  eq(other: EmojiWidget): boolean { return other.value === this.value && other.name === this.name; }
+}
+
+class FrontMatterWidget extends WidgetType {
+  constructor(
+    private readonly editor: EditorView,
+    private readonly from: number,
+    private readonly to: number,
+    private readonly source: string,
+  ) { super(); }
+
+  toDOM(): HTMLElement {
+    const container = document.createElement('section');
+    container.className = 'markda-front-matter';
+    const header = document.createElement('div');
+    header.className = 'markda-front-matter-header';
+    const title = document.createElement('strong');
+    title.textContent = 'Front Matter';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.textContent = 'Edit YAML';
+    header.append(title, toggle);
+    const fields = document.createElement('div');
+    fields.className = 'markda-front-matter-fields';
+    const sourceEditor = createBlockSourceEditor(this.editor, this.source, (value) => {
+      commitFrontMatter(this.editor, this.from, value);
+    });
+    sourceEditor.classList.add('markda-front-matter-source');
+    sourceEditor.hidden = true;
+    const loading = document.createElement('span');
+    loading.className = 'markda-toc-empty';
+    loading.textContent = 'Loading YAML fields…';
+    fields.append(loading);
+    void loadYaml().then((yamlApi) => {
+      if (!container.isConnected) return;
+      fields.replaceChildren();
+      const yaml = yamlApi.parseDocument(this.source, { keepSourceTokens: true });
+      if (yaml.errors.length || !yamlApi.isMap(yaml.contents)) {
+        const error = document.createElement('div');
+        error.className = 'markda-front-matter-error';
+        error.textContent = yaml.errors[0]?.message ?? 'Front Matter must contain a YAML mapping.';
+        fields.append(error);
+        sourceEditor.hidden = false;
+        toggle.hidden = true;
+        return;
+      }
+      for (const pair of yaml.contents.items) {
+        const key = yamlApi.isScalar(pair.key) ? String(pair.key.value) : String(pair.key);
+        const row = document.createElement('label');
+        const label = document.createElement('span');
+        label.textContent = key;
+        if (yamlApi.isScalar(pair.value) || pair.value === null) {
+          const input = document.createElement('input');
+          input.value = pair.value === null ? '' : String(pair.value.value ?? '');
+          input.addEventListener('change', () => {
+            yaml.set(key, yamlApi.parse(input.value));
+            commitFrontMatter(this.editor, this.from, String(yaml).trimEnd());
+          });
+          row.append(label, input);
+        } else {
+          const value = document.createElement('code');
+          value.textContent = String(pair.value).trim().replace(/\s+/gu, ' ');
+          value.title = 'Use Edit YAML for nested values';
+          row.append(label, value);
+        }
+        fields.append(row);
+      }
+      if (!yaml.contents.items.length) {
+        const empty = document.createElement('span');
+        empty.className = 'markda-toc-empty';
+        empty.textContent = 'Use Edit YAML to add document metadata.';
+        fields.append(empty);
+      }
+    }).catch((error: unknown) => {
+      fields.replaceChildren();
+      const message = document.createElement('div');
+      message.className = 'markda-front-matter-error';
+      message.textContent = String(error);
+      fields.append(message);
+      sourceEditor.hidden = false;
+    });
+    toggle.addEventListener('click', () => {
+      sourceEditor.hidden = !sourceEditor.hidden;
+      fields.hidden = !sourceEditor.hidden;
+      toggle.textContent = sourceEditor.hidden ? 'Edit YAML' : 'Show fields';
+      if (!sourceEditor.hidden) sourceEditor.focus();
+    });
+    sourceEditor.addEventListener('focus', () => { activeFrontMatterFrom = this.from; });
+    sourceEditor.addEventListener('blur', () => {
+      if (activeFrontMatterFrom === this.from) activeFrontMatterFrom = undefined;
+      this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+    });
+    container.append(header, fields, sourceEditor);
+    return container;
+  }
+
+  ignoreEvent(): boolean { return true; }
+  eq(other: FrontMatterWidget): boolean {
+    return other.from === this.from && (activeFrontMatterFrom === this.from
+      || (other.to === this.to && other.source === this.source));
+  }
+}
+
+function loadYaml(): Promise<typeof import('yaml')> {
+  return yamlPromise ??= import('./yamlLoader.js').then((module) => module.api);
+}
+
+function commitFrontMatter(editor: EditorView, from: number, yaml: string): void {
+  const opening = editor.state.doc.lineAt(Math.min(from, editor.state.doc.length));
+  if (!/^---\s*$/u.test(opening.text)) return;
+  let endLine = opening.number + 1;
+  while (endLine <= editor.state.doc.lines && !/^(?:---|\.\.\.)\s*$/u.test(editor.state.doc.line(endLine).text)) endLine++;
+  if (endLine > editor.state.doc.lines) return;
+  const to = editor.state.doc.line(endLine).to;
+  const eol = editor.state.doc.toString().match(/\r\n|\r|\n/u)?.[0] ?? '\n';
+  const replacement = `---${eol}${yaml.replace(/\r\n?|\n/gu, eol).trim()}${eol}---`;
+  if (editor.state.sliceDoc(from, to) !== replacement) editor.dispatch({ changes: { from, to, insert: replacement } });
+}
+
 class ThematicBreakWidget extends WidgetType {
   constructor(private readonly editor: EditorView, private readonly from: number) { super(); }
   toDOM(): HTMLElement {
@@ -1536,6 +1790,14 @@ class ThematicBreakWidget extends WidgetType {
   eq(other: ThematicBreakWidget): boolean { return other.from === this.from; }
 }
 
+function prepareLiveMath(source: string, displayMode: boolean): string {
+  const documentSource = view.state.doc.toString();
+  if (!mathReferenceCache || mathReferenceCache.source !== documentSource) {
+    mathReferenceCache = { source: documentSource, references: collectMathReferences(documentSource) };
+  }
+  return prepareMathExpression(source, mathReferenceCache.references, displayMode);
+}
+
 class SoftBreakWidget extends WidgetType {
   toDOM(): HTMLElement {
     const space = document.createElement('span');
@@ -1553,7 +1815,7 @@ class TrailingParagraphWidget extends WidgetType {
     target.className = 'markda-trailing-paragraph';
     target.tabIndex = 0;
     target.setAttribute('role', 'button');
-    target.setAttribute('aria-label', 'Add paragraph after block');
+    target.setAttribute('aria-label', t('addParagraph'));
     target.title = 'Click to add a paragraph after this block';
     const append = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
@@ -1608,11 +1870,11 @@ class InlineImageWidget extends WidgetType {
     container.className = 'markda-inline-image';
     container.tabIndex = 0;
     container.setAttribute('role', 'button');
-    container.setAttribute('aria-label', `Image: ${this.alt || this.source}. Activate to edit Markdown.`);
+    container.setAttribute('aria-label', t('imageEdit', this.alt || this.source));
     container.title = 'Click to edit image Markdown';
     if (/^https?:/iu.test(this.source) && settings.security.allowRemoteResources !== 'always') {
       container.classList.add('markda-inline-image-blocked');
-      container.textContent = this.alt || 'Remote image';
+      container.textContent = this.alt || t('remoteImage');
     } else {
       const image = document.createElement('img');
       image.alt = this.alt;
@@ -1651,7 +1913,7 @@ class FootnoteReferenceWidget extends WidgetType {
     reference.className = 'markda-footnote-reference';
     reference.tabIndex = 0;
     reference.setAttribute('role', 'button');
-    reference.setAttribute('aria-label', `Footnote ${this.label}. Activate to edit.`);
+    reference.setAttribute('aria-label', t('footnoteEdit', this.label));
     reference.title = 'Click to edit footnote reference';
     reference.textContent = this.label;
     const edit = (event: Event) => {
@@ -1678,7 +1940,7 @@ class InlineHtmlWidget extends WidgetType {
     container.className = 'markda-inline-html';
     container.tabIndex = 0;
     container.setAttribute('role', 'button');
-    container.setAttribute('aria-label', 'Rendered inline HTML. Activate to edit source.');
+    container.setAttribute('aria-label', t('inlineHtmlEdit'));
     container.title = 'Click to edit HTML source';
     container.innerHTML = DOMPurify.sanitize(this.source, { USE_PROFILES: { html: true } });
     const edit = (event: Event) => {
@@ -1706,7 +1968,7 @@ class EntityWidget extends WidgetType {
     value.className = 'markda-entity';
     value.tabIndex = 0;
     value.setAttribute('role', 'button');
-    value.setAttribute('aria-label', `${decoded}. Activate to edit entity source.`);
+    value.setAttribute('aria-label', t('entityEdit', decoded));
     value.title = 'Click to edit character entity';
     value.textContent = decoded;
     const edit = () => {
@@ -1741,7 +2003,7 @@ class FootnoteDefinitionWidget extends WidgetType {
     content.className = 'markda-footnote-definition-content';
     content.contentEditable = 'true';
     content.spellcheck = true;
-    content.setAttribute('aria-label', `Footnote ${this.label} content`);
+    content.setAttribute('aria-label', t('footnoteContent', this.label));
     content.textContent = this.content;
     const gate = new CompositionCommitGate();
     let timer: number | undefined;
@@ -1797,14 +2059,14 @@ class ReferenceDefinitionWidget extends WidgetType {
     container.className = 'markda-reference-definition';
     const labelInput = document.createElement('input');
     labelInput.value = this.label;
-    labelInput.setAttribute('aria-label', 'Reference label');
+    labelInput.setAttribute('aria-label', t('referenceLabel'));
     const destinationInput = document.createElement('input');
     destinationInput.value = this.definition.destination;
-    destinationInput.setAttribute('aria-label', 'Reference destination');
+    destinationInput.setAttribute('aria-label', t('referenceDestination'));
     const titleInput = document.createElement('input');
     titleInput.value = this.definition.title ?? '';
     titleInput.placeholder = 'Optional title';
-    titleInput.setAttribute('aria-label', 'Reference title');
+    titleInput.setAttribute('aria-label', t('referenceTitle'));
     const commit = () => commitReferenceDefinition(
       this.editor, this.from, labelInput.value, destinationInput.value, titleInput.value,
     );
@@ -1835,12 +2097,12 @@ class HtmlBlockWidget extends WidgetType {
     container.className = 'markda-html-block';
     container.contentEditable = 'true';
     container.spellcheck = true;
-    container.setAttribute('aria-label', 'Rendered HTML block');
+    container.setAttribute('aria-label', t('htmlBlock'));
     container.innerHTML = DOMPurify.sanitize(this.source, { USE_PROFILES: { html: true } });
     if (!container.childNodes.length) {
       const placeholder = document.createElement('span');
       placeholder.className = 'markda-html-empty';
-      placeholder.textContent = 'HTML block has no visible safe content';
+      placeholder.textContent = t('emptyHtmlBlock');
       container.append(placeholder);
     }
     const gate = new CompositionCommitGate();
@@ -1898,7 +2160,7 @@ class ImageWidget extends WidgetType {
     if (/^https?:/iu.test(this.source) && settings.security.allowRemoteResources !== 'always') {
       const blocked = document.createElement('span');
       blocked.className = 'markda-remote-blocked';
-      blocked.textContent = `Remote image blocked: ${this.alt || this.source}`;
+      blocked.textContent = t('remoteImageBlocked', this.alt || this.source);
       figure.append(blocked);
     } else {
       try { image.src = /^(?:data:|vscode-webview:)/iu.test(this.source) ? this.source : new URL(this.source, resourceBaseUri).toString(); }
@@ -1906,7 +2168,7 @@ class ImageWidget extends WidgetType {
       figure.append(image);
     }
     const caption = document.createElement('figcaption');
-    caption.textContent = this.alt || 'Image';
+    caption.textContent = this.alt || t('image');
     figure.append(caption);
     if (!/^(?:https?:|data:|vscode-webview:)/iu.test(this.source)) {
       const controls = document.createElement('div');
@@ -1979,7 +2241,7 @@ class IndentedCodeWidget extends WidgetType {
     const code = document.createElement('code');
     code.contentEditable = 'true';
     code.spellcheck = false;
-    code.setAttribute('aria-label', 'Indented code content');
+    code.setAttribute('aria-label', t('indentedCode'));
     code.textContent = this.source;
     const gate = new CompositionCommitGate();
     let timer: number | undefined;
@@ -2021,6 +2283,146 @@ class IndentedCodeWidget extends WidgetType {
 
   ignoreEvent(): boolean { return true; }
   eq(other: IndentedCodeWidget): boolean { return other.from === this.from && other.source === this.source; }
+}
+
+type GitHubSyntaxToken = 'comment' | 'constant' | 'entity' | 'keyword' | 'string' | 'variable';
+
+const codeKeywords = new Set([
+  'abstract', 'and', 'as', 'async', 'await', 'base', 'break', 'case', 'catch', 'class', 'const', 'continue',
+  'def', 'default', 'defer', 'delete', 'do', 'elif', 'else', 'enum', 'except', 'export', 'extends',
+  'final', 'finally', 'fn', 'for', 'from', 'func', 'function', 'global', 'goto', 'if', 'implements', 'import',
+  'in', 'instanceof', 'interface', 'internal', 'is', 'lambda', 'let', 'match', 'module', 'namespace', 'native',
+  'new', 'not', 'of', 'or', 'override', 'package', 'pass', 'private', 'protected',
+  'public', 'raise', 'readonly', 'record', 'return', 'sealed', 'sizeof', 'static', 'struct', 'super', 'switch',
+  'this', 'throw', 'trait', 'try', 'type', 'typeof', 'union', 'unsafe', 'use', 'using',
+  'var', 'virtual', 'void', 'when', 'where', 'while', 'with', 'yield',
+]);
+
+const codeTypes = new Set([
+  'any', 'bigint', 'bool', 'boolean', 'byte', 'char', 'decimal', 'double', 'float', 'int', 'integer', 'long',
+  'never', 'number', 'object', 'sbyte', 'short', 'string', 'symbol', 'uint', 'ulong', 'unknown', 'ushort',
+]);
+
+function appendSyntaxToken(parent: DocumentFragment, value: string, token?: GitHubSyntaxToken): void {
+  if (!token) {
+    parent.append(document.createTextNode(value));
+    return;
+  }
+  const span = document.createElement('span');
+  span.className = `markda-syntax-${token}`;
+  span.textContent = value;
+  parent.append(span);
+}
+
+function highlightCode(code: HTMLElement, source: string, language: string): void {
+  const fragment = document.createDocumentFragment();
+  const normalizedLanguage = language.toLowerCase().replace(/^language-/u, '');
+  const markup = /^(?:html?|xml|svg|vue|svelte|jsx|tsx)$/u.test(normalizedLanguage);
+  const hashComments = /^(?:py|python|rb|ruby|sh|shell|bash|zsh|fish|yaml|yml|toml|perl|r)$/u.test(normalizedLanguage);
+  const sql = /^(?:sql|pgsql|mysql)$/u.test(normalizedLanguage);
+  let index = 0;
+  while (index < source.length) {
+    const rest = source.slice(index);
+    const comment = rest.match(hashComments ? /^(?:#[^\n]*|\/\*[\s\S]*?\*\/)/u : /^(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)/u);
+    if (comment) {
+      appendSyntaxToken(fragment, comment[0], 'comment');
+      index += comment[0].length;
+      continue;
+    }
+    if (markup) {
+      const markupComment = rest.match(/^<!--[\s\S]*?(?:-->|$)/u);
+      if (markupComment) {
+        appendSyntaxToken(fragment, markupComment[0], 'comment');
+        index += markupComment[0].length;
+        continue;
+      }
+      const tag = rest.match(/^<\/?[A-Za-z][\w:.-]*/u);
+      if (tag) {
+        appendSyntaxToken(fragment, tag[0], 'entity');
+        index += tag[0].length;
+        continue;
+      }
+      const attribute = rest.match(/^[A-Za-z_:][\w:.-]*(?=\s*=)/u);
+      if (attribute) {
+        appendSyntaxToken(fragment, attribute[0], 'variable');
+        index += attribute[0].length;
+        continue;
+      }
+    }
+    const string = rest.match(/^(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\])*`)/u);
+    if (string) {
+      appendSyntaxToken(fragment, string[0], 'string');
+      index += string[0].length;
+      continue;
+    }
+    const number = rest.match(/^(?:0[xob][\da-f]+|\d+(?:\.\d+)?(?:e[+-]?\d+)?)(?:[nfd])?/iu);
+    if (number) {
+      appendSyntaxToken(fragment, number[0], 'constant');
+      index += number[0].length;
+      continue;
+    }
+    const word = rest.match(/^[A-Za-z_$][\w$]*/u);
+    if (word) {
+      const value = word[0];
+      const lowered = value.toLowerCase();
+      const after = source.slice(index + value.length);
+      let token: GitHubSyntaxToken | undefined;
+      if (codeKeywords.has(lowered) || (sql && /^(?:select|insert|update|delete|from|where|join|on|group|order|by|having|limit|offset|into|values|create|alter|drop|table|index|view|distinct|all|union)$/u.test(lowered))) {
+        token = 'keyword';
+      } else if (codeTypes.has(lowered) || /^[A-Z][\w$]*$/u.test(value)) {
+        token = 'entity';
+      } else if (/^\s*\(/u.test(after)) {
+        token = 'entity';
+      } else if (/^(?:true|false|null|none|nil|undefined)$/u.test(lowered)) {
+        token = 'constant';
+      }
+      appendSyntaxToken(fragment, value, token);
+      index += value.length;
+      continue;
+    }
+    appendSyntaxToken(fragment, source[index]!);
+    index += 1;
+  }
+  code.replaceChildren(fragment);
+}
+
+function codeSelectionOffset(code: HTMLElement): number | undefined {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return undefined;
+  const range = selection.getRangeAt(0);
+  if (!code.contains(range.startContainer)) return undefined;
+  const prefix = range.cloneRange();
+  prefix.selectNodeContents(code);
+  prefix.setEnd(range.startContainer, range.startOffset);
+  return prefix.toString().length;
+}
+
+function restoreCodeSelection(code: HTMLElement, offset: number | undefined): void {
+  if (offset === undefined) return;
+  const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+  let remaining = offset;
+  let node = walker.nextNode();
+  while (node) {
+    const length = node.textContent?.length ?? 0;
+    if (remaining <= length) {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.setStart(node, remaining);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return;
+    }
+    remaining -= length;
+    node = walker.nextNode();
+  }
+}
+
+function refreshCodeHighlight(code: HTMLElement, language: string): void {
+  const offset = codeSelectionOffset(code);
+  const source = editablePlainText(code);
+  highlightCode(code, source, language);
+  restoreCodeSelection(code, offset);
 }
 
 class CodeBlockWidget extends WidgetType {
@@ -2087,10 +2489,12 @@ class CodeBlockWidget extends WidgetType {
       code.textContent = this.source;
       code.contentEditable = 'true';
       code.spellcheck = false;
-      code.setAttribute('aria-label', 'Code content');
+      code.setAttribute('aria-label', t('codeContent'));
+      highlightCode(code, this.source, this.language);
       const gate = new CompositionCommitGate();
       let timer: number | undefined;
       let dirty = false;
+      let composing = false;
       const commit = () => commitCodeBlock(this.editor, this.from, editablePlainText(code), undefined);
       const commitIfDirty = () => {
         if (!dirty) return;
@@ -2105,11 +2509,19 @@ class CodeBlockWidget extends WidgetType {
       code.addEventListener('focus', () => { activeCodeFrom = this.from; });
       code.addEventListener('input', () => {
         dirty = true;
+        if (!composing) refreshCodeHighlight(code, this.language);
         window.clearTimeout(timer);
         timer = window.setTimeout(() => { timer = undefined; gate.request(commitIfDirty); }, 80);
       });
-      code.addEventListener('compositionstart', () => gate.start());
-      code.addEventListener('compositionend', () => gate.end(commitIfDirty));
+      code.addEventListener('compositionstart', () => {
+        composing = true;
+        gate.start();
+      });
+      code.addEventListener('compositionend', () => {
+        composing = false;
+        refreshCodeHighlight(code, this.language);
+        gate.end(commitIfDirty);
+      });
       code.addEventListener('keydown', (event) => {
         if (runEditableHistoryShortcut(event, this.editor, () => {
           window.clearTimeout(timer);
@@ -2199,15 +2611,15 @@ class TableWidget extends WidgetType {
     container.className = 'markda-live-table-wrap';
     container.dataset.tableFrom = String(this.table.from);
     container.setAttribute('role', 'group');
-    container.setAttribute('aria-label', 'Editable Markdown table');
+    container.setAttribute('aria-label', t('editableTable'));
     const cellCount = (this.table.rows.length + 1) * this.table.header.length;
     if (cellCount > settings.liveTableMaxCells) {
       container.classList.add('markda-large-table');
       const summary = document.createElement('span');
-      summary.textContent = `Large table (${this.table.rows.length + 1} rows × ${this.table.header.length} columns)`;
+      summary.textContent = t('largeTable', this.table.rows.length + 1, this.table.header.length);
       const edit = document.createElement('button');
       edit.type = 'button';
-      edit.textContent = 'Edit here';
+      edit.textContent = t('editHere');
       const sourceEditor = createBlockSourceEditor(this.editor, serializeMarkdownTable(this.table), (value) => {
         const current = findMarkdownTable(this.editor.state.doc.toString(), this.table.from,
           this.editor.state.doc.lineAt(this.table.from).number - 1);
@@ -2600,7 +3012,7 @@ function createBlockSourceEditor(editor: EditorView, source: string, commit: (va
   input.value = source;
   input.rows = 1;
   input.spellcheck = false;
-  input.setAttribute('aria-label', 'Block Markdown source');
+  input.setAttribute('aria-label', t('blockSource'));
   const gate = new CompositionCommitGate();
   let timer: number | undefined;
   let dirty = false;
@@ -2857,13 +3269,32 @@ function createLivePreviewPlugin() {
 }
 
 function selectionTouchesBlockCandidate(update: ViewUpdate): boolean {
-  const before = update.startState.doc.lineAt(update.startState.selection.main.head).text;
-  const after = update.state.doc.lineAt(update.state.selection.main.head).text;
-  return isBlockCandidateLine(before) || isBlockCandidateLine(after);
+  const before = update.startState.doc.lineAt(update.startState.selection.main.head);
+  const after = update.state.doc.lineAt(update.state.selection.main.head);
+  return isBlockCandidateLine(before.text) || isBlockCandidateLine(after.text)
+    || isBlankLineNextToThematicBreak(update.startState, before.number)
+    || isBlankLineNextToThematicBreak(update.state, after.number);
 }
 
 function isBlockCandidateLine(line: string): boolean {
   return line.includes('|') || /^\s*(?:```|~~~|\$\$\s*$|(?:[*_-]\s*){3,}|=+\s*$|!\[[^\]]*\]\([^)]+\)\s*$|>\s*(?:\[!|\*\*))/u.test(line);
+}
+
+function isThematicBreakLine(state: EditorState, lineNumber: number): boolean {
+  const text = state.doc.line(lineNumber).text;
+  return /^[ \t]{0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/u.test(text)
+    && !(lineNumber > 1 && state.doc.line(lineNumber - 1).text.trim()
+      && /^[ \t]{0,3}-+[ \t]*$/u.test(text));
+}
+
+function isBlankLineNextToThematicBreak(state: EditorState, lineNumber: number): boolean {
+  if (state.doc.line(lineNumber).text.trim()) return false;
+  let previous = lineNumber - 1;
+  while (previous >= 1 && !state.doc.line(previous).text.trim()) previous--;
+  if (previous >= 1 && isThematicBreakLine(state, previous)) return true;
+  let next = lineNumber + 1;
+  while (next <= state.doc.lines && !state.doc.line(next).text.trim()) next++;
+  return next <= state.doc.lines && isThematicBreakLine(state, next);
 }
 
 function buildInlineDecorations(editor: EditorView): DecorationSet {
@@ -3021,6 +3452,7 @@ function buildSoftBreakDecorations(
  */
 function buildBlockDecorations(editor: EditorView): DecorationSet {
   const decorations: { from: number; to?: number; decoration: Decoration }[] = [];
+  const collapsedBlankLineStarts = new Set<number>();
   const state = editor.state.field(modeField);
   const selection = editor.state.selection.main;
   const selectionFrom = livePreviewSelectionFocused ? selection.from : -1;
@@ -3042,6 +3474,33 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
       processedUntil = line.to + 1;
       const text = line.text;
       if (!isBlockDecorationCandidate(text)) continue;
+      if (lineNumber === 1 && /^---\s*$/u.test(text)) {
+        let endLine = 2;
+        while (endLine <= editor.state.doc.lines && !/^(?:---|\.\.\.)\s*$/u.test(editor.state.doc.line(endLine).text)) endLine++;
+        if (endLine <= editor.state.doc.lines) {
+          const closing = editor.state.doc.line(endLine);
+          const content = codeContentRange(editor.state, line.to, closing.from);
+          const to = closing.to;
+          decorations.push({
+            from: line.from,
+            to: blockDecorationTo(editor.state, to),
+            decoration: Decoration.replace({
+              widget: new FrontMatterWidget(editor, line.from, to, editor.state.sliceDoc(content.from, content.to)),
+              block: true,
+            }),
+          });
+          processedUntil = to + 1;
+          continue;
+        }
+      }
+      if (/^\s*\[toc\]\s*$/iu.test(text)) {
+        decorations.push({
+          from: line.from,
+          to: blockDecorationTo(editor.state, line.to),
+          decoration: Decoration.replace({ widget: new TocWidget(editor, line.from), block: true }),
+        });
+        continue;
+      }
       const htmlBlock = settings.markdown.html && settings.security.allowUnsafeHtml && /^\s*</u.test(text)
         ? findSyntaxAncestor(editor.state, Math.min(line.from + text.search(/\S/u), line.to), 'HTMLBlock')
         : undefined;
@@ -3113,8 +3572,7 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
         });
         continue;
       }
-      const thematicBreak = /^[ \t]{0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/u.test(text)
-        && !(lineNumber > 1 && editor.state.doc.line(lineNumber - 1).text.trim() && /^[ \t]{0,3}-+[ \t]*$/u.test(text));
+      const thematicBreak = isThematicBreakLine(editor.state, lineNumber);
       if (thematicBreak) {
         if (!selectionIntersectsBlock(selectionFrom, selectionTo, line.from, line.to)) {
           decorations.push({
@@ -3122,6 +3580,21 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
             to: blockDecorationTo(editor.state, line.to),
             decoration: Decoration.replace({ widget: new ThematicBreakWidget(editor, line.from), block: true }),
           });
+          for (const direction of [-1, 1] as const) {
+            for (let blankLineNumber = lineNumber + direction;
+              blankLineNumber >= 1 && blankLineNumber <= editor.state.doc.lines;
+              blankLineNumber += direction) {
+              const blankLine = editor.state.doc.line(blankLineNumber);
+              if (blankLine.text.trim()) break;
+              if (selectionIntersectsBlock(selectionFrom, selectionTo, blankLine.from, blankLine.to)
+                || collapsedBlankLineStarts.has(blankLine.from)) continue;
+              collapsedBlankLineStarts.add(blankLine.from);
+              decorations.push({
+                from: blankLine.from,
+                decoration: Decoration.line({ class: 'markda-thematic-blank-line' }),
+              });
+            }
+          }
         }
         continue;
       }
@@ -3449,7 +3922,7 @@ function addInlineDecorations(
         class: 'markda-link-text',
         attributes: {
           'data-href': href,
-          title: 'Click to edit; Ctrl/Cmd+click to open',
+          title: t('editOrOpenLink'),
         },
       }),
     });
@@ -3517,7 +3990,7 @@ function addInlineDecorations(
         class: 'markda-link-text',
         attributes: {
           'data-href': href,
-          title: 'Click to edit; Ctrl/Cmd+click to open',
+          title: t('editOrOpenLink'),
         },
       }),
     });
@@ -3534,7 +4007,7 @@ function addInlineDecorations(
       to: end,
       decoration: Decoration.mark({
         class: 'markda-link-text',
-        attributes: { 'data-href': raw, title: 'Ctrl/Cmd+click to open' },
+        attributes: { 'data-href': raw, title: t('openLinkHint') },
       }),
     });
   }
@@ -3545,6 +4018,22 @@ function addInlineDecorations(
     const expanded = selectionIntersects(selectionFrom, selectionTo, start, end);
     addMetaDecoration(output, start, start + 1, expanded);
     linkRanges.push({ start, end });
+  }
+  for (const match of text.matchAll(/(?<![\w:]):([a-z0-9_+-]+):(?![\w:])/giu)) {
+    const name = (match[1] ?? '').toLocaleLowerCase();
+    const value = emojiNames[name];
+    if (!value) continue;
+    const start = lineFrom + (match.index ?? 0);
+    const end = start + match[0].length;
+    if (linkRanges.some((range) => start < range.end && end > range.start)) continue;
+    linkRanges.push({ start, end });
+    if (!selectionIntersects(selectionFrom, selectionTo, start, end)) {
+      output.push({
+        from: start,
+        to: end,
+        decoration: Decoration.replace({ widget: new EmojiWidget(value, name) }),
+      });
+    }
   }
   const patterns: readonly [RegExp, string, number][] = [
     [/(\*\*|__)(?=\S)(.+?\S)\1/gu, 'markda-strong', 2],
@@ -3707,7 +4196,11 @@ function getStyles(): string { return String.raw`
   --markda-surface:#f8f8f8;--markda-inline-code:#f3f4f4;--markda-surface-secondary:#eef2f2;--markda-elevated:#fff;
   --markda-hover:#eaeef2;--markda-active:#dbeafe;--markda-selection:#b5d6fc;
   --markda-active-line:transparent;--markda-line-highlight:#0969da14;--markda-find-highlight:#fff8c5;--markda-focus:#0969da;
+  --markda-find-widget:#f3f3f3;--markda-find-input:#fff;--markda-find-match:#f6b94a70;--markda-find-match-selected:#f59b2399;
+  --markda-widget-shadow:#00000029;
   --markda-cursor-color:var(--markda-fg);--markda-accent:#0969da;--markda-error:#cf222e;
+  --markda-syntax-comment:#6e7781;--markda-syntax-constant:#0550ae;--markda-syntax-entity:#8250df;
+  --markda-syntax-keyword:#cf222e;--markda-syntax-string:#0a3069;--markda-syntax-variable:#953800;
   --markda-error-bg:#ffebe9;--markda-info:#0969da;--markda-info-bg:#ddf4ff;
   --markda-tip:#1a7f37;--markda-tip-bg:#dafbe1;--markda-warning:#9a6700;--markda-warning-bg:#fff8c5;
   --markda-scrollbar-track:transparent;--markda-scrollbar-thumb:#1f232847;
@@ -3719,7 +4212,11 @@ function getStyles(): string { return String.raw`
   --markda-surface:#252526;--markda-inline-code:#252526;--markda-surface-secondary:#2d2d30;--markda-elevated:#252526;
   --markda-hover:#2a2d2e;--markda-active:#37373d;--markda-selection:#4a89dc;
   --markda-active-line:transparent;--markda-line-highlight:#ffffff0f;--markda-find-highlight:#515c6a;--markda-focus:#007fd4;
+  --markda-find-widget:#252526;--markda-find-input:#3c3c3c;--markda-find-match:#ea5c0055;--markda-find-match-selected:#ea5c0088;
+  --markda-widget-shadow:#0000005c;
   --markda-cursor-color:var(--markda-fg);--markda-accent:#7aa2f7;--markda-error:#f48771;
+  --markda-syntax-comment:#8b949e;--markda-syntax-constant:#79c0ff;--markda-syntax-entity:#d2a8ff;
+  --markda-syntax-keyword:#ff7b72;--markda-syntax-string:#a5d6ff;--markda-syntax-variable:#ffa657;
   --markda-error-bg:#3b1f23;--markda-info:#75beff;--markda-info-bg:#152b3c;
   --markda-tip:#89d185;--markda-tip-bg:#17351f;--markda-warning:#e2c08d;--markda-warning-bg:#352f15;
   --markda-scrollbar-thumb:#c8c8c866;--markda-scrollbar-thumb-hover:#c8c8c88c;--markda-scrollbar-thumb-active:#c8c8c8b3;
@@ -3737,15 +4234,31 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .markda-shell{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.markda-toolbar{min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--markda-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
 .table-toolbar{display:none;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
-.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:16px;color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:30px var(--markda-padding-x,30px) 100px;line-height:1.6}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:1.6}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
+.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:16px;color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:30px var(--markda-padding-x,30px) 100px;line-height:1.6}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:1.6}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
+.cm-editor .cm-panels-top:has(.cm-search){position:absolute;top:0;right:14px;left:auto;z-index:400;color:var(--markda-fg);background:transparent;border:0}
+.cm-editor .cm-panel.cm-search{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) repeat(6,24px);grid-template-rows:24px 24px;gap:3px;width:min(430px,calc(100vw - 32px));padding:4px 28px 4px 4px;color:var(--markda-fg);background:var(--markda-find-widget);border:1px solid var(--markda-border);border-top:0;box-shadow:0 2px 8px var(--markda-widget-shadow);font:13px/1 var(--markda-font-body)}
+.cm-search .cm-textfield{min-width:0;height:24px;margin:0!important;padding:2px 6px;color:var(--markda-fg);background:var(--markda-find-input);border:1px solid var(--markda-border);border-radius:0;font:inherit}.cm-search .cm-textfield:focus{outline:1px solid var(--markda-focus);outline-offset:-1px;border-color:var(--markda-focus)}
+.cm-search input[name=search]{grid-area:1/1}.cm-search input[name=replace]{grid-area:2/1}.cm-search br{display:none}
+.cm-search button,.cm-search label{display:grid;place-items:center;width:24px;height:24px;min-height:24px;margin:0!important;padding:0;border:0;border-radius:2px;color:var(--markda-fg);background:transparent;font-size:0;cursor:pointer}
+.cm-search button:hover,.cm-search label:hover{background:var(--markda-hover)}.cm-search button:focus-visible,.cm-search label:focus-within{outline:1px solid var(--markda-focus);outline-offset:-1px}
+.cm-search button{font-size:0}.cm-search button::before,.cm-search label::after{font:16px/1 codicon}
+.cm-search button[name=prev]{grid-area:1/5}.cm-search button[name=prev]::before{content:"\eab7"}.cm-search button[name=next]{grid-area:1/6}.cm-search button[name=next]::before{content:"\eab4"}.cm-search button[name=select]{grid-area:1/7}.cm-search button[name=select]::before{content:"\eb85"}
+.cm-search label:has(input[name=case]){grid-area:1/2}.cm-search label:has(input[name=case])::after{content:"\eab1"}.cm-search label:has(input[name=word]){grid-area:1/3}.cm-search label:has(input[name=word])::after{content:"\eb7e"}.cm-search label:has(input[name=re]){grid-area:1/4}.cm-search label:has(input[name=re])::after{content:"\eb38"}
+.cm-search label input[type=checkbox]{position:absolute;width:1px;height:1px;margin:0!important;opacity:0}.cm-search label:has(input:checked){color:var(--markda-accent);background:var(--markda-active);outline:1px solid var(--markda-focus);outline-offset:-1px}
+.cm-search button[name=replace]{grid-area:2/5}.cm-search button[name=replace]::before{content:"\eb3d"}.cm-search button[name=replaceAll]{grid-area:2/6}.cm-search button[name=replaceAll]::before{content:"\eb3c"}
+.cm-search button[name=close]{position:absolute!important;top:4px!important;right:3px!important;margin:0!important}.cm-search button[name=close]::before{content:"\ea76"}.cm-search button[name=close]{color:transparent!important}.cm-search button[name=close]::before{color:var(--markda-fg)}
+.cm-editor .cm-searchMatch{background:var(--markda-find-match)!important}.cm-editor .cm-searchMatch-selected{background:var(--markda-find-match-selected)!important;outline:1px solid var(--markda-accent)}
 .markda-h1,.markda-h2,.markda-h3,.markda-h4,.markda-h5,.markda-h6{font-weight:700;margin-top:1rem;margin-bottom:1rem}.markda-h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}.markda-h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}.markda-h3{font-size:1.5em;line-height:1.43}.markda-h4{font-size:1.25em}.markda-h5{font-size:1em}.markda-h6{font-size:1em;color:var(--markda-muted)}.markda-setext-marker{height:0;min-height:0;line-height:0;overflow:hidden}.markda-quote{border-left:4px solid var(--markda-border);padding-left:15px!important;color:var(--markda-muted)}.markda-list-marker{color:var(--markda-muted)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--markda-fg);font-weight:700;text-align:center}
 .markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-subscript{font-size:.78em;vertical-align:sub}.markda-superscript{font-size:.78em;vertical-align:super}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--markda-font-mono);font-size:.9em;background:var(--markda-inline-code);padding:0 2px;border:1px solid color-mix(in srgb,var(--markda-border) 70%,transparent);border-radius:3px}.markda-soft-break{white-space:pre}.markda-inline-math{padding:0 2px}.markda-inline-html,.markda-entity{cursor:pointer}.markda-inline-image{display:inline-flex;align-items:center;max-width:min(18em,70vw);max-height:4em;margin:0 .2em;padding:2px;border:1px solid transparent;border-radius:4px;vertical-align:middle;cursor:pointer}.markda-inline-image:hover{border-color:var(--markda-border)}.markda-inline-image img{display:block;max-width:100%;max-height:3.5em}.markda-inline-image-blocked{padding:1px 5px;color:var(--markda-muted);background:var(--markda-surface)}.markda-image-alt,.markda-footnote-source{color:var(--markda-muted)}.markda-footnote-reference{display:inline-block;min-width:1em;padding:0 2px;color:var(--markda-link);font-size:.75em;line-height:1;vertical-align:super;cursor:pointer}.markda-thematic-break{width:100%;height:2px;margin:16px 0;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3,.source-mode .markda-h4,.source-mode .markda-h5,.source-mode .markda-h6{font-size:inherit;font-weight:inherit;line-height:inherit;color:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
+.markda-emoji{display:inline-block;min-width:1em;text-align:center}.markda-diagnostic{text-decoration-line:underline;text-decoration-style:wavy;text-underline-offset:3px}.markda-diagnostic-error{text-decoration-color:var(--markda-error)}.markda-diagnostic-warning{text-decoration-color:var(--markda-warning)}.markda-diagnostic-information{text-decoration-color:var(--markda-info)}.markda-diagnostic-hint{text-decoration-color:var(--markda-muted)}
+.markda-live-toc,.markda-front-matter{margin:12px 0;padding:14px 16px;border:1px solid var(--markda-border);border-radius:7px;background:var(--markda-surface)}.markda-live-toc ol{list-style:none;margin:8px 0 0;padding:0}.markda-live-toc li{margin-left:calc(var(--markda-toc-depth,0) * 18px)}.markda-live-toc button{min-height:24px;padding:2px 4px;color:var(--markda-link);text-align:left}.markda-toc-empty{display:block;margin-top:6px;color:var(--markda-muted);font-style:italic}
+.markda-front-matter-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.markda-front-matter-header button{min-height:24px;font-size:12px}.markda-front-matter-fields{display:grid;gap:6px}.markda-front-matter-fields label{display:grid;grid-template-columns:minmax(7em,.4fr) minmax(10em,1fr);gap:10px;align-items:center}.markda-front-matter-fields input{min-width:0;padding:5px 7px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}.markda-front-matter-fields code{overflow:hidden;color:var(--markda-muted);text-overflow:ellipsis;white-space:nowrap}.markda-front-matter-source{min-height:8em}.markda-front-matter-error{color:var(--markda-error)}
 .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em;accent-color:var(--markda-accent)}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--markda-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{color:var(--markda-muted);text-align:center;font-size:.9em}
 .markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
 .markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-source-editor{display:block;width:100%;min-height:0;overflow-y:hidden;resize:none;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
 .markda-footnote-definition{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;margin:.45em 0;padding:6px 9px;color:var(--markda-muted);background:var(--markda-surface);border-radius:4px}.markda-footnote-definition-content{min-height:1.5em;white-space:pre-wrap;outline:none}.markda-reference-definition{display:grid;grid-template-columns:minmax(7em,.5fr) auto minmax(10em,1fr) minmax(8em,.7fr);gap:6px;align-items:center;margin:.45em 0;padding:6px 9px;background:var(--markda-surface);border-radius:4px}.markda-reference-definition input{min-width:0;padding:4px 6px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}
 .markda-html-block{margin:.6em 0;padding:8px;outline:none;border:1px solid transparent;border-radius:4px}.markda-html-block:focus{border-color:var(--markda-border)}.markda-html-empty{color:var(--markda-muted);font-style:italic}
-.markda-live-code{margin:15px 0;max-width:100%;overflow:auto;font-family:var(--markda-font-mono);font-size:.9em}.markda-live-code pre{margin:0;padding:8px 4px 6px;border:1px solid var(--markda-border);border-radius:3px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-code-rendered{padding:10px}
+.markda-live-code{margin:15px 0;max-width:100%;overflow:auto;font-family:var(--markda-font-mono);font-size:.9em}.markda-live-code pre{margin:0;padding:8px 4px 6px;border:1px solid var(--markda-border);border-radius:3px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-syntax-comment{color:var(--markda-syntax-comment)}.markda-syntax-constant{color:var(--markda-syntax-constant)}.markda-syntax-entity{color:var(--markda-syntax-entity)}.markda-syntax-keyword{color:var(--markda-syntax-keyword)}.markda-syntax-string{color:var(--markda-syntax-string)}.markda-syntax-variable{color:var(--markda-syntax-variable)}.markda-code-rendered{padding:10px}
 .markda-trailing-paragraph{min-height:1.7em;margin-top:2px;border-radius:3px;cursor:text}.markda-trailing-paragraph:hover,.markda-trailing-paragraph:focus{background:var(--markda-line-highlight);outline:none}.markda-trailing-paragraph:focus::before{content:"";display:inline-block;height:1.35em;border-left:2px solid var(--markda-cursor-color);box-shadow:none;vertical-align:middle}
 .markda-live-table-wrap{overflow:auto;margin:.8em 0;color:var(--markda-fg)}.markda-live-table-wrap table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap tbody tr:nth-child(2n){background:var(--markda-surface)}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:6px 13px;min-width:70px;resize:horizontal;overflow:auto;color:var(--markda-fg);background:transparent}.markda-live-table-wrap th{font-weight:700;background:var(--markda-surface)}.markda-live-table-wrap th:focus-visible,.markda-live-table-wrap td:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--markda-focus)}.markda-live-table-wrap code{padding:0 2px;color:var(--markda-fg);background:var(--markda-inline-code);border:1px solid var(--markda-border);border-radius:3px;font-family:var(--markda-font-mono);font-size:.9em}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
 .markda-callout{margin:12px 0;padding:12px 16px;border-radius:6px;border-left:4px solid;background:var(--markda-surface)}.markda-callout-title{font-weight:600;margin-bottom:4px}.markda-callout-content{color:var(--markda-fg)}.markda-callout-edit{margin-top:8px;font-size:11px;padding:2px 8px;opacity:0}.markda-callout:hover .markda-callout-edit{opacity:1}
@@ -3754,6 +4267,7 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 dialog{color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:260px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:76px;padding:5px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
 body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
 #preview{color:var(--markda-fg);background:var(--markda-bg)}#preview h1,#preview h2,#preview h3,#preview h4,#preview h5,#preview h6{position:relative;margin:1rem 0;color:var(--markda-fg);font-weight:700;line-height:1.4}#preview h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}#preview h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}#preview h3{font-size:1.5em;line-height:1.43}#preview h4{font-size:1.25em}#preview h5{font-size:1em}#preview h6{font-size:1em;color:var(--markda-muted)}#preview p,#preview blockquote,#preview ul,#preview ol,#preview dl,#preview table{margin:.8em 0}#preview ul,#preview ol{padding-left:30px}#preview li>ul,#preview li>ol{margin:0}#preview hr{box-sizing:content-box;height:2px;margin:16px 0;padding:0;overflow:hidden;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}#preview pre{overflow:auto;margin:15px 0;padding:8px 4px 6px;color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);border-radius:3px}#preview code{font-family:var(--markda-font-mono);font-size:.9em;color:var(--markda-fg)}#preview :not(pre)>code{padding:0 2px;background:var(--markda-inline-code);border:1px solid var(--markda-border);border-radius:3px}#preview pre code{padding:0;color:var(--markda-fg);background:transparent;border:0}#preview blockquote{padding:0 15px;color:var(--markda-muted);background:transparent;border-left:4px solid var(--markda-border)}#preview blockquote p{color:inherit}#preview table{border-collapse:collapse;width:100%;padding:0;color:var(--markda-fg);background:var(--markda-bg);word-break:initial}#preview tr:nth-child(2n),#preview thead{background:var(--markda-surface)}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 13px;color:var(--markda-fg);background:transparent}#preview th{font-weight:700}#preview input{accent-color:var(--markda-accent)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
+#preview .markda-toc{margin:1em 0;padding:12px 16px;border:1px solid var(--markda-border);border-radius:6px;background:var(--markda-surface)}#preview .markda-toc ul{list-style:none;margin:0;padding:0}#preview .markda-toc-level-1{margin-left:18px}#preview .markda-toc-level-2{margin-left:36px}#preview .markda-toc-level-3{margin-left:54px}#preview .markda-toc-level-4,#preview .markda-toc-level-5{margin-left:72px}
 @media(max-width:760px){.markda-toolbar button span:not(.math-icon){display:none}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}}
   @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 `; }
@@ -3766,5 +4280,6 @@ applyViewState(initialViewState);
 if (initialDocument) {
   applySettings(true);
   scheduleDerivedStateUpdate();
+  if (initialDocument.text.includes(':')) void loadFullEmoji();
 }
 vscode.postMessage({ type: 'ready' });

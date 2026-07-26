@@ -1,0 +1,19 @@
+{
+  "Filter headings": "제목 필터",
+  "Heading text": "제목 텍스트",
+  "Filter Markdown files": "Markdown 파일 필터",
+  "File or folder name": "파일 또는 폴더 이름",
+  "Create": "만들기",
+  "Duplicate": "복제",
+  "{0} words · {1} characters · {2} lines · {3} min read": "단어 {0}개 · 문자 {1}개 · {2}줄 · 읽기 {3}분",
+  "markda: No active markda document.": "markda: 활성 markda 문서가 없습니다.",
+  "Export": "내보내기",
+  "markda: Exported {0}": "markda: {0} 내보냄",
+  "markda: This document has no previous export.": "markda: 이 문서에는 이전 내보내기가 없습니다.",
+  "current": "현재",
+  "Recent": "최근",
+  "Go to heading": "제목으로 이동",
+  "markda Markdown editor": "markda Markdown 편집기",
+  "{0} words": "단어 {0}개",
+  "{0} words · {1} characters": "단어 {0}개 · 문자 {1}개"
+}

@@ -1,0 +1,19 @@
+{
+  "Filter headings": "تصفية العناوين",
+  "Heading text": "نص العنوان",
+  "Filter Markdown files": "تصفية ملفات Markdown",
+  "File or folder name": "اسم الملف أو المجلد",
+  "Create": "إنشاء",
+  "Duplicate": "تكرار",
+  "{0} words · {1} characters · {2} lines · {3} min read": "{0} كلمة · {1} حرفًا · {2} سطرًا · {3} دقيقة قراءة",
+  "markda: No active markda document.": "markda: لا يوجد مستند markda نشط.",
+  "Export": "تصدير",
+  "markda: Exported {0}": "markda: تم تصدير {0}",
+  "markda: This document has no previous export.": "markda: لا يحتوي هذا المستند على تصدير سابق.",
+  "current": "الحالي",
+  "Recent": "الأخيرة",
+  "Go to heading": "الانتقال إلى العنوان",
+  "markda Markdown editor": "محرر Markdown من markda",
+  "{0} words": "{0} كلمة",
+  "{0} words · {1} characters": "{0} كلمة · {1} حرفًا"
+}

@@ -112,6 +112,11 @@ describe('live Markdown pointer geometry in Chromium', () => {
     });
     await settle();
     const thematicBreak = view.dom.querySelector<HTMLElement>('.markda-thematic-break')!;
+    const collapsedBlankLines = Array.from(
+      view.dom.querySelectorAll<HTMLElement>('.markda-thematic-blank-line'),
+    );
+    expect(collapsedBlankLines).toHaveLength(1);
+    expect(collapsedBlankLines.every((line) => line.getBoundingClientRect().height === 0)).toBe(true);
     const ruleRect = thematicBreak.getBoundingClientRect();
     const ruleX = ruleRect.left + ruleRect.width / 2;
     const ruleY = ruleRect.top + ruleRect.height / 2;

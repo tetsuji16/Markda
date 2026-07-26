@@ -28,3 +28,19 @@ declare module 'markdown-it-task-lists' {
   const plugin: MarkdownIt.PluginWithOptions<{ enabled?: boolean; label?: boolean; labelAfter?: boolean }>;
   export default plugin;
 }
+
+declare module 'markdown-it-emoji' {
+  import type MarkdownIt from 'markdown-it';
+  export const full: MarkdownIt.PluginSimple;
+  export const light: MarkdownIt.PluginSimple;
+}
+
+declare module 'markdown-it-emoji/lib/data/full.mjs' {
+  const emoji: Readonly<Record<string, string>>;
+  export default emoji;
+}
+
+declare module 'markdown-it-emoji/lib/data/light.mjs' {
+  const emoji: Readonly<Record<string, string>>;
+  export default emoji;
+}

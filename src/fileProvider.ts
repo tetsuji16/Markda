@@ -114,10 +114,10 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
   }
 
   private rebuildRecent(): void {
-    const recent = new FolderItem('Recent', '');
+    const recent = new FolderItem(vscode.l10n.t('Recent'), '');
     recent.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
     recent.iconPath = new vscode.ThemeIcon('history');
-    recent.children.push(...this.recent.filter((uri) => !this.filter || uri.fsPath.toLowerCase().includes(this.filter)).map((uri) => new FileItem(uri, 'Recent', uri.toString() === this.current)));
+    recent.children.push(...this.recent.filter((uri) => !this.filter || uri.fsPath.toLowerCase().includes(this.filter)).map((uri) => new FileItem(uri, vscode.l10n.t('Recent'), uri.toString() === this.current)));
     this.roots = recent.children.length ? [recent, ...this.contentRoots] : this.contentRoots;
     this.changeEmitter.fire(undefined);
   }
@@ -151,13 +151,13 @@ class FileItem extends vscode.TreeItem {
     super(path.basename(uri.fsPath), vscode.TreeItemCollapsibleState.None);
     this.resourceUri = uri;
     this.defaultDescription = path.dirname(relative) === '.' ? '' : path.dirname(relative);
-    this.command = { command: 'markda.open', title: 'Open with markda', arguments: [uri] };
+    this.command = { command: 'markda.open', title: vscode.l10n.t('Open with markda'), arguments: [uri] };
     this.contextValue = 'markdaFile';
     this.accessibilityInformation = { label: `${path.basename(uri.fsPath)}, ${relative}` };
     this.setActive(active);
   }
   setActive(active: boolean): void {
-    this.description = active ? 'current' : this.defaultDescription;
+    this.description = active ? vscode.l10n.t('current') : this.defaultDescription;
     if (active) this.iconPath = new vscode.ThemeIcon('arrow-right');
     else Reflect.deleteProperty(this, 'iconPath');
   }

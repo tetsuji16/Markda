@@ -10,21 +10,22 @@ Markda is a calm, source-preserving Markdown editor for VS Code Desktop. Work di
 
 ## Source-preserving by design
 
-![Markda rendering its specification in the live editor, with document scope and synchronization rules shown as formatted Markdown](media/screenshots/live-editing.png)
+![Markda's compact product showcase in the live editor, demonstrating source mode, focus and typewriter modes, tables, tasks, math, code, and local Markdown rendering](media/screenshots/live-editing.png)
 
 The VS Code text document remains the single source of truth. Markda applies focused edits to that document while preserving untouched content and Markdown syntax. Switch to full source whenever you want to inspect or change it directly.
 
 ## Highlights
 
-- Edit supported CommonMark and Markda extension syntax in place—including reference links and images, footnotes, indented code, entities, and explicitly permitted HTML—or switch to the full source view.
+- Edit supported CommonMark and Markda extension syntax in place—including reference links and images, footnotes, indented code, entities, emoji shortcodes, YAML Front Matter, `[toc]`, and explicitly permitted HTML—or switch to the full source view.
 - Use document-style paragraph breaks, smart HTML-to-Markdown paste, and modifier-click link opening.
 - Work with tables using direct cell editing, row and column controls, drag reordering, resizing, alignment, and Tab navigation.
-- Edit code blocks directly without opening source mode, with unified undo and redo behavior.
-- Render KaTeX math and Mermaid diagrams without sending document content to an online rendering service.
+- Edit syntax-highlighted code blocks directly without opening source mode, with unified undo and redo behavior.
+- Render KaTeX math, numbered labeled equations and references, and Mermaid diagrams without sending document content to an online rendering service.
 - Insert multiple images, or save images from the clipboard and drag-and-drop into a configurable asset folder.
 - Navigate with filterable Outline and Files views, workspace Markdown search, and Quick Open.
 - Use focus and typewriter modes, light and dark themes, find, and document statistics.
-- Export a styled standalone HTML document or bare HTML.
+- Export styled or bare HTML, create PDF through an installed Chromium-family browser, or invoke trusted external export targets such as Pandoc.
+- Follow same-document and cross-document heading links, and show VS Code diagnostics from spell checkers, markdownlint, Vale, and other language tools in the live editor.
 - Keep split editors synchronized through the underlying VS Code text document.
 - Keep the selected editor theme synchronized across open Markdown tabs.
 - Stay responsive in long documents with optimized statistics, outline tracking, and live-view cursor updates.
@@ -34,7 +35,7 @@ The VS Code text document remains the single source of truth. Markda applies foc
 1. Open a Markdown file. Markda is registered for `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`, and `.txt` files.
 2. If another editor is active, run **Markda: Open with Markda** or choose **Reopen Editor With… → Markda** from the editor tab menu.
 3. Use the `</>` button or **Markda: Toggle Source Code Mode** to move between the live editor and Markdown source.
-4. To return to VS Code's built-in editor, choose **Reopen Editor With… → Text Editor**.
+4. To return to VS Code's built-in editor, use the **Reopen with Another Editor** button in the Markda editor title.
 
 The Markda activity-bar view provides document outline and Markdown file navigation.
 
@@ -56,11 +57,13 @@ The Markda activity-bar view provides document outline and Markdown file navigat
 | Copy as Markdown | `Ctrl+Shift+C` | `Cmd+Shift+C` |
 | Paste as plain text | `Ctrl+Shift+V` | `Cmd+Shift+V` |
 
-Search for `Markda:` in the Command Palette to see all available commands, including table and math insertion, workspace search, statistics, and HTML export.
+Search for `Markda:` in the Command Palette to see all available commands, including table and math insertion, workspace search, statistics, HTML/PDF export, and configured external export targets.
+
+Run **Markda: Configure File Associations** to choose which of `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`, and `.txt` open with Markda by default. Associations can be saved for the current user or only the current workspace. They are stored in VS Code's `workbench.editorAssociations` setting, so they can also be reviewed or changed later in Settings.
 
 ## Settings
 
-Settings under `markda.*` control editor width, delimiter pairing, typewriter behavior, split-preview delay, the live-table size limit, Markdown features, image paths, themes, export behavior, remote resources, and unsafe HTML. Open **Settings** and search for `markda` to see descriptions and defaults.
+Settings under `markda.*` control editor width, delimiter pairing, typewriter behavior, split-preview delay, the live-table size limit, Markdown features, image paths, themes, export behavior, remote resources, and unsafe HTML. `markda.export.pdfBrowserPath` selects a custom Edge/Chrome/Chromium binary, while `markda.export.targets` registers trusted argument-array commands using `${source}`, `${destination}`, `${documentDir}`, `${documentName}`, and `${workspaceFolder}`. Open **Settings** and search for `markda` to see descriptions and defaults.
 
 By default, remote resources require confirmation and unsafe HTML is disabled. In an untrusted workspace, workspace-controlled image destinations and security overrides are restricted.
 
@@ -68,7 +71,7 @@ By default, remote resources require confirmation and unsafe HTML is disabled. I
 
 - VS Code Desktop 1.100 or later
 - Local or remote desktop extension hosts; this release is not a web extension for `vscode.dev`
-- HTML export is supported; PDF and DOCX export are not included
+- HTML and PDF export are supported. Other formats can be configured as external export targets; their conversion tools are not bundled.
 
 ## Privacy and security
 

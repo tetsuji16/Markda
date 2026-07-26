@@ -18,7 +18,7 @@ Markda does not collect telemetry. External URLs and remote resources follow the
 
 ## Editor behavior
 
-Live view and source view operate on the same CodeMirror 6 document. Live view hides inactive syntax markers and directly renders headings, quotes, lists, emphasis, links (inline, reference, shortcut, automatic, and bare URL forms), images (block, inline, and reference forms), character entities, escapes, tasks, footnotes, reference definitions, fenced and indented code blocks, permitted HTML, math, Mermaid diagrams, thematic breaks, and tables in the editing surface. Activating a rendered inline object exposes only its Markdown source; editable block objects synchronize their changes back to the original source range.
+Live view and source view operate on the same CodeMirror 6 document. Live view hides inactive syntax markers and directly renders headings, quotes, lists, emphasis, links (inline, reference, shortcut, automatic, bare URL, and heading-anchor forms), images (block, inline, and reference forms), character entities, escapes, emoji shortcodes, tasks, footnotes, reference definitions, YAML Front Matter, `[toc]`, fenced and indented code blocks, permitted HTML, math, Mermaid diagrams, thematic breaks, and tables in the editing surface. Activating a rendered inline object exposes only its Markdown source; editable block objects synchronize their changes back to the original source range.
 
 In ordinary live-view paragraphs, Enter creates a paragraph and Shift+Enter creates a Markdown hard break. Lists, quotes, headings, fenced code blocks, and source view retain structural Markdown behavior. Rich clipboard HTML is converted to Markdown for headings, paragraphs, formatting, links, images, lists, quotes, tables, and code. HTML blocks are directly editable only when both Markdown HTML and unsafe HTML are explicitly enabled; edited HTML is sanitized before it is written back.
 
@@ -28,13 +28,13 @@ Focus Mode dims lines outside the current line. Typewriter Mode keeps the caret 
 
 The optional rendered preview supports Markdown, tables, tasks, footnotes, subscript, superscript, highlighting, KaTeX, and Mermaid. Generated HTML is sanitized with DOMPurify. Raw HTML is parsed only when `allowUnsafeHtml` is enabled and is still sanitized afterward.
 
-KaTeX and Mermaid load only when a matching element first appears. The split preview is disabled by default and refreshes only after editing becomes idle.
+KaTeX, Mermaid, the full emoji catalog, and the YAML parser load only when matching content first appears. Labeled display equations receive stable document-order numbers; `\ref` and `\eqref` resolve against those labels without rewriting Markdown source. The split preview is disabled by default and refreshes only after editing becomes idle.
 
 ## VS Code integration
 
 The editor view type is `markda.editor`. Outline shows heading hierarchy, the current section, and filtering. Files lists supported workspace files in a folder hierarchy and provides recent-file, Quick Open, and workspace-search entry points.
 
-Document statistics show words, characters, non-space characters, lines, and estimated reading time. Interactive controls provide accessible names, pressed states where applicable, and visible keyboard focus.
+Document statistics show words, characters, non-space characters, lines, and estimated reading time. VS Code diagnostics for the underlying `TextDocument` are mapped to source ranges in the live editor, retaining severity, source, and message. Interactive controls provide accessible names, pressed states where applicable, and visible keyboard focus.
 
 ## Security
 
@@ -42,7 +42,7 @@ The webview Content Security Policy uses `default-src 'none'`. Scripts are limit
 
 ## Export scope
 
-The 0.1 release series supports styled HTML, bare HTML, and exporting again to the previous destination for the document. PDF, image, import, and external conversion-tool support are outside the current scope.
+The 0.1 release series supports styled HTML, bare HTML, PDF through a detected or configured Edge/Chrome/Chromium executable, trusted external argument-array commands, and exporting HTML again to the previous destination. External commands never use a shell and are disabled in untrusted workspaces. Image export and import remain outside the current scope.
 
 ## Acceptance status
 
@@ -53,8 +53,11 @@ The 0.1 release series supports styled HTML, bare HTML, and exporting again to t
 | Math and diagrams | Implemented | Local KaTeX and Mermaid rendering with sanitized output |
 | Outline and files | Implemented | Hierarchy, current location, filtering, recent files, Quick Open, search |
 | HTML export | Implemented | Styled and bare output, repeat export, escaped titles |
+| PDF and external export | Implemented | Chromium-family PDF printing, relative resources, configured commands, Workspace Trust |
+| Document extensions | Implemented | Heading anchors, `[toc]`, emoji, YAML Front Matter, equation labels and references |
+| VS Code diagnostics | Implemented | Severity-colored live ranges with message and source |
 | Images | Implemented | Safe workspace destinations, collision avoidance, relative URL insertion |
 | Table interface | Implemented | Cell editing, row and column operations, reordering, width, alignment, Tab navigation |
-| PDF, image, and external formats | Not implemented | Requires signed tools, licensing review, and cross-platform tests |
+| Image export and import | Not implemented | Requires format-specific rendering and cross-platform tests |
 
 Version 1.0 requires completion of all planned areas plus Windows, macOS, Linux, accessibility, performance, and security validation.

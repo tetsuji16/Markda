@@ -77,6 +77,8 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     const view = __getEditorView();
     const widget = view.dom.querySelector('.markda-live-code');
     expect(widget).not.toBeNull();
+    expect(widget?.querySelector('.markda-syntax-keyword')?.textContent).toBe('const');
+    expect(widget?.querySelector('.markda-syntax-constant')?.textContent).toBe('1');
     // The source fence syntax must be hidden behind the widget.
     expect(view.dom.textContent).not.toContain('```js');
   });
@@ -328,6 +330,30 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     expect(view.dom.textContent).not.toContain('- - -');
     expect(view.dom.textContent).not.toContain('___');
     expect(view.dom.textContent).not.toContain('***');
+  });
+
+  it('collapses blank source lines around a rendered thematic break like Typora', async () => {
+    vi.resetModules();
+    const text = ['Before', '', '', '___', '', '', 'After'].join('\n');
+    setupEditor(text);
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    expect(view.dom.querySelector('.markda-thematic-break')).not.toBeNull();
+    // The block replacement already consumes the first empty line immediately
+    // after the rule; every remaining rendered blank line is explicitly folded.
+    expect(view.dom.querySelectorAll('.markda-thematic-blank-line')).toHaveLength(3);
+
+    const blankLine = view.state.doc.line(2);
+    view.focus();
+    await tick();
+    view.dispatch({ selection: { anchor: blankLine.from } });
+    await tick();
+    expect(view.dom.querySelector('.markda-thematic-break')).not.toBeNull();
+    expect(view.domAtPos(blankLine.from).node instanceof Element
+      ? (view.domAtPos(blankLine.from).node as Element).closest('.markda-thematic-blank-line')
+      : view.domAtPos(blankLine.from).node.parentElement?.closest('.markda-thematic-blank-line')).toBeNull();
   });
 
   it('exposes thematic-break and task Markdown while their lines are being edited', async () => {

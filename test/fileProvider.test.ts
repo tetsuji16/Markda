@@ -9,6 +9,7 @@ function uri(value: string): { fsPath: string; toString(): string } {
 }
 
 vi.mock('vscode', () => ({
+  l10n: { t: (message: string) => message },
   Uri: class {
     private constructor(readonly fsPath: string) {}
     static file(value: string) { return new this(value); }

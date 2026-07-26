@@ -1,10 +1,11 @@
 {
   "name": "markda",
   "displayName": "Markda",
-  "description": "A source-preserving live Markdown editor for VS Code: edit formatted Markdown in place while keeping ordinary, portable Markdown files.",
-  "version": "0.1.15",
+  "description": "%extension.description%",
+  "version": "0.1.16",
   "publisher": "tetsuji16",
   "license": "MIT",
+  "l10n": "./l10n",
   "homepage": "https://github.com/tetsuji16/Markda#readme",
   "bugs": {
     "url": "https://github.com/tetsuji16/Markda/issues"
@@ -112,221 +113,252 @@
       "markda": [
         {
           "id": "markda.outline",
-          "name": "Outline"
+          "name": "%view.outline%"
         },
         {
           "id": "markda.files",
-          "name": "Files"
+          "name": "%view.files%"
         }
       ]
     },
     "commands": [
       {
         "command": "markda.open",
-        "title": "Open with markda",
+        "title": "%command.open%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.reopenWith",
+        "title": "%command.reopenWith%",
+        "category": "markda",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "markda.configureFileAssociations",
+        "title": "%command.configureAssociations%",
         "category": "markda"
       },
       {
         "command": "markda.newFile",
-        "title": "New Markdown File",
+        "title": "%command.new%",
         "category": "markda"
       },
       {
         "command": "markda.duplicate",
-        "title": "Duplicate Document",
+        "title": "%command.duplicate%",
         "category": "markda"
       },
       {
         "command": "markda.toggleSourceMode",
-        "title": "Toggle Source Code Mode",
+        "title": "%command.source%",
         "category": "markda",
         "icon": "$(code)"
       },
       {
         "command": "markda.toggleFocusMode",
-        "title": "Toggle Focus Mode",
+        "title": "%command.focus%",
         "category": "markda"
       },
       {
         "command": "markda.toggleTypewriterMode",
-        "title": "Toggle Typewriter Mode",
+        "title": "%command.typewriter%",
         "category": "markda"
       },
       {
         "command": "markda.showOutline",
-        "title": "Show Outline",
+        "title": "%command.outline%",
         "category": "markda"
       },
       {
         "command": "markda.showFiles",
-        "title": "Show Files",
+        "title": "%command.files%",
         "category": "markda"
       },
       {
         "command": "markda.showSearch",
-        "title": "Find in Document",
+        "title": "%command.find%",
         "category": "markda"
       },
       {
         "command": "markda.copyAsMarkdown",
-        "title": "Copy as Markdown",
+        "title": "%command.copy%",
         "category": "markda"
       },
       {
         "command": "markda.pastePlainText",
-        "title": "Paste as Plain Text",
+        "title": "%command.paste%",
         "category": "markda"
       },
       {
         "command": "markda.insertTable",
-        "title": "Insert Table",
+        "title": "%command.table%",
         "category": "markda"
       },
       {
         "command": "markda.insertImage",
-        "title": "Insert Image",
+        "title": "%command.image%",
         "category": "markda"
       },
       {
         "command": "markda.insertMathBlock",
-        "title": "Insert Math Block",
+        "title": "%command.math%",
         "category": "markda"
       },
       {
         "command": "markda.toggleBold",
-        "title": "Format: Bold",
+        "title": "%command.bold%",
         "category": "markda",
         "icon": "$(bold)"
       },
       {
         "command": "markda.toggleItalic",
-        "title": "Format: Italic",
+        "title": "%command.italic%",
         "category": "markda",
         "icon": "$(italic)"
       },
       {
         "command": "markda.toggleInlineCode",
-        "title": "Format: Inline Code",
+        "title": "%command.inlineCode%",
         "category": "markda",
         "icon": "$(code)"
       },
       {
         "command": "markda.insertLink",
-        "title": "Format: Link",
+        "title": "%command.link%",
         "category": "markda",
         "icon": "$(link)"
       },
       {
         "command": "markda.toggleBulletList",
-        "title": "Format: Bulleted List",
+        "title": "%command.bullets%",
         "category": "markda",
         "icon": "$(list-unordered)"
       },
       {
         "command": "markda.toggleOrderedList",
-        "title": "Format: Numbered List",
+        "title": "%command.numbered%",
         "category": "markda",
         "icon": "$(list-ordered)"
       },
       {
         "command": "markda.toggleTaskList",
-        "title": "Format: Task List",
+        "title": "%command.tasks%",
         "category": "markda",
         "icon": "$(checklist)"
       },
       {
         "command": "markda.toggleBlockquote",
-        "title": "Format: Block Quote",
+        "title": "%command.quote%",
         "category": "markda"
       },
       {
         "command": "markda.toggleStrikethrough",
-        "title": "Format: Strikethrough",
+        "title": "%command.strike%",
         "category": "markda"
       },
       {
         "command": "markda.insertCodeBlock",
-        "title": "Format: Code Block",
+        "title": "%command.codeBlock%",
         "category": "markda"
       },
       {
         "command": "markda.clearFormatting",
-        "title": "Format: Clear Formatting",
+        "title": "%command.clearFormat%",
         "category": "markda"
       },
       {
         "command": "markda.filterOutline",
-        "title": "Filter Outline",
+        "title": "%command.filterOutline%",
         "category": "markda",
         "icon": "$(filter)"
       },
       {
         "command": "markda.clearOutlineFilter",
-        "title": "Clear Outline Filter",
+        "title": "%command.clearOutline%",
         "category": "markda",
         "icon": "$(clear-all)"
       },
       {
         "command": "markda.filterFiles",
-        "title": "Filter Files",
+        "title": "%command.filterFiles%",
         "category": "markda",
         "icon": "$(filter)"
       },
       {
         "command": "markda.clearFileFilter",
-        "title": "Clear File Filter",
+        "title": "%command.clearFiles%",
         "category": "markda",
         "icon": "$(clear-all)"
       },
       {
         "command": "markda.searchWorkspace",
-        "title": "Search across Markdown Files",
+        "title": "%command.searchWorkspace%",
         "category": "markda",
         "icon": "$(search)"
       },
       {
         "command": "markda.quickOpen",
-        "title": "Quick Open Markdown File",
+        "title": "%command.quickOpen%",
         "category": "markda",
         "icon": "$(go-to-file)"
       },
       {
         "command": "markda.showStatistics",
-        "title": "Show Document Statistics",
+        "title": "%command.statistics%",
         "category": "markda"
       },
       {
         "command": "markda.exportHtml",
-        "title": "Export: HTML",
+        "title": "%command.export%",
         "category": "markda"
       },
       {
         "command": "markda.exportHtmlBare",
-        "title": "Export: HTML without styles",
+        "title": "%command.exportBare%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.exportPdf",
+        "title": "%command.exportPdf%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.exportExternal",
+        "title": "%command.exportExternal%",
         "category": "markda"
       },
       {
         "command": "markda.exportWithPrevious",
-        "title": "Export with Previous Settings",
+        "title": "%command.exportPrevious%",
         "category": "markda"
       },
       {
         "command": "markda.openThemeFolder",
-        "title": "Open Theme Folder",
+        "title": "%command.themeFolder%",
         "category": "markda"
       }
     ],
     "menus": {
       "editor/title": [
         {
+          "command": "markda.reopenWith",
+          "when": "activeCustomEditorId == markda.editor",
+          "group": "navigation@1"
+        },
+        {
           "command": "markda.toggleSourceMode",
           "when": "activeCustomEditorId == markda.editor",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "markda.exportHtml",
           "when": "activeCustomEditorId == markda.editor",
-          "group": "navigation"
+          "group": "navigation@3"
+        },
+        {
+          "command": "markda.exportPdf",
+          "when": "activeCustomEditorId == markda.editor",
+          "group": "navigation@4"
         }
       ],
       "view/title": [
@@ -472,7 +504,7 @@
           "type": "boolean",
           "default": true,
           "scope": "resource",
-          "description": "Automatically pair Markdown delimiters."
+          "description": "%config.autoPair%"
         },
         "markda.editor.contentWidth": {
           "type": "integer",
@@ -480,7 +512,7 @@
           "minimum": 0,
           "maximum": 1800,
           "scope": "resource",
-          "description": "Maximum editor content width in pixels. 0 fills the window."
+          "description": "%config.contentWidth%"
         },
         "markda.editor.themeMode": {
           "type": "string",
@@ -491,12 +523,12 @@
             "dark"
           ],
           "enumDescriptions": [
-            "Follow the VS Code color theme automatically.",
-            "Always use the light editor theme.",
-            "Always use the dark editor theme."
+            "%config.themeAuto%",
+            "%config.themeLight%",
+            "%config.themeDark%"
           ],
           "scope": "window",
-          "description": "Editor theme: auto (follow VS Code), light, or dark."
+          "description": "%config.themeMode%"
         },
         "markda.editor.typewriterKeepCentered": {
           "type": "boolean",
@@ -509,7 +541,7 @@
           "minimum": 150,
           "maximum": 2000,
           "scope": "resource",
-          "description": "Idle delay before refreshing the optional split preview, in milliseconds."
+          "description": "%config.previewDelay%"
         },
         "markda.editor.liveTableMaxCells": {
           "type": "integer",
@@ -517,7 +549,7 @@
           "minimum": 100,
           "maximum": 5000,
           "scope": "resource",
-          "description": "Maximum number of table cells rendered as editable controls before falling back to source editing."
+          "description": "%config.tableCells%"
         },
         "markda.markdown.math": {
           "type": "boolean",
@@ -578,6 +610,44 @@
           "default": false,
           "scope": "resource"
         },
+        "markda.export.pdfBrowserPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Path to Microsoft Edge, Google Chrome, or Chromium for PDF export. Markda detects common installation locations automatically."
+        },
+        "markda.export.targets": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "description": "Trusted external export commands. Variables: ${source}, ${destination}, ${documentDir}, ${documentName}, ${workspaceFolder}.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "command"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "extension": {
+                "type": "string",
+                "description": "Output extension such as docx. Leave empty for commands without an output file."
+              }
+            }
+          }
+        },
         "markda.security.allowRemoteResources": {
           "type": "string",
           "enum": [
@@ -609,12 +679,14 @@
     "entities": "^4.5.0",
     "katex": "^0.16.22",
     "markdown-it": "^14.1.0",
+    "markdown-it-emoji": "^3.1.0",
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-mark": "^4.0.0",
     "markdown-it-sub": "^2.0.0",
     "markdown-it-sup": "^2.0.0",
     "markdown-it-task-lists": "^2.1.1",
-    "mermaid": "^11.7.0"
+    "mermaid": "^11.7.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",

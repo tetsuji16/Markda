@@ -25,7 +25,13 @@ describe('Markda theme colors in Chromium', () => {
         security: { allowRemoteResources: 'never', allowUnsafeHtml: false },
       },
     };
-    vi.stubGlobal('acquireVsCodeApi', () => ({ getState: () => undefined, setState: vi.fn(), postMessage: vi.fn() }));
+    vi.stubGlobal('acquireVsCodeApi', () => ({
+      getState: () => ({
+        schemaVersion: 2, sourceMode: false, focusMode: false, typewriterMode: false, previewVisible: true,
+      }),
+      setState: vi.fn(),
+      postMessage: vi.fn(),
+    }));
 
     await import('../src/webview/main.js');
     await settle();
@@ -77,8 +83,7 @@ describe('Markda theme colors in Chromium', () => {
     await settle();
     expect(tableCell.querySelector('code')?.textContent).toBe('Ctrl+/');
 
-    document.querySelector<HTMLButtonElement>('#preview-button')!.click();
-    await settle();
+    expect(document.querySelector('#preview-button')).toBeNull();
     const renderedQuote = document.querySelector<HTMLElement>('#preview blockquote')!;
     const renderedInlineCode = document.querySelector<HTMLElement>('#preview :not(pre) > code')!;
     const renderedTable = document.querySelector<HTMLElement>('#preview table')!;

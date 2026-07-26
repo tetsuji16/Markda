@@ -1,11 +1,12 @@
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
-import { areValidTextChanges, decodeImageSource, parseEditorToHostMessage, type EditorCommand, type EditorToHostMessage, type HostToEditorMessage, type TextChange } from './protocol.js';
+import { areValidTextChanges, decodeImageSource, parseEditorToHostMessage, type EditorCommand, type EditorDiagnostic, type EditorToHostMessage, type HostToEditorMessage, type TextChange } from './protocol.js';
 import { getEditorSettings, getThemeMode } from './settings.js';
 import { getStatistics } from './statistics.js';
 import { findMinimalChange } from './textChange.js';
 import { OutlineProvider } from './outlineProvider.js';
+import { isRtlLocale } from './localization.js';
 
 interface EditorView {
   panel: vscode.WebviewPanel;
@@ -37,6 +38,13 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       }),
       vscode.window.onDidChangeActiveTextEditor(() => this.refreshStatus()),
     );
+    const languageApi = (vscode as typeof vscode & { languages?: typeof vscode.languages }).languages;
+    if (languageApi) {
+      this.disposables.push(languageApi.onDidChangeDiagnostics((event) => {
+        const changed = new Set(event.uris.map((uri) => uri.toString()));
+        for (const view of this.views) if (changed.has(view.document.uri.toString())) this.postDiagnostics(view);
+      }));
+    }
   }
 
   async resolveCustomTextEditor(
@@ -106,6 +114,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
         // recreated from older HTML, so always reconcile it with the current
         // in-memory settings when command messaging becomes live again.
         this.postSettings(view);
+        this.postDiagnostics(view);
         this.refreshStatus();
         return;
       case 'edit':
@@ -195,7 +204,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       // ask the webview to reconcile instead of overwriting it.
       if (documentText !== expectedText) {
         this.resync(view);
-        void vscode.window.showWarningMessage('markda: The document changed while saving. Review the latest contents and save again.');
+        void vscode.window.showWarningMessage(vscode.l10n.t('markda: The document changed while saving. Review the latest contents and save again.'));
         return;
       }
       const change = findMinimalChange(expectedText, text);
@@ -203,12 +212,12 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       edit.replace(view.document.uri, new vscode.Range(view.document.positionAt(change.from), view.document.positionAt(change.to)), change.insert);
       if (!await vscode.workspace.applyEdit(edit)) {
         this.resync(view);
-        void vscode.window.showErrorMessage('markda: Could not synchronize the latest edit before saving.');
+        void vscode.window.showErrorMessage(vscode.l10n.t('markda: Could not synchronize the latest edit before saving.'));
         return;
       }
     }
     if (!await view.document.save()) {
-      void vscode.window.showErrorMessage('markda: The document could not be saved.');
+      void vscode.window.showErrorMessage(vscode.l10n.t('markda: The document could not be saved.'));
     }
   }
 
@@ -289,13 +298,13 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       const destinationFolder = path.resolve(documentFolder, copyFolder);
       const workspace = vscode.workspace.getWorkspaceFolder(view.document.uri);
       if (workspace && !isInside(workspace.uri.fsPath, destinationFolder)) {
-        void vscode.window.showErrorMessage('markda: The configured image folder must stay inside the workspace.');
+        void vscode.window.showErrorMessage(vscode.l10n.t('markda: The configured image folder must stay inside the workspace.'));
         throw new Error('Image folder is outside the workspace.');
       }
       await vscode.workspace.fs.createDirectory(vscode.Uri.file(destinationFolder));
       target = await availableDestination(vscode.Uri.file(path.join(destinationFolder, filename)));
     } else if (path.isAbsolute(copyFolder)) {
-      void vscode.window.showErrorMessage('markda: Absolute image folders are not allowed. Use a workspace-relative folder.');
+      void vscode.window.showErrorMessage(vscode.l10n.t('markda: Absolute image folders are not allowed. Use a workspace-relative folder.'));
       throw new Error('Invalid absolute image folder.');
     }
     return target;
@@ -314,12 +323,12 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
 
   private async manageImage(view: EditorView, sourceValue: string, from: number, action: 'move' | 'copy' | 'delete'): Promise<void> {
     if (/^(?:https?:|data:|vscode-webview:)/iu.test(sourceValue)) {
-      void vscode.window.showWarningMessage('markda: Only local image files can be managed.');
+      void vscode.window.showWarningMessage(vscode.l10n.t('markda: Only local image files can be managed.'));
       return;
     }
     const decoded = decodeImageSource(sourceValue);
     if (decoded === undefined) {
-      void vscode.window.showErrorMessage('markda: The image path is invalid.');
+      void vscode.window.showErrorMessage(vscode.l10n.t('markda: The image path is invalid.'));
       return;
     }
     const documentFolder = path.dirname(view.document.uri.fsPath);
@@ -327,13 +336,14 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const workspace = vscode.workspace.getWorkspaceFolder(view.document.uri);
     const allowedRoot = workspace?.uri.fsPath ?? documentFolder;
     if (!isInside(allowedRoot, sourcePath)) {
-      void vscode.window.showErrorMessage('markda: Image management is restricted to the current workspace.');
+      void vscode.window.showErrorMessage(vscode.l10n.t('markda: Image management is restricted to the current workspace.'));
       return;
     }
     const source = vscode.Uri.file(sourcePath);
     if (action === 'delete') {
-      const choice = await vscode.window.showWarningMessage(`Move image to trash?\n${source.fsPath}`, { modal: true }, 'Move to Trash');
-      if (choice !== 'Move to Trash') return;
+      const moveToTrash = vscode.l10n.t('Move to Trash');
+      const choice = await vscode.window.showWarningMessage(vscode.l10n.t('Move image to trash?\n{0}', source.fsPath), { modal: true }, moveToTrash);
+      if (choice !== moveToTrash) return;
       await vscode.workspace.fs.delete(source, { useTrash: true });
       this.post(view, { type: 'command', command: 'removeImageSource', payload: { source: sourceValue, from } });
       return;
@@ -341,11 +351,11 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const target = await vscode.window.showSaveDialog({
       defaultUri: source,
       filters: { Images: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'] },
-      saveLabel: action === 'move' ? 'Move Image' : 'Copy Image',
+      saveLabel: action === 'move' ? vscode.l10n.t('Move Image') : vscode.l10n.t('Copy Image'),
     });
     if (!target || target.toString() === source.toString()) return;
     if (await exists(target)) {
-      void vscode.window.showErrorMessage('markda: The selected destination already exists.');
+      void vscode.window.showErrorMessage(vscode.l10n.t('markda: The selected destination already exists.'));
       return;
     }
     if (action === 'move') await vscode.workspace.fs.rename(source, target, { overwrite: false });
@@ -359,24 +369,49 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       const policy = vscode.workspace.getConfiguration('markda', documentUri).get<string>('security.allowRemoteResources', 'prompt');
       if (policy === 'never') return;
       if (policy === 'prompt') {
-        const choice = await vscode.window.showWarningMessage(`Open external link?\n${href}`, { modal: true }, 'Open');
-        if (choice !== 'Open') return;
+        const open = vscode.l10n.t('Open');
+        const choice = await vscode.window.showWarningMessage(vscode.l10n.t('Open external link?\n{0}', href), { modal: true }, open);
+        if (choice !== open) return;
       }
       await vscode.env.openExternal(vscode.Uri.parse(href));
       return;
     }
-    const target = vscode.Uri.joinPath(documentUri, '..', href.split('#')[0] ?? href);
+    const [pathPart = '', fragment] = href.split('#', 2);
+    if (!pathPart && fragment) {
+      const current = [...this.views].find((view) => view.document.uri.toString() === documentUri.toString());
+      if (current) this.post(current, { type: 'command', command: 'focusAnchor', payload: { fragment } });
+      return;
+    }
+    const target = vscode.Uri.joinPath(documentUri, '..', pathPart);
     if (target.scheme !== 'file') {
-      void vscode.window.showWarningMessage('markda: Only local file links can be opened.');
+      void vscode.window.showWarningMessage(vscode.l10n.t('markda: Only local file links can be opened.'));
       return;
     }
     const workspace = vscode.workspace.getWorkspaceFolder(documentUri);
     const allowedRoot = workspace?.uri.fsPath ?? path.dirname(documentUri.fsPath);
     if (!isInside(allowedRoot, target.fsPath)) {
-      void vscode.window.showWarningMessage('markda: Links outside the workspace cannot be opened.');
+      void vscode.window.showWarningMessage(vscode.l10n.t('markda: Links outside the workspace cannot be opened.'));
       return;
     }
-    await vscode.commands.executeCommand('vscode.open', target);
+    await vscode.commands.executeCommand('vscode.openWith', target, MarkdaEditorProvider.viewType);
+    if (fragment) {
+      const opened = [...this.views].find((view) => view.document.uri.fsPath === target.fsPath);
+      if (opened) this.post(opened, { type: 'command', command: 'focusAnchor', payload: { fragment } });
+    }
+  }
+
+  private postDiagnostics(view: EditorView): void {
+    const languageApi = (vscode as typeof vscode & { languages?: typeof vscode.languages }).languages;
+    const diagnostics: EditorDiagnostic[] = (languageApi?.getDiagnostics(view.document.uri) ?? [])
+      .slice(0, 2_000)
+      .map((diagnostic) => ({
+        from: view.document.offsetAt(diagnostic.range.start),
+        to: view.document.offsetAt(diagnostic.range.end),
+        severity: diagnosticSeverity(diagnostic.severity),
+        message: diagnostic.message.slice(0, 4_096),
+        ...(diagnostic.source ? { source: diagnostic.source.slice(0, 128) } : {}),
+      }));
+    this.post(view, { type: 'diagnosticsChanged', diagnostics });
   }
 
   private refreshStatus(): void {
@@ -390,8 +425,8 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
   }
 
   private setStatus(words: number, characters: number): void {
-    this.status.text = `$(pencil) ${words} words`;
-    this.status.tooltip = `${words} words · ${characters} characters`;
+    this.status.text = `$(pencil) ${vscode.l10n.t('{0} words', words)}`;
+    this.status.tooltip = vscode.l10n.t('{0} words · {1} characters', words, characters);
     this.status.show();
   }
 
@@ -421,6 +456,8 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       resourceBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(view.document.uri, '..')).toString()}/`,
       themeBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.globalStorageUri, 'themes')).toString()}/`,
       assetBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist')).toString()}/`,
+      locale: vscode.env.language,
+      direction: isRtlLocale(vscode.env.language) ? 'rtl' : 'ltr',
       version: view.document.version,
       text: view.document.getText(), settings: getEditorSettings(view.document.uri, this.themeMode),
     };
@@ -437,11 +474,26 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const styles = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'));
     const initialData = escapeEmbeddedJson(JSON.stringify(initialization));
     return `<!doctype html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="${escapeHtmlAttribute(initialization.locale)}" dir="${initialization.direction}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:${allowRemoteImages ? ' https:' : ''}; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src ${webview.cspSource} 'nonce-${nonce}';">
 <link rel="stylesheet" href="${styles}"><title>markda</title></head>
-<body><div id="app" role="application" aria-label="markda Markdown editor"></div><script nonce="${nonce}">globalThis.__markdaInitial=${initialData};</script><script type="module" nonce="${nonce}" src="${script}"></script></body></html>`;
+<body><div id="app" role="application" aria-label="${escapeHtmlAttribute(vscode.l10n.t('markda Markdown editor'))}"></div><script nonce="${nonce}">globalThis.__markdaInitial=${initialData};</script><script type="module" nonce="${nonce}" src="${script}"></script></body></html>`;
   }
+}
+
+function diagnosticSeverity(severity: vscode.DiagnosticSeverity): EditorDiagnostic['severity'] {
+  switch (severity) {
+    case vscode.DiagnosticSeverity.Error: return 'error';
+    case vscode.DiagnosticSeverity.Warning: return 'warning';
+    case vscode.DiagnosticSeverity.Information: return 'information';
+    default: return 'hint';
+  }
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value.replace(/[&<>"']/gu, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character] ?? character);
 }
 
 const embeddedJsonEscapes: Readonly<Record<string, string>> = {

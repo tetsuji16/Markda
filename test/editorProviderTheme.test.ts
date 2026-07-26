@@ -17,6 +17,8 @@ const { getConfiguration, persistedTheme, updateThemeMode } = vi.hoisted(() => {
 });
 
 vi.mock('vscode', () => ({
+  env: { language: 'en' },
+  l10n: { t: (message: string) => message },
   workspace: {
     getConfiguration,
     onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
@@ -24,6 +26,10 @@ vi.mock('vscode', () => ({
   },
   window: {
     onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
+  },
+  languages: {
+    onDidChangeDiagnostics: vi.fn(() => ({ dispose: vi.fn() })),
+    getDiagnostics: vi.fn(() => []),
   },
   Uri: {
     joinPath: vi.fn((base: { toString(): string }, ...parts: string[]) => ({

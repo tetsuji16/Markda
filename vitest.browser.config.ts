@@ -1,6 +1,14 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  optimizeDeps: {
+    include: [
+      'markdown-it-emoji',
+      'markdown-it-emoji/lib/data/light.mjs',
+      'markdown-it-emoji/lib/data/full.mjs',
+      'yaml',
+    ],
+  },
   test: {
     include: ['test/**/*.browser.test.ts'],
     // Browser suites share CPU-heavy editor and Mermaid initialization. Running

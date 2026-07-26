@@ -69,11 +69,13 @@ class HeadingItem extends vscode.TreeItem {
   readonly children: HeadingItem[] = [];
   constructor(readonly heading: Heading, active: boolean) {
     super(heading.text, vscode.TreeItemCollapsibleState.None);
-    this.description = active ? `H${heading.level} · current` : `H${heading.level}`;
-    this.command = { command: 'markda.focusHeading', title: 'Go to heading', arguments: [heading] };
+    this.description = active ? `H${heading.level} · ${vscode.l10n.t('current')}` : `H${heading.level}`;
+    this.command = { command: 'markda.focusHeading', title: vscode.l10n.t('Go to heading'), arguments: [heading] };
     this.iconPath = new vscode.ThemeIcon(active ? 'arrow-right' : 'symbol-namespace');
     this.contextValue = active ? 'markdaHeadingCurrent' : 'markdaHeading';
-    this.accessibilityInformation = { label: `${heading.text}, heading level ${heading.level}${active ? ', current section' : ''}` };
+    this.accessibilityInformation = {
+      label: vscode.l10n.t('{0}, heading level {1}{2}', heading.text, heading.level, active ? vscode.l10n.t(', current section') : ''),
+    };
   }
   refreshCollapsible(): void {
     this.collapsibleState = this.children.length ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None;
