@@ -3,6 +3,10 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['test/**/*.browser.test.ts'],
+    // Browser suites share CPU-heavy editor and Mermaid initialization. Running
+    // them serially makes startup budgets meaningful and avoids cross-test
+    // contention masquerading as a product regression.
+    maxWorkers: 1,
     browser: {
       enabled: true,
       provider: 'playwright',

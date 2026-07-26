@@ -1,6 +1,6 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from '@codemirror/commands';
 import '@vscode/codicons/dist/codicon.css';
-import { markdown, markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
+import { markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language';
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
 import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from '@codemirror/state';
@@ -111,6 +111,7 @@ let settings: EditorSettings = initialDocument?.settings ?? {
   theme: { light: 'paper', dark: 'midnight' },
 };
 const syntaxThemeCompartment = new Compartment();
+let appliedSyntaxDark = usesDarkColors();
 
 function usesDarkColors(): boolean {
   return settings.themeMode === 'dark'
@@ -220,8 +221,13 @@ const view = new EditorView({
     extensions: [
       modeField,
       history(),
-      markdown({ base: markdownLanguage }),
-      syntaxThemeCompartment.of(syntaxHighlighting(createSyntaxHighlightStyle(usesDarkColors()), { fallback: true })),
+      // The preconfigured Markdown language already includes the GFM grammar
+      // Markda needs. `markdown()` additionally installs the complete HTML/CSS/
+      // JavaScript language stack even though fenced blocks and HTML are edited
+      // by Markda's own widgets. Keeping only the base language removes those
+      // parsers from the startup bundle and its first-file compile path.
+      markdownLanguage,
+      syntaxThemeCompartment.of(syntaxHighlighting(createSyntaxHighlightStyle(appliedSyntaxDark), { fallback: true })),
       search(),
       keymap.of([
         ...createMarkdaKeymap(),
@@ -358,7 +364,7 @@ function onHostMessage(message: HostToEditorMessage): void {
       pendingBaseText = undefined;
       pendingLineSeparator = undefined;
       if (!replaceDocument(message.text)) scheduleDerivedStateUpdate();
-      applySettings();
+      applySettings(true);
       return;
     case 'documentChanged':
       documentVersion = message.version;
@@ -380,7 +386,7 @@ function onHostMessage(message: HostToEditorMessage): void {
     case 'configurationChanged':
       settings = message.settings;
       clientRenderer = undefined;
-      applySettings();
+      applySettings(true);
       renderPreview();
       return;
     case 'command':
@@ -650,7 +656,7 @@ function applyViewState(state: ViewState): void {
   previewButton?.setAttribute('aria-pressed', String(state.previewVisible));
 }
 
-function applySettings(): void {
+function applySettings(refreshDecorations = false): void {
   // A contentWidth of 0 (or unset) means "fill the window" — the editor area
   // grows with the window instead of being capped at a fixed measure.
   const contentWidth = settings.contentWidth && settings.contentWidth > 0 ? `${settings.contentWidth}px` : 'none';
@@ -675,12 +681,15 @@ function applySettings(): void {
   themeLink.href = themeBaseUri && themeName ? `${themeBaseUri}${encodeURIComponent(themeName)}.css` : '';
   const colorModeChanged = previousColorMode !== colorMode;
   if (colorModeChanged) colorThemeRevision++;
-  view.dispatch({
-    effects: [
-      syntaxThemeCompartment.reconfigure(syntaxHighlighting(createSyntaxHighlightStyle(dark), { fallback: true })),
-      ...(colorModeChanged ? [refreshLivePreview.of(null)] : []),
-    ],
-  });
+  const effects: StateEffect<unknown>[] = [];
+  if (dark !== appliedSyntaxDark) {
+    appliedSyntaxDark = dark;
+    effects.push(syntaxThemeCompartment.reconfigure(
+      syntaxHighlighting(createSyntaxHighlightStyle(dark), { fallback: true }),
+    ));
+  }
+  if (colorModeChanged || refreshDecorations) effects.push(refreshLivePreview.of(null));
+  if (effects.length) view.dispatch({ effects });
   if (colorModeChanged) {
     queueMicrotask(() => {
       document.querySelectorAll<HTMLElement>('[data-markda-renderer="mermaid"]').forEach((element) => {
@@ -1693,12 +1702,13 @@ class EntityWidget extends WidgetType {
 
   toDOM(): HTMLElement {
     const value = document.createElement('span');
+    const decoded = decodeHtmlEntity(this.source);
     value.className = 'markda-entity';
     value.tabIndex = 0;
     value.setAttribute('role', 'button');
-    value.setAttribute('aria-label', `${decodeHtmlEntity(this.source)}. Activate to edit entity source.`);
+    value.setAttribute('aria-label', `${decoded}. Activate to edit entity source.`);
     value.title = 'Click to edit character entity';
-    value.textContent = decodeHtmlEntity(this.source);
+    value.textContent = decoded;
     const edit = () => {
       livePreviewSelectionFocused = true;
       this.editor.dispatch({ selection: EditorSelection.cursor(this.from + 1) });
@@ -2795,9 +2805,6 @@ function createLivePreviewPlugin() {
       beginLivePreviewFreeze = (target) => {
         if (target === editor) this.pointerActive = true;
       };
-      requestAnimationFrame(() => {
-        editor.dispatch({ effects: refreshLivePreview.of(null) });
-      });
     }
     update(update: ViewUpdate): void {
       const modeChanged = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(setMode)));
@@ -2977,40 +2984,33 @@ function buildSoftBreakDecorations(
   const mode = editor.state.field(modeField);
   if (mode.sourceMode || settings.markdown.breaks) return Decoration.none;
   const decorations: { from: number; to: number; decoration: Decoration }[] = [];
-  const tree = syntaxTree(editor.state);
-  for (let lineNumber = 1; lineNumber < editor.state.doc.lines; lineNumber++) {
-    const line = editor.state.doc.line(lineNumber);
-    const next = editor.state.doc.line(lineNumber + 1);
-    if (!line.text.trim() || !next.text.trim() || /(?: {2,}|\\)$/u.test(line.text)) continue;
-
-    const leftParagraph = paragraphRangeAt(tree, line.to, -1);
-    const rightParagraph = paragraphRangeAt(tree, next.from, 1);
-    if (!leftParagraph || !rightParagraph
-      || leftParagraph.from !== rightParagraph.from || leftParagraph.to !== rightParagraph.to) continue;
-
-    const paragraphSource = editor.state.sliceDoc(leftParagraph.from, leftParagraph.to);
-    // Display-math blocks are implemented outside the Markdown grammar and can
-    // otherwise look like one ordinary multi-line paragraph to Lezer.
-    if (/^\s*\$\$\s*$/mu.test(paragraphSource)) continue;
-
-    decorations.push({
-      from: line.to,
-      to: next.from,
-      decoration: Decoration.replace({ widget: new SoftBreakWidget() }),
-    });
-  }
+  const doc = editor.state.doc;
+  // Iterate parsed paragraphs once instead of resolving two syntax ancestors
+  // for every line in the document. This preserves document-wide decorations
+  // without recreating the pre-08b1f99 viewport instability.
+  syntaxTree(editor.state).iterate({
+    enter(node) {
+      if (node.name !== 'Paragraph') return;
+      // Display-math blocks are implemented outside the Markdown grammar and
+      // can otherwise look like an ordinary multi-line paragraph to Lezer.
+      if (/^\s*\$\$\s*$/mu.test(editor.state.sliceDoc(node.from, node.to))) return false;
+      let line = doc.lineAt(node.from);
+      const lastLine = doc.lineAt(Math.max(node.from, node.to - 1)).number;
+      while (line.number < lastLine) {
+        const next = doc.line(line.number + 1);
+        if (line.text.trim() && next.text.trim() && !/(?: {2,}|\\)$/u.test(line.text)) {
+          decorations.push({
+            from: line.to,
+            to: next.from,
+            decoration: Decoration.replace({ widget: new SoftBreakWidget() }),
+          });
+        }
+        line = next;
+      }
+      return false;
+    },
+  });
   return Decoration.set(decorations.map((item) => item.decoration.range(item.from, item.to)), true);
-}
-
-function paragraphRangeAt(
-  tree: ReturnType<typeof syntaxTree>, position: number, side: -1 | 1,
-): { from: number; to: number } | undefined {
-  let node = tree.resolveInner(position, side);
-  for (;;) {
-    if (node.name === 'Paragraph') return { from: node.from, to: node.to };
-    if (!node.parent) return undefined;
-    node = node.parent;
-  }
 }
 
 /**
@@ -3041,6 +3041,7 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
       if (line.from < processedUntil) continue;
       processedUntil = line.to + 1;
       const text = line.text;
+      if (!isBlockDecorationCandidate(text)) continue;
       const htmlBlock = settings.markdown.html && settings.security.allowUnsafeHtml && /^\s*</u.test(text)
         ? findSyntaxAncestor(editor.state, Math.min(line.from + text.search(/\S/u), line.to), 'HTMLBlock')
         : undefined;
@@ -3220,6 +3221,14 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
   }
   if (decorations.length === 0) return Decoration.none;
   return Decoration.set(decorations.map((item) => item.decoration.range(item.from, item.to ?? item.from)), true);
+}
+
+function isBlockDecorationCandidate(line: string): boolean {
+  if (line.includes('|') || line.startsWith('    ') || line.startsWith('\t')) return true;
+  const first = line.trimStart().charCodeAt(0);
+  return first === 0x21 || first === 0x24 || first === 0x3c || first === 0x3e
+    || first === 0x5b || first === 0x5f || first === 0x60 || first === 0x7e
+    || first === 0x2a || first === 0x2d;
 }
 
 /**
@@ -3755,7 +3764,7 @@ body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"]
 // dead zone. CodeMirror then disables the crashed view plugin for the whole editor.
 applyViewState(initialViewState);
 if (initialDocument) {
-  applySettings();
+  applySettings(true);
   scheduleDerivedStateUpdate();
 }
 vscode.postMessage({ type: 'ready' });
