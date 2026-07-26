@@ -17,6 +17,8 @@ describe('rendered math and Mermaid editing in Chromium', () => {
       'y^2',
       '$$',
       '',
+      '## Mermaid',
+      '',
       '$$z^2$$',
       '',
       '```mermaid',
@@ -51,12 +53,16 @@ describe('rendered math and Mermaid editing in Chromium', () => {
     view.dispatch({ selection: { anchor: 0 } });
     await settle();
     const renderedMath = view.dom.querySelector<HTMLElement>('.markda-block-math')!;
-    renderedMath.style.height = '80px';
-    const renderedMathHeight = renderedMath.getBoundingClientRect().height;
+    await vi.waitUntil(() => renderedMath.querySelector('.katex') !== null, { timeout: 5_000 });
+    const mathWrapper = renderedMath.parentElement!;
+    const renderedMathHeight = mathWrapper.getBoundingClientRect().height;
+    const followingHeading = view.dom.querySelector<HTMLElement>('.markda-h2')!;
+    const followingHeadingTop = followingHeading.getBoundingClientRect().top;
     renderedMath.click();
     const blockSource = view.dom.querySelector<HTMLTextAreaElement>('.markda-block-math-wrap .markda-block-source-editor')!;
     expect(blockSource.hidden).toBe(false);
     expect(blockSource.getBoundingClientRect().height).toBeCloseTo(renderedMathHeight, 0);
+    expect(followingHeading.getBoundingClientRect().top).toBeCloseTo(followingHeadingTop, 0);
 
     blockSource.value = Array.from({ length: 12 }, (_, index) => `x_${index}^2`).join('\n');
     blockSource.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));

@@ -64,6 +64,7 @@ const initialViewState: ViewState = savedViewState?.schemaVersion === 2 ? savedV
 const externalUpdate = Annotation.define<boolean>();
 const setMode = StateEffect.define<Partial<ViewState>>();
 const refreshLivePreview = StateEffect.define<null>();
+const refreshInlinePreview = StateEffect.define<null>();
 const settleLivePreview = StateEffect.define<number>();
 const modeField = StateField.define<ViewState>({
   create: () => initialViewState,
@@ -274,7 +275,12 @@ const view = new EditorView({
       Prec.high(EditorView.domEventHandlers({
         mousedown(event, editor) {
           if (event.button !== 0 || !(event.target instanceof Element)) return false;
-          const interactive = event.target.closest('button,input,textarea,select,[contenteditable="true"]');
+          // Widget controls run their own pointer/focus lifecycle. Treating their
+          // first mousedown as a document-caret move can rebuild the widget before
+          // its click fires (notably for indented one-line display math).
+          const interactive = event.target.closest(
+            'button,input,textarea,select,[contenteditable="true"],[role="button"],[data-markda-interactive]',
+          );
           if (interactive && interactive !== editor.contentDOM) return false;
           return beginLivePreviewPointer(event, editor);
         },
@@ -341,7 +347,7 @@ const refreshAfterEditorFocusChange = (event: FocusEvent) => {
   requestAnimationFrame(() => {
     editorFocusRefreshScheduled = false;
     livePreviewSelectionFocused = view.dom.ownerDocument.activeElement === view.contentDOM;
-    if (view.dom.isConnected) view.dispatch({ effects: refreshLivePreview.of(null) });
+    if (view.dom.isConnected) view.dispatch({ effects: refreshInlinePreview.of(null) });
   });
 };
 // CodeMirror retains its logical selection when focus moves into a table/code
@@ -1739,7 +1745,7 @@ class FrontMatterWidget extends WidgetType {
     sourceEditor.addEventListener('focus', () => { activeFrontMatterFrom = this.from; });
     sourceEditor.addEventListener('blur', () => {
       if (activeFrontMatterFrom === this.from) activeFrontMatterFrom = undefined;
-      this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+      requestLivePreviewRefresh(this.editor);
     });
     container.append(header, fields, sourceEditor);
     return container;
@@ -1796,6 +1802,15 @@ function prepareLiveMath(source: string, displayMode: boolean): string {
     mathReferenceCache = { source: documentSource, references: collectMathReferences(documentSource) };
   }
   return prepareMathExpression(source, mathReferenceCache.references, displayMode);
+}
+
+function requestLivePreviewRefresh(editor: EditorView): void {
+  // A widget can lose focus while CodeMirror is synchronously reconciling its
+  // DOM. Dispatching from that blur handler re-enters EditorView.update and
+  // throws. A microtask runs immediately after the reconciliation completes.
+  queueMicrotask(() => {
+    if (editor.dom.isConnected) editor.dispatch({ effects: refreshLivePreview.of(null) });
+  });
 }
 
 class SoftBreakWidget extends WidgetType {
@@ -2136,7 +2151,7 @@ class HtmlBlockWidget extends WidgetType {
       window.clearTimeout(timer);
       gate.flush(commitIfDirty);
       if (activeHtmlFrom === this.from) activeHtmlFrom = undefined;
-      this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+      requestLivePreviewRefresh(this.editor);
     });
     return container;
   }
@@ -2204,7 +2219,7 @@ class ImageWidget extends WidgetType {
     editorPanel.addEventListener('focusout', () => queueMicrotask(() => {
       if (editorPanel.contains(document.activeElement)) return;
       if (activeImageFrom === this.from) activeImageFrom = undefined;
-      this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+      requestLivePreviewRefresh(this.editor);
     }));
     figure.append(editorPanel);
     const editorBinding = bindWidgetEditor(this.editor, editorPanel, image.isConnected ? image : caption, figure);
@@ -2443,13 +2458,15 @@ class CodeBlockWidget extends WidgetType {
       rendered.className = 'markda-code-rendered';
       rendered.textContent = this.source;
       rendered.tabIndex = 0;
+      rendered.setAttribute('role', 'button');
+      rendered.setAttribute('aria-label', 'Edit math source');
       const sourceEditor = createBlockSourceEditor(this.editor, this.source,
         (value) => commitCodeBlock(this.editor, this.from, value, undefined));
       sourceEditor.hidden = true;
       sourceEditor.addEventListener('focus', () => { activeCodeFrom = this.from; });
       sourceEditor.addEventListener('blur', () => {
         if (activeCodeFrom === this.from) activeCodeFrom = undefined;
-        this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+        requestLivePreviewRefresh(this.editor);
       });
       const editorBinding = bindWidgetEditor(this.editor, sourceEditor, rendered, container);
       this.disposeEditor = editorBinding.dispose;
@@ -2466,13 +2483,15 @@ class CodeBlockWidget extends WidgetType {
       rendered.dataset.markdaRenderer = 'mermaid';
       rendered.dataset.markdaSource = this.source;
       rendered.tabIndex = 0;
+      rendered.setAttribute('role', 'button');
+      rendered.setAttribute('aria-label', 'Edit Mermaid source');
       const sourceEditor = createBlockSourceEditor(this.editor, this.source,
         (value) => commitCodeBlock(this.editor, this.from, value, undefined));
       sourceEditor.hidden = true;
       sourceEditor.addEventListener('focus', () => { activeCodeFrom = this.from; });
       sourceEditor.addEventListener('blur', () => {
         if (activeCodeFrom === this.from) activeCodeFrom = undefined;
-        this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+        requestLivePreviewRefresh(this.editor);
       });
       const editorBinding = bindWidgetEditor(this.editor, sourceEditor, rendered, container);
       this.disposeEditor = editorBinding.dispose;
@@ -2629,7 +2648,7 @@ class TableWidget extends WidgetType {
       sourceEditor.addEventListener('focus', () => { activeTableFrom = this.table.from; });
       sourceEditor.addEventListener('blur', () => {
         if (activeTableFrom === this.table.from) activeTableFrom = undefined;
-        this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+        requestLivePreviewRefresh(this.editor);
       });
       const editorBinding = bindWidgetEditor(this.editor, sourceEditor, summary, container);
       this.disposeEditor = editorBinding.dispose;
@@ -2881,6 +2900,8 @@ class MathWidget extends WidgetType {
     }
     if (this.displayMode && this.editor && this.from !== undefined) {
       element.tabIndex = 0;
+      element.setAttribute('role', 'button');
+      element.setAttribute('aria-label', 'Edit math source');
       const sourceEditor = createBlockSourceEditor(this.editor, this.source,
         (value) => commitBlockMath(this.editor!, this.from!, value));
       sourceEditor.hidden = true;
@@ -2889,7 +2910,7 @@ class MathWidget extends WidgetType {
       sourceEditor.addEventListener('focus', () => { activeMathFrom = this.from; });
       sourceEditor.addEventListener('blur', () => {
         if (activeMathFrom === this.from) activeMathFrom = undefined;
-        this.editor?.dispatch({ effects: refreshLivePreview.of(null) });
+        if (this.editor) requestLivePreviewRefresh(this.editor);
       });
       const editorBinding = bindWidgetEditor(this.editor, sourceEditor, element, wrapper);
       this.disposeEditor = editorBinding.dispose;
@@ -2902,6 +2923,8 @@ class MathWidget extends WidgetType {
     if (this.editor && this.from !== undefined) {
       element.title = 'Click to edit inline math source';
       element.tabIndex = 0;
+      element.setAttribute('role', 'button');
+      element.setAttribute('aria-label', 'Edit inline math source');
       const edit = () => {
         const position = Math.min(this.from! + 1, this.editor!.state.doc.length);
         livePreviewSelectionFocused = true;
@@ -2916,6 +2939,12 @@ class MathWidget extends WidgetType {
   eq(other: MathWidget): boolean {
     return other.from === this.from && (activeMathFrom === this.from
       || (other.source === this.source && other.displayMode === this.displayMode));
+  }
+  ignoreEvent(): boolean {
+    // Math owns its click-to-edit and nested textarea events. Letting CodeMirror
+    // reinterpret the same gesture as a source selection can replace this widget
+    // between mousedown and click, so the editor never opens.
+    return true;
   }
   destroy(): void {
     this.disposeEditor?.();
@@ -2994,7 +3023,7 @@ class CalloutWidget extends WidgetType {
       window.clearTimeout(timer);
       gate.flush(commitIfDirty);
       if (activeCalloutFrom === this.from) activeCalloutFrom = undefined;
-      this.editor.dispatch({ effects: refreshLivePreview.of(null) });
+      requestLivePreviewRefresh(this.editor);
     });
     container.append(content);
     return container;
@@ -3044,8 +3073,11 @@ function createBlockSourceEditor(editor: EditorView, source: string, commit: (va
 function bindWidgetEditor(
   editor: EditorView, input: HTMLElement, rendered: HTMLElement, boundary: HTMLElement,
 ): { toggle: () => void; dispose: () => void } {
+  // The editor-level pointer mapper must not reinterpret controls inside this
+  // boundary as source-caret clicks before their click/double-click can fire.
+  boundary.dataset.markdaInteractive = 'true';
   let listeningForOutsidePointer = false;
-  let renderedHeight = 0;
+  let renderedOccupiedHeight = 0;
   const blockSourceEditor = input instanceof HTMLTextAreaElement
     && input.classList.contains('markda-block-source-editor') ? input : undefined;
   const resizeBlockSourceEditor = () => {
@@ -3072,7 +3104,7 @@ function bindWidgetEditor(
     document.body.append(mirror);
     const sourceHeight = mirror.getBoundingClientRect().height;
     mirror.remove();
-    const height = `${Math.ceil(Math.max(renderedHeight, sourceHeight))}px`;
+    const height = `${Math.ceil(Math.max(renderedOccupiedHeight, sourceHeight))}px`;
     blockSourceEditor.style.height = height;
     blockSourceEditor.style.maxHeight = height;
     editor.requestMeasure();
@@ -3086,6 +3118,7 @@ function bindWidgetEditor(
     if (input.hidden) return;
     input.hidden = true;
     rendered.hidden = false;
+    boundary.style.minHeight = '';
     stopListeningForOutsidePointer();
     const active = document.activeElement;
     if (active instanceof HTMLElement && input.contains(active)) active.blur();
@@ -3104,7 +3137,12 @@ function bindWidgetEditor(
       close();
       return;
     }
-    renderedHeight = rendered.getBoundingClientRect().height;
+    // Preserve the complete block footprint while swapping the rendered
+    // content for its source editor. In particular, KaTeX's display margin is
+    // part of the wrapper's height (the math wrapper is a flow root), so the
+    // following document blocks remain at exactly the same vertical position.
+    renderedOccupiedHeight = boundary.getBoundingClientRect().height;
+    boundary.style.minHeight = `${Math.ceil(renderedOccupiedHeight)}px`;
     input.hidden = false;
     rendered.hidden = true;
     resizeBlockSourceEditor();
@@ -3221,6 +3259,8 @@ function createLivePreviewPlugin() {
     update(update: ViewUpdate): void {
       const modeChanged = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(setMode)));
       const refreshRequested = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(refreshLivePreview)));
+      const inlineRefreshRequested = update.transactions.some((transaction) =>
+        transaction.effects.some((effect) => effect.is(refreshInlinePreview)));
       const settleRequested = update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(settleLivePreview)));
       if (settleRequested) this.pointerActive = false;
 
@@ -3230,7 +3270,7 @@ function createLivePreviewPlugin() {
       // ranges behind.
       if (this.pointerActive && !settleRequested) {
         if (update.docChanged) this.decorations = this.decorations.map(update.changes);
-      } else if (update.docChanged || update.viewportChanged || modeChanged || refreshRequested
+      } else if (update.docChanged || update.viewportChanged || modeChanged || refreshRequested || inlineRefreshRequested
         || settleRequested || update.selectionSet) {
         this.decorations = buildInlineDecorations(update.view);
       }
@@ -4231,9 +4271,9 @@ html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--markda-fg);
 .markda-meta{font-size:0!important;line-height:0!important;letter-spacing:0!important;color:transparent!important}.markda-meta.markda-meta-expanded{font-size:inherit!important;line-height:inherit!important;letter-spacing:inherit!important;color:var(--markda-muted)!important}
 .markda-list-bullet-source{font-size:0;color:var(--markda-muted)}.markda-list-bullet-source::after{content:'•';display:inline-block;min-width:.8em;font-size:var(--vscode-editor-font-size);font-weight:700;text-align:center}.markda-list-bullet-source.markda-meta-expanded{font-size:inherit;color:inherit}.markda-list-bullet-source.markda-meta-expanded::after{content:none}
 button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--markda-hover)}button.active{background:var(--markda-active)}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--markda-focus);outline-offset:2px}
-.markda-shell{height:100%;display:grid;grid-template-rows:auto auto 1fr auto}.markda-toolbar{min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--markda-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
-.table-toolbar{display:none;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
-.markda-workspace{display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
+.markda-shell{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr)}.markda-toolbar{grid-area:1/1;min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--markda-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
+.table-toolbar{grid-area:2/1;align-self:start;z-index:300;display:none;width:100%;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
+.markda-workspace{grid-area:2/1;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
 .cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:16px;color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-scroller{padding:30px var(--markda-padding-x,30px) 100px;line-height:1.6}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:1.6}.cm-content:focus{outline:none}.cm-line{padding:0;transition:opacity .12s}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-cursor,.cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
 .cm-editor .cm-panels-top:has(.cm-search){position:absolute;top:0;right:14px;left:auto;z-index:400;color:var(--markda-fg);background:transparent;border:0}
 .cm-editor .cm-panel.cm-search{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) repeat(6,24px);grid-template-rows:24px 24px;gap:3px;width:min(430px,calc(100vw - 32px));padding:4px 28px 4px 4px;color:var(--markda-fg);background:var(--markda-find-widget);border:1px solid var(--markda-border);border-top:0;box-shadow:0 2px 8px var(--markda-widget-shadow);font:13px/1 var(--markda-font-body)}
@@ -4255,7 +4295,7 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .markda-front-matter-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.markda-front-matter-header button{min-height:24px;font-size:12px}.markda-front-matter-fields{display:grid;gap:6px}.markda-front-matter-fields label{display:grid;grid-template-columns:minmax(7em,.4fr) minmax(10em,1fr);gap:10px;align-items:center}.markda-front-matter-fields input{min-width:0;padding:5px 7px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}.markda-front-matter-fields code{overflow:hidden;color:var(--markda-muted);text-overflow:ellipsis;white-space:nowrap}.markda-front-matter-source{min-height:8em}.markda-front-matter-error{color:var(--markda-error)}
 .markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em;accent-color:var(--markda-accent)}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--markda-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{color:var(--markda-muted);text-align:center;font-size:.9em}
 .markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
-.markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-source-editor{display:block;width:100%;min-height:0;overflow-y:hidden;resize:none;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
+.markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-math-wrap{display:flow-root}.markda-block-source-editor{display:block;width:100%;min-height:0;overflow-y:hidden;resize:none;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
 .markda-footnote-definition{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;margin:.45em 0;padding:6px 9px;color:var(--markda-muted);background:var(--markda-surface);border-radius:4px}.markda-footnote-definition-content{min-height:1.5em;white-space:pre-wrap;outline:none}.markda-reference-definition{display:grid;grid-template-columns:minmax(7em,.5fr) auto minmax(10em,1fr) minmax(8em,.7fr);gap:6px;align-items:center;margin:.45em 0;padding:6px 9px;background:var(--markda-surface);border-radius:4px}.markda-reference-definition input{min-width:0;padding:4px 6px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}
 .markda-html-block{margin:.6em 0;padding:8px;outline:none;border:1px solid transparent;border-radius:4px}.markda-html-block:focus{border-color:var(--markda-border)}.markda-html-empty{color:var(--markda-muted);font-style:italic}
 .markda-live-code{margin:15px 0;max-width:100%;overflow:auto;font-family:var(--markda-font-mono);font-size:.9em}.markda-live-code pre{margin:0;padding:8px 4px 6px;border:1px solid var(--markda-border);border-radius:3px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-syntax-comment{color:var(--markda-syntax-comment)}.markda-syntax-constant{color:var(--markda-syntax-constant)}.markda-syntax-entity{color:var(--markda-syntax-entity)}.markda-syntax-keyword{color:var(--markda-syntax-keyword)}.markda-syntax-string{color:var(--markda-syntax-string)}.markda-syntax-variable{color:var(--markda-syntax-variable)}.markda-code-rendered{padding:10px}
