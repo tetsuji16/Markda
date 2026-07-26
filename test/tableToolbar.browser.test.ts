@@ -16,7 +16,7 @@ describe('live table toolbar in Chromium', () => {
       resourceBaseUri: 'http://localhost/',
       themeBaseUri: 'http://localhost/',
       version: 1,
-      text: ['Before', '', '| A | B |', '| --- | --- |', '| 1 | 2 |', '', 'After'].join('\n'),
+      text: ['Before', '', '| A | B |', '| --- | --- |', '| 1 | 2 |', '', '## After'].join('\n'),
       settings: {
         contentWidth: 520,
         autoPairMarkdown: true,
@@ -42,9 +42,12 @@ describe('live table toolbar in Chromium', () => {
     expect(getComputedStyle(toolbar).display).toBe('none');
     expect(document.querySelector('.markda-inline-table-controls')).toBeNull();
 
+    const followingHeading = document.querySelector<HTMLElement>('.markda-h2')!;
+    const followingHeadingTop = followingHeading.getBoundingClientRect().top;
     document.querySelector<HTMLElement>('[data-table-row="0"][data-table-column="0"]')!.focus();
     await settle();
     expect(getComputedStyle(toolbar).display).toBe('flex');
+    expect(followingHeading.getBoundingClientRect().top).toBeCloseTo(followingHeadingTop, 0);
 
     const rowAfter = document.querySelector<HTMLButtonElement>('[data-table-command="row-after"]')!;
     rowAfter.focus();
