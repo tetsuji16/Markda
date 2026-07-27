@@ -64,7 +64,9 @@ describe('Markda color themes', () => {
 
     expect(root.dataset.markdaColorMode).toBe('dark');
     expect(root.style.colorScheme).toBe('dark');
-    expect(__getEditorView().state).not.toBe(before);
+    // Palette changes are paint-only: theme switching must not rebuild editor
+    // state or live code widgets just to update their colors.
+    expect(__getEditorView().state).toBe(before);
     expect(postMessage).toHaveBeenCalledWith({ type: 'updateThemeMode', mode: 'dark' });
   });
 

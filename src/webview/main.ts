@@ -3,7 +3,7 @@ import '@vscode/codicons/dist/codicon.css';
 import { markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language';
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
-import { Annotation, ChangeSet, Compartment, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from '@codemirror/state';
+import { Annotation, ChangeSet, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { Decoration, drawSelection, EditorView, highlightActiveLine, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import DOMPurify from 'dompurify';
@@ -125,28 +125,30 @@ let settings: EditorSettings = initialDocument?.settings ?? {
   security: { allowRemoteResources: 'prompt', allowUnsafeHtml: false },
   theme: { light: 'paper', dark: 'midnight' },
 };
-const syntaxThemeCompartment = new Compartment();
-let appliedSyntaxDark = usesDarkColors();
-
 function usesDarkColors(): boolean {
   return settings.themeMode === 'dark'
     || (settings.themeMode === 'auto'
       && (document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')));
 }
 
-function createSyntaxHighlightStyle(dark: boolean): HighlightStyle {
+/**
+ * Keep CodeMirror source highlighting and rendered code widgets on the same
+ * theme contract. CSS variables resolve at paint time, so selected themes and
+ * user theme files update both surfaces without rebuilding editor state.
+ */
+function createSyntaxHighlightStyle(): HighlightStyle {
   return HighlightStyle.define([
-    { tag: [tags.meta, tags.comment], color: dark ? '#8b949e' : '#6e7781' },
-    { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: dark ? '#ff7b72' : '#cf222e' },
-    { tag: [tags.string, tags.special(tags.string), tags.regexp], color: dark ? '#a5d6ff' : '#0a3069' },
-    { tag: [tags.number, tags.bool, tags.null], color: dark ? '#79c0ff' : '#0550ae' },
-    { tag: [tags.typeName, tags.className, tags.namespace], color: dark ? '#d2a8ff' : '#8250df' },
-    { tag: [tags.variableName, tags.propertyName, tags.labelName], color: dark ? '#ffa657' : '#953800' },
-    { tag: [tags.definition(tags.variableName), tags.function(tags.variableName)], color: dark ? '#d2a8ff' : '#8250df' },
+    { tag: [tags.meta, tags.comment], color: 'var(--markda-syntax-comment)' },
+    { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: 'var(--markda-syntax-keyword)' },
+    { tag: [tags.string, tags.special(tags.string), tags.regexp], color: 'var(--markda-syntax-string)' },
+    { tag: [tags.number, tags.bool, tags.null], color: 'var(--markda-syntax-constant)' },
+    { tag: [tags.typeName, tags.className, tags.namespace], color: 'var(--markda-syntax-entity)' },
+    { tag: [tags.variableName, tags.propertyName, tags.labelName], color: 'var(--markda-syntax-variable)' },
+    { tag: [tags.definition(tags.variableName), tags.function(tags.variableName)], color: 'var(--markda-syntax-entity)' },
     { tag: [tags.heading, tags.strong], fontWeight: '700' },
     { tag: tags.emphasis, fontStyle: 'italic' },
-    { tag: [tags.link, tags.url], color: dark ? '#a5d6ff' : '#0969da', textDecoration: 'underline' },
-    { tag: tags.invalid, color: dark ? '#f0f6fc' : '#82071e' },
+    { tag: [tags.link, tags.url], color: 'var(--markda-link)', textDecoration: 'underline' },
+    { tag: tags.invalid, color: 'var(--markda-error)' },
   ]);
 }
 
@@ -253,7 +255,7 @@ const view = new EditorView({
       // by Markda's own widgets. Keeping only the base language removes those
       // parsers from the startup bundle and its first-file compile path.
       markdownLanguage,
-      syntaxThemeCompartment.of(syntaxHighlighting(createSyntaxHighlightStyle(appliedSyntaxDark), { fallback: true })),
+      syntaxHighlighting(createSyntaxHighlightStyle(), { fallback: true }),
       search({ top: true }),
       keymap.of([
         ...createMarkdaKeymap(),
@@ -782,15 +784,9 @@ function applySettings(refreshDecorations = false): void {
   themeLink.href = themeBaseUri && themeName ? `${themeBaseUri}${encodeURIComponent(themeName)}.css` : '';
   const colorModeChanged = previousColorMode !== colorMode;
   if (colorModeChanged) colorThemeRevision++;
-  const effects: StateEffect<unknown>[] = [];
-  if (dark !== appliedSyntaxDark) {
-    appliedSyntaxDark = dark;
-    effects.push(syntaxThemeCompartment.reconfigure(
-      syntaxHighlighting(createSyntaxHighlightStyle(dark), { fallback: true }),
-    ));
-  }
-  if (colorModeChanged || refreshDecorations) effects.push(refreshLivePreview.of(null));
-  if (effects.length) view.dispatch({ effects });
+  // Color-only changes are handled by the shared CSS palette. Rebuild live
+  // decorations only when settings that affect their structure have changed.
+  if (refreshDecorations) view.dispatch({ effects: refreshLivePreview.of(null) });
   if (colorModeChanged) {
     queueMicrotask(() => {
       document.querySelectorAll<HTMLElement>('[data-markda-renderer="mermaid"]').forEach((element) => {
@@ -2486,7 +2482,6 @@ class CodeBlockWidget extends WidgetType {
     private readonly from: number,
     private readonly source: string,
     private readonly language: string,
-    private readonly themeRevision: number,
   ) { super(); }
   toDOM(): HTMLElement {
     const container = document.createElement('div');
@@ -2602,7 +2597,7 @@ class CodeBlockWidget extends WidgetType {
   ignoreEvent(): boolean { return true; }
   destroy(): void { this.disposeEditor?.(); }
   eq(other: CodeBlockWidget): boolean {
-    return other.from === this.from && other.themeRevision === this.themeRevision
+    return other.from === this.from
       && (activeCodeFrom === this.from || (other.source === this.source && other.language === this.language));
   }
 }
@@ -3735,7 +3730,7 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
         const contentRange = codeContentRange(editor.state, line.to, editor.state.doc.line(endLine).from);
         const contentFrom = contentRange.from;
         const contentTo = contentRange.to;
-        decorations.push({ from: line.from, to: blockDecorationTo(editor.state, end), decoration: Decoration.replace({ widget: new CodeBlockWidget(editor, line.from, editor.state.sliceDoc(contentFrom, Math.max(contentFrom, contentTo)), fence[2] ?? '', colorThemeRevision), block: true }) });
+        decorations.push({ from: line.from, to: blockDecorationTo(editor.state, end), decoration: Decoration.replace({ widget: new CodeBlockWidget(editor, line.from, editor.state.sliceDoc(contentFrom, Math.max(contentFrom, contentTo)), fence[2] ?? ''), block: true }) });
         // Even while this block is exposed as source, its closing fence belongs
         // to the opening fence above. Without skipping the full range here, the
         // closing fence is parsed again as a new opener and can absorb every

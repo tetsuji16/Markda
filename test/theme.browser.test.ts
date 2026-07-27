@@ -40,6 +40,9 @@ describe('Markda theme colors in Chromium', () => {
     const quote = document.querySelector<HTMLElement>('.markda-quote')!;
     const inlineCode = document.querySelector<HTMLElement>('.markda-code')!;
     const blockCode = document.querySelector<HTMLElement>('.markda-live-code code')!;
+    const blockKeyword = blockCode.querySelector<HTMLElement>('.markda-syntax-keyword')!;
+    const blockString = blockCode.querySelector<HTMLElement>('.markda-syntax-string')!;
+    const blockPre = blockCode.closest<HTMLElement>('pre')!;
     const activeLine = document.querySelector<HTMLElement>('.cm-activeLine')!;
     const tableCode = document.querySelector<HTMLElement>('.markda-live-table-wrap code')!;
     const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
@@ -51,6 +54,9 @@ describe('Markda theme colors in Chromium', () => {
     expect(getComputedStyle(quote).color).toBe('rgb(119, 119, 119)');
     expect(getComputedStyle(inlineCode).backgroundColor).toBe('rgb(243, 244, 244)');
     expect(getComputedStyle(blockCode).color).toBe('rgb(51, 51, 51)');
+    expect(getComputedStyle(blockPre).backgroundColor).toBe('rgb(248, 248, 248)');
+    expect(getComputedStyle(blockKeyword).color).toBe('rgb(207, 34, 46)');
+    expect(getComputedStyle(blockString).color).toBe('rgb(10, 48, 105)');
     expect(tableCode.textContent).toBe('Ctrl+/');
     expect(tableCode.closest('td')?.textContent).toBe('Use Ctrl+/');
     expect(getComputedStyle(tableCode).backgroundColor).toBe('rgb(243, 244, 244)');
@@ -101,6 +107,7 @@ describe('Markda theme colors in Chromium', () => {
     await settle();
 
     expect(root.dataset.markdaColorMode).toBe('dark');
+    expect(document.querySelector('.markda-live-code code')).toBe(blockCode);
     expect(getComputedStyle(document.body).backgroundColor).toBe('rgb(30, 30, 30)');
     expect(getComputedStyle(document.body).color).toBe('rgb(212, 212, 212)');
     content.focus();
@@ -119,6 +126,9 @@ describe('Markda theme colors in Chromium', () => {
     expect(getComputedStyle(quote).color).toBe('rgb(168, 168, 168)');
     expect(getComputedStyle(inlineCode).backgroundColor).toBe('rgb(37, 37, 38)');
     expect(getComputedStyle(document.querySelector<HTMLElement>('.markda-live-code code')!).color).toBe('rgb(212, 212, 212)');
+    expect(getComputedStyle(blockPre).backgroundColor).toBe('rgb(37, 37, 38)');
+    expect(getComputedStyle(blockKeyword).color).toBe('rgb(255, 123, 114)');
+    expect(getComputedStyle(blockString).color).toBe('rgb(165, 214, 255)');
     expect(getComputedStyle(document.querySelector<HTMLElement>('.markda-live-table-wrap code')!).backgroundColor).toBe('rgb(37, 37, 38)');
     expect(getComputedStyle(document.querySelector<HTMLElement>('#preview :not(pre) > code')!).color).toBe('rgb(212, 212, 212)');
     expect(getComputedStyle(document.querySelector<HTMLElement>('#preview :not(pre) > code')!).backgroundColor).toBe('rgb(37, 37, 38)');
@@ -135,7 +145,11 @@ describe('Markda theme colors in Chromium', () => {
     document.querySelector<HTMLButtonElement>('#theme-toggle')!.click();
     await settle();
     expect(root.dataset.markdaColorMode).toBe('light');
+    expect(document.querySelector('.markda-live-code code')).toBe(blockCode);
     expect(getComputedStyle(document.querySelector<HTMLElement>('.markda-live-code code')!).color).toBe('rgb(51, 51, 51)');
+    expect(getComputedStyle(blockPre).backgroundColor).toBe('rgb(248, 248, 248)');
+    expect(getComputedStyle(blockKeyword).color).toBe('rgb(207, 34, 46)');
+    expect(getComputedStyle(blockString).color).toBe('rgb(10, 48, 105)');
     expect(getComputedStyle(document.querySelector<HTMLElement>('#preview pre code')!).color).toBe('rgb(51, 51, 51)');
   });
 });
