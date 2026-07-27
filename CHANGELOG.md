@@ -4,6 +4,12 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.19 - 2026-07-27
+
+- Unified source and live-code syntax colors behind the same light/dark CSS palette so every programming-code surface follows theme changes and custom themes consistently.
+- Made theme switching paint-only for syntax colors, avoiding CodeMirror state reconfiguration and fenced-code widget reconstruction.
+- Added Chromium regression coverage for code backgrounds, keywords, and strings across light-to-dark-to-light transitions while verifying that the live code DOM remains stable.
+
 ## 0.1.18 - 2026-07-26
 
 - Preserved all live Markdown editing improvements while consolidating them on the latest `main` release line.
