@@ -7,6 +7,7 @@ import { getStatistics } from './statistics.js';
 import { findMinimalChange } from './textChange.js';
 import { OutlineProvider } from './outlineProvider.js';
 import { isRtlLocale } from './localization.js';
+import { isMarkdownDocumentPath, parseDocumentLink } from './documentLink.js';
 
 interface EditorView {
   panel: vscode.WebviewPanel;
@@ -194,7 +195,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const change = findMinimalChange(expectedText, text);
     const edit = new vscode.WorkspaceEdit();
     edit.replace(view.document.uri, new vscode.Range(view.document.positionAt(change.from), view.document.positionAt(change.to)), change.insert);
-    await vscode.workspace.applyEdit(edit);
+    if (!await vscode.workspace.applyEdit(edit)) this.resync(view);
   }
 
   private async saveDocument(view: EditorView, uri: string, expectedText: string, text: string): Promise<void> {
@@ -368,38 +369,46 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
   }
 
   private async openLink(documentUri: vscode.Uri, href: string): Promise<void> {
-    if (/^https?:/iu.test(href)) {
+    const link = parseDocumentLink(href);
+    if (link.kind === 'unsupported') {
+      void vscode.window.showWarningMessage(vscode.l10n.t('markda: This link type cannot be opened safely.'));
+      return;
+    }
+    if (link.kind === 'external') {
       const policy = vscode.workspace.getConfiguration('markda', documentUri).get<string>('security.allowRemoteResources', 'prompt');
       if (policy === 'never') return;
       if (policy === 'prompt') {
         const open = vscode.l10n.t('Open');
-        const choice = await vscode.window.showWarningMessage(vscode.l10n.t('Open external link?\n{0}', href), { modal: true }, open);
+        const choice = await vscode.window.showWarningMessage(vscode.l10n.t('Open external link?\n{0}', link.href), { modal: true }, open);
         if (choice !== open) return;
       }
-      await vscode.env.openExternal(vscode.Uri.parse(href));
+      await vscode.env.openExternal(vscode.Uri.parse(link.href));
       return;
     }
-    const [pathPart = '', fragment] = href.split('#', 2);
-    if (!pathPart && fragment) {
+    if (link.kind === 'anchor') {
       const current = [...this.views].find((view) => view.document.uri.toString() === documentUri.toString());
-      if (current) this.post(current, { type: 'command', command: 'focusAnchor', payload: { fragment } });
+      if (current) this.post(current, { type: 'command', command: 'focusAnchor', payload: { fragment: link.fragment } });
       return;
     }
-    const target = vscode.Uri.joinPath(documentUri, '..', pathPart);
-    if (target.scheme !== 'file') {
+    if (documentUri.scheme !== 'file') {
       void vscode.window.showWarningMessage(vscode.l10n.t('markda: Only local file links can be opened.'));
       return;
     }
+    const target = vscode.Uri.file(path.resolve(path.dirname(documentUri.fsPath), link.path));
     const workspace = vscode.workspace.getWorkspaceFolder(documentUri);
     const allowedRoot = workspace?.uri.fsPath ?? path.dirname(documentUri.fsPath);
     if (!isInside(allowedRoot, target.fsPath)) {
       void vscode.window.showWarningMessage(vscode.l10n.t('markda: Links outside the workspace cannot be opened.'));
       return;
     }
+    if (!isMarkdownDocumentPath(target.fsPath)) {
+      await vscode.commands.executeCommand('vscode.open', target);
+      return;
+    }
     await vscode.commands.executeCommand('vscode.openWith', target, MarkdaEditorProvider.viewType);
-    if (fragment) {
+    if (link.fragment) {
       const opened = [...this.views].find((view) => view.document.uri.fsPath === target.fsPath);
-      if (opened) this.post(opened, { type: 'command', command: 'focusAnchor', payload: { fragment } });
+      if (opened) this.post(opened, { type: 'command', command: 'focusAnchor', payload: { fragment: link.fragment } });
     }
   }
 

@@ -518,100 +518,106 @@
         "command": "markda.toggleSourceMode",
         "key": "ctrl+/",
         "mac": "cmd+/",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleFocusMode",
         "key": "f8",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleTypewriterMode",
         "key": "f9",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.insertTable",
         "key": "ctrl+t",
         "mac": "cmd+alt+t",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.insertMathBlock",
         "key": "ctrl+shift+m",
         "mac": "cmd+alt+b",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.copyAsMarkdown",
         "key": "ctrl+shift+c",
         "mac": "cmd+shift+c",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.pastePlainText",
         "key": "ctrl+shift+v",
         "mac": "cmd+shift+v",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleBold",
         "key": "ctrl+b",
         "mac": "cmd+b",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleItalic",
         "key": "ctrl+i",
         "mac": "cmd+i",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.insertLink",
         "key": "ctrl+k",
         "mac": "cmd+k",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleOrderedList",
         "key": "ctrl+shift+[",
         "mac": "cmd+alt+o",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleBulletList",
         "key": "ctrl+shift+]",
         "mac": "cmd+alt+u",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleBlockquote",
         "key": "ctrl+shift+q",
         "mac": "cmd+alt+q",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.insertCodeBlock",
         "key": "ctrl+shift+k",
         "mac": "cmd+alt+c",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleStrikethrough",
         "key": "alt+shift+5",
         "mac": "ctrl+shift+`",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.clearFormatting",
         "key": "ctrl+\\",
         "mac": "cmd+\\",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       }
     ],
     "configuration": {
       "title": "markda",
       "properties": {
+        "markda.editor.enableDefaultKeybindings": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "Enable Markda's contributed keyboard shortcuts while the Markda editor is active. Disabled by default so VS Code keybindings take precedence."
+        },
         "markda.editor.autoPairMarkdown": {
           "type": "boolean",
           "default": true,
@@ -874,7 +880,7 @@
     "@vitest/browser": "^3.2.7",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.5",
-    "happy-dom": "^18.0.1",
+    "happy-dom": "^20.11.1",
     "playwright": "^1.61.1",
     "typescript": "^5.8.3",
     "vitest": "^3.2.3"
