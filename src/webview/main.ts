@@ -89,6 +89,7 @@ let lineSeparator = documentLineSeparator(syncedText);
 let sendTimer: number | undefined;
 let previewTimer: number | undefined;
 let derivedStateTimer: number | undefined;
+let suppressStateUntil = 0;
 let previewRenderVersion = 0;
 let clientRenderer: MarkdownIt | undefined;
 let mermaidPromise: Promise<typeof import('mermaid')['default']> | undefined;
@@ -99,7 +100,10 @@ let yamlPromise: Promise<typeof import('yaml')> | undefined;
 let emojiPromise: Promise<void> | undefined;
 let emojiPlugin = lightEmojiPlugin;
 let emojiNames: Readonly<Record<string, string>> = lightEmojiNames;
-let cachedDocumentText = '';
+const initialDerivedState = analyzeDocument(initialDocument?.text ?? '');
+let cachedDocumentText = initialDocument?.text ?? '';
+let cachedDocumentStatistics = initialDerivedState.statistics;
+let cachedDocumentHeadings = initialDerivedState.headings;
 let cachedTable: MarkdownTable | undefined;
 let activeTableFrom: number | undefined;
 let activeLiveTableCursor: { from: number; row: number; column: number } | undefined;
@@ -109,6 +113,8 @@ let activeMathFrom: number | undefined;
 let activeCalloutFrom: number | undefined;
 let activeHtmlFrom: number | undefined;
 let activeFrontMatterFrom: number | undefined;
+let currentDiagnostics: readonly EditorDiagnostic[] = [];
+let linkDialogSelection: { from: number; to: number } | undefined;
 let mathReferenceCache: { source: string; references: ReturnType<typeof collectMathReferences> } | undefined;
 let referenceDefinitionCache: {
   doc: EditorState['doc'];
@@ -154,23 +160,33 @@ function createSyntaxHighlightStyle(): HighlightStyle {
 
 document.body.innerHTML = `<style>${getStyles()}</style>
 <div class="markda-shell">
-  <header class="markda-toolbar" aria-label="${t('editorControls')}">
+  <header id="editor-toolbar" class="markda-toolbar" aria-label="${t('editorControls')}">
+    <button id="toolbar-toggle" title="${t('showControls')}" aria-label="${t('showControls')}" aria-controls="editor-toolbar" aria-expanded="false"><i class="codicon codicon-more" aria-hidden="true"></i></button>
     <button data-command="toggleSourceMode" title="${t('sourceMode')}" aria-label="${t('toggleSourceMode')}" aria-pressed="false"><i class="codicon codicon-code" aria-hidden="true"></i><span>${t('source')}</span></button>
     <button data-command="toggleFocusMode" title="${t('focusMode')}" aria-label="${t('toggleFocusMode')}" aria-pressed="false"><i class="codicon codicon-target" aria-hidden="true"></i><span>${t('focus')}</span></button>
     <button data-command="toggleTypewriterMode" title="${t('typewriterMode')}" aria-label="${t('toggleTypewriterMode')}" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i><span>${t('typewriter')}</span></button>
     <span class="toolbar-separator"></span>
+    <label class="markda-style-picker"><span class="visually-hidden">${t('paragraphStyle')}</span><select id="paragraph-style" title="${t('paragraphStyle')}" aria-label="${t('paragraphStyle')}">
+      <option value="0">${t('paragraph')}</option>${Array.from({ length: 6 }, (_value, index) => `<option value="${index + 1}">${t('heading', index + 1)}</option>`).join('')}
+    </select></label>
     <button data-command="toggleBold" title="${t('bold')} (Ctrl+B)" aria-label="${t('bold')}"><i class="codicon codicon-bold" aria-hidden="true"></i></button>
     <button data-command="toggleItalic" title="${t('italic')} (Ctrl+I)" aria-label="${t('italic')}"><i class="codicon codicon-italic" aria-hidden="true"></i></button>
     <button data-command="toggleInlineCode" title="${t('inlineCode')}" aria-label="${t('inlineCode')}"><i class="codicon codicon-code" aria-hidden="true"></i></button>
     <button data-command="insertLink" title="${t('insertLink')} (Ctrl+K)" aria-label="${t('insertLink')}"><i class="codicon codicon-link" aria-hidden="true"></i></button>
     <button data-command="toggleBulletList" title="${t('bulletedList')}" aria-label="${t('bulletedList')}"><i class="codicon codicon-list-unordered" aria-hidden="true"></i></button>
+    <button data-command="toggleOrderedList" title="${t('orderedList')}" aria-label="${t('orderedList')}"><i class="codicon codicon-list-ordered" aria-hidden="true"></i></button>
     <button data-command="toggleTaskList" title="${t('taskList')}" aria-label="${t('taskList')}"><i class="codicon codicon-checklist" aria-hidden="true"></i></button>
+    <button data-command="toggleBlockquote" title="${t('blockquote')}" aria-label="${t('blockquote')}"><i class="codicon codicon-quote"></i></button>
+    <button data-command="toggleStrikethrough" title="${t('strikethrough')}" aria-label="${t('strikethrough')}"><span aria-hidden="true"><s>S</s></span></button>
+    <button data-command="insertCodeBlock" title="${t('codeBlock')}" aria-label="${t('codeBlock')}"><i class="codicon codicon-symbol-method"></i></button>
+    <button data-command="clearFormatting" title="${t('clearFormatting')}" aria-label="${t('clearFormatting')}"><i class="codicon codicon-clear-all"></i></button>
     <span class="toolbar-separator"></span>
     <button data-command="insertTable" title="${t('insertTable')}" aria-label="${t('insertTable')}"><i class="codicon codicon-table" aria-hidden="true"></i></button>
     <button data-command="insertImage" title="${t('insertImages')}" aria-label="${t('insertImages')}"><i class="codicon codicon-file-media" aria-hidden="true"></i></button>
     <button data-command="insertMathBlock" title="${t('insertMath')}" aria-label="${t('insertMath')}"><span class="math-icon" aria-hidden="true">∑</span></button>
     <span class="toolbar-spacer"></span>
-    <button id="theme-toggle" title="${t('toggleTheme')}" aria-label="${t('toggleTheme')}" aria-pressed="false"><i class="codicon codicon-color-mode" aria-hidden="true"></i><span>${t('theme')}</span></button>
+    <button id="shortcut-priority-toggle" title="${t('preferMarkdaShortcuts')}" aria-label="${t('preferMarkdaShortcuts')}" aria-pressed="false"><i class="codicon codicon-keyboard" aria-hidden="true"></i><span>${t('shortcuts')}</span></button>
+    <button id="theme-toggle" title="${t('toggleTheme')}" aria-label="${t('toggleTheme')}"><i class="codicon codicon-color-mode" aria-hidden="true"></i><span>${t('theme')}</span></button>
   </header>
   <div id="table-toolbar" class="table-toolbar" aria-label="${t('tableControls')}">
     <span>${t('table')}</span>
@@ -187,13 +203,71 @@ document.body.innerHTML = `<style>${getStyles()}</style>
     <button data-table-command="align-right" title="${t('alignRight')}"><i class="codicon codicon-list-ordered"></i></button>
   </div>
   <div class="markda-workspace"><div id="editor"></div><aside id="preview" aria-label="${t('renderedPreview')}"></aside></div>
-  <dialog id="table-dialog" aria-labelledby="table-dialog-title"><form method="dialog"><h2 id="table-dialog-title">${t('insertTable')}</h2><label>${t('columns')} <input id="table-columns" type="number" min="1" max="20" value="2"></label><label>${t('rows')} <input id="table-rows" type="number" min="1" max="100" value="2"></label><div><button value="cancel">${t('cancel')}</button><button id="table-insert-confirm" value="default">${t('insert')}</button></div></form></dialog>
+  <div id="markda-welcome" class="markda-welcome" hidden><strong>${t('welcomeTitle')}</strong><span>${t('welcomeBody')}</span></div>
+  <div id="quick-insert" class="markda-quick-insert" role="dialog" aria-label="${t('quickInsert')}" hidden>
+    <input id="quick-insert-filter" type="text" autocomplete="off" placeholder="${t('quickInsertHint')}" aria-label="${t('quickInsertHint')}">
+    <div id="quick-insert-items" role="listbox"></div>
+  </div>
+  <div id="selection-toolbar" class="markda-selection-toolbar" role="toolbar" aria-label="${t('editorControls')}" hidden>
+    <button type="button" data-selection-command="toggleBold" title="${t('bold')}"><i class="codicon codicon-bold"></i></button>
+    <button type="button" data-selection-command="toggleItalic" title="${t('italic')}"><i class="codicon codicon-italic"></i></button>
+    <button type="button" data-selection-command="toggleStrikethrough" title="${t('strikethrough')}"><span><s>S</s></span></button>
+    <button type="button" data-selection-command="toggleInlineCode" title="${t('inlineCode')}"><i class="codicon codicon-code"></i></button>
+    <button type="button" data-selection-command="insertLink" title="${t('insertLink')}"><i class="codicon codicon-link"></i></button>
+    <button type="button" data-selection-command="clearFormatting" title="${t('clearFormatting')}"><i class="codicon codicon-clear-all"></i></button>
+  </div>
+  <footer class="markda-status" aria-label="${t('statistics')}">
+    <button id="document-mode-status" type="button"></button>
+    <button id="document-section-status" type="button"></button>
+    <span class="toolbar-spacer"></span>
+    <button id="document-problems-status" type="button"></button>
+    <span id="document-statistics-status"></span>
+    <span id="document-sync-status" role="status" aria-live="polite">${t('syncSaved')}</span>
+  </footer>
+  <dialog id="table-dialog" aria-labelledby="table-dialog-title"><form method="dialog"><h2 id="table-dialog-title">${t('insertTable')}</h2><label>${t('columns')} <input id="table-columns" type="number" min="1" max="20" value="2"></label><label>${t('rows')} <input id="table-rows" type="number" min="1" max="100" value="2"></label><div><button value="cancel" formnovalidate>${t('cancel')}</button><button id="table-insert-confirm" value="default">${t('insert')}</button></div></form></dialog>
+  <dialog id="link-dialog" aria-labelledby="link-dialog-title"><form method="dialog"><h2 id="link-dialog-title">${t('editLink')}</h2>
+    <label>${t('linkText')} <input id="link-text" type="text"></label>
+    <label>${t('linkUrl')} <input id="link-url" type="text" list="markda-link-targets"></label>
+    <label>${t('linkTitle')} <input id="link-title" type="text"></label>
+    <div><button value="cancel" formnovalidate>${t('cancel')}</button><button id="link-insert-confirm" value="default">${t('insert')}</button></div>
+  </form></dialog>
+  <datalist id="markda-code-languages">${['text','javascript','typescript','json','html','css','python','java','c','cpp','csharp','go','rust','ruby','php','sql','shell','powershell','yaml','toml','markdown'].map((language) => `<option value="${language}"></option>`).join('')}</datalist>
+  <datalist id="markda-link-targets"></datalist>
 </div>`;
 
 const appRoot = document.querySelector<HTMLElement>('.markda-shell')!;
 const preview = document.querySelector<HTMLElement>('#preview')!;
+const selectionToolbar = document.querySelector<HTMLElement>('#selection-toolbar')!;
+const syncStatus = document.querySelector<HTMLElement>('#document-sync-status')!;
+const documentModeStatus = document.querySelector<HTMLButtonElement>('#document-mode-status')!;
+const documentSectionStatus = document.querySelector<HTMLButtonElement>('#document-section-status')!;
+const documentProblemsStatus = document.querySelector<HTMLButtonElement>('#document-problems-status')!;
+const documentStatisticsStatus = document.querySelector<HTMLElement>('#document-statistics-status')!;
+const welcome = document.querySelector<HTMLElement>('#markda-welcome')!;
 
 const tableDialog = document.querySelector<HTMLDialogElement>('#table-dialog')!;
+const linkDialog = document.querySelector<HTMLDialogElement>('#link-dialog')!;
+const editorToolbar = document.querySelector<HTMLElement>('#editor-toolbar')!;
+const toolbarToggle = document.querySelector<HTMLButtonElement>('#toolbar-toggle')!;
+function setToolbarExpanded(expanded: boolean): void {
+  editorToolbar.classList.toggle('expanded', expanded);
+  toolbarToggle.setAttribute('aria-expanded', String(expanded));
+  toolbarToggle.setAttribute('aria-label', t(expanded ? 'hideControls' : 'showControls'));
+  toolbarToggle.title = t(expanded ? 'hideControls' : 'showControls');
+}
+toolbarToggle.addEventListener('click', () => setToolbarExpanded(!editorToolbar.classList.contains('expanded')));
+setToolbarExpanded(true);
+editorToolbar.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !editorToolbar.classList.contains('expanded')) return;
+  event.preventDefault();
+  setToolbarExpanded(false);
+  toolbarToggle.focus();
+});
+editorToolbar.addEventListener('focusin', () => {
+  activeTableFrom = undefined;
+  activeLiveTableCursor = undefined;
+  appRoot.classList.remove('table-active');
+});
 document.querySelectorAll<HTMLButtonElement>('button[title]').forEach((button) => {
   if (!button.getAttribute('aria-label')) button.setAttribute('aria-label', button.title);
 });
@@ -311,16 +385,50 @@ export function __getEditorView(): EditorView {
 document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((button) => {
   button.addEventListener('click', () => runCommand(button.dataset.command as EditorCommand));
 });
+document.querySelectorAll<HTMLButtonElement>('[data-selection-command]').forEach((button) => {
+  button.addEventListener('mousedown', (event) => event.preventDefault());
+  button.addEventListener('click', () => runCommand(button.dataset.selectionCommand as EditorCommand));
+});
+const paragraphStyle = document.querySelector<HTMLSelectElement>('#paragraph-style')!;
+paragraphStyle.addEventListener('change', () => {
+  runCommand('setHeading', Number(paragraphStyle.value));
+  view.focus();
+});
 document.querySelectorAll<HTMLButtonElement>('[data-table-command]').forEach((button) => {
   button.addEventListener('click', () => runTableCommand(button.dataset.tableCommand ?? ''));
 });
 const themeToggleButton = document.querySelector<HTMLButtonElement>('#theme-toggle');
+const shortcutPriorityButton = document.querySelector<HTMLButtonElement>('#shortcut-priority-toggle');
+function updateShortcutPriorityLabel(): void {
+  if (!shortcutPriorityButton) return;
+  const markdaFirst = settings.enableDefaultKeybindings === true;
+  const priority = t(markdaFirst ? 'shortcutsMarkda' : 'shortcutsVscode');
+  const action = t(markdaFirst ? 'preferVscodeShortcuts' : 'preferMarkdaShortcuts');
+  shortcutPriorityButton.querySelector('span')?.replaceChildren(
+    document.createTextNode(`${t('shortcuts')}: ${priority}`),
+  );
+  shortcutPriorityButton.classList.toggle('active', markdaFirst);
+  shortcutPriorityButton.setAttribute('aria-pressed', String(markdaFirst));
+  shortcutPriorityButton.setAttribute('aria-label', `${t('shortcutsCurrent', priority)}. ${action}`);
+  shortcutPriorityButton.title = `${t('shortcutsCurrent', priority)}. ${action}`;
+}
+shortcutPriorityButton?.addEventListener('click', () => {
+  const enabled = settings.enableDefaultKeybindings !== true;
+  settings.enableDefaultKeybindings = enabled;
+  updateShortcutPriorityLabel();
+  vscode.postMessage({ type: 'updateDefaultKeybindings', enabled });
+});
+updateShortcutPriorityLabel();
+
 function updateThemeToggleLabel(): void {
   if (!themeToggleButton) return;
-  const labels: Record<typeof settings.themeMode, string> = { auto: 'Auto', light: 'Light', dark: 'Dark' };
-  themeToggleButton.querySelector('span')?.replaceChildren(document.createTextNode(`Theme: ${labels[settings.themeMode]}`));
-  themeToggleButton.setAttribute('aria-pressed', String(settings.themeMode !== 'auto'));
-  themeToggleButton.title = `Theme: ${labels[settings.themeMode]} (click to change)`;
+  const labels: Record<typeof settings.themeMode, string> = {
+    auto: t('themeAuto'), light: t('themeLight'), dark: t('themeDark'),
+  };
+  themeToggleButton.querySelector('span')?.replaceChildren(document.createTextNode(`${t('theme')}: ${labels[settings.themeMode]}`));
+  themeToggleButton.dataset.mode = settings.themeMode;
+  themeToggleButton.setAttribute('aria-label', `${t('toggleTheme')}. ${t('themeCurrent', labels[settings.themeMode])}`);
+  themeToggleButton.title = `${t('themeCurrent', labels[settings.themeMode])}. ${t('toggleTheme')}`;
 }
 themeToggleButton?.addEventListener('click', () => {
   const order: ('auto' | 'light' | 'dark')[] = ['auto', 'light', 'dark'];
@@ -332,9 +440,23 @@ themeToggleButton?.addEventListener('click', () => {
 });
 updateThemeToggleLabel();
 
-document.querySelector('#table-insert-confirm')?.addEventListener('click', () => insertTableFromDialog());
+tableDialog.querySelector('form')?.addEventListener('submit', (event) => {
+  if ((event as SubmitEvent).submitter?.id === 'table-insert-confirm') insertTableFromDialog();
+});
+linkDialog.querySelector('form')?.addEventListener('submit', (event) => {
+  if ((event as SubmitEvent).submitter?.id === 'link-insert-confirm') insertLinkFromDialog();
+});
+linkDialog.addEventListener('close', () => {
+  linkDialogSelection = undefined;
+  view.focus();
+});
 view.dom.addEventListener('paste', (event) => void handlePaste(event));
 view.dom.addEventListener('drop', (event) => void receiveImageFiles(event.dataTransfer?.files, event));
+view.contentDOM.addEventListener('contextmenu', (event) => {
+  if (event.defaultPrevented || (event.target instanceof Element && event.target.closest('[data-markda-interactive]'))) return;
+  event.preventDefault();
+  openQuickInsert(event.clientX, event.clientY, true);
+});
 // CodeMirror creates a logical selection at position 0 even before the editor
 // receives focus. Only expose source syntax when that selection owns the
 // visible editing focus; otherwise the first line incorrectly looks active.
@@ -403,6 +525,7 @@ function onHostMessage(message: HostToEditorMessage): void {
       pendingChanges = undefined;
       pendingBaseText = undefined;
       pendingLineSeparator = undefined;
+      setSyncState('saved');
       if (!replaceDocument(message.text)) scheduleDerivedStateUpdate();
       applySettings(true);
       return;
@@ -413,7 +536,9 @@ function onHostMessage(message: HostToEditorMessage): void {
         inFlightTransaction = undefined;
         inFlightChanges = undefined;
         flushEdit();
+        if (!pendingChanges && !inFlightTransaction) setSyncState('saved');
       } else if ('text' in message) {
+        if (inFlightTransaction || pendingChanges) setSyncState('conflict');
         syncedText = message.text;
         inFlightTransaction = undefined;
         inFlightChanges = undefined;
@@ -421,12 +546,15 @@ function onHostMessage(message: HostToEditorMessage): void {
         pendingBaseText = undefined;
         pendingLineSeparator = undefined;
         replaceDocument(message.text);
+        window.setTimeout(() => setSyncState('saved'), 1200);
       }
       return;
     case 'configurationChanged':
       settings = message.settings;
       clientRenderer = undefined;
       applySettings(true);
+      updateShortcutPriorityLabel();
+      updateThemeToggleLabel();
       renderPreview();
       return;
     case 'diagnosticsChanged':
@@ -477,6 +605,7 @@ function onEditorUpdate(update: ViewUpdate): void {
       pendingLineSeparator = lineSeparator;
     }
     scheduleEdit();
+    setSyncState('pending');
   }
   if (update.docChanged) {
     cachedDocumentText = '';
@@ -491,8 +620,12 @@ function onEditorUpdate(update: ViewUpdate): void {
   else if (update.selectionSet) {
     updateTableToolbar();
     const state = update.state.field(modeField);
-    vscode.postMessage({ type: 'state', sourceMode: state.sourceMode, focusMode: state.focusMode, typewriterMode: state.typewriterMode, cursor: update.state.selection.main.head });
+    if (performance.now() >= suppressStateUntil) {
+      vscode.postMessage({ type: 'state', sourceMode: state.sourceMode, focusMode: state.focusMode, typewriterMode: state.typewriterMode, cursor: update.state.selection.main.head });
+    }
   }
+  if (update.docChanged || update.selectionSet) updateDocumentStatus();
+  if (update.docChanged || update.selectionSet || update.focusChanged) updateSelectionToolbar();
   const mode = update.state.field(modeField);
   if (mode.typewriterMode && update.selectionSet && settings.typewriterKeepCentered) {
     view.dispatch({ effects: EditorView.scrollIntoView(update.state.selection.main.head, { y: 'center' }) });
@@ -517,6 +650,7 @@ function flushEdit(): void {
   if (!changes.length) return;
   inFlightTransaction = `${documentVersion}:${crypto.randomUUID()}`;
   inFlightChanges = changes;
+  setSyncState('saving');
   vscode.postMessage({
     type: 'edit', uri: documentUri, baseVersion: documentVersion, transactionId: inFlightTransaction,
     changes, selection: { anchor: view.state.selection.main.anchor, head: view.state.selection.main.head },
@@ -582,6 +716,7 @@ function synchronizeAndSave(): void {
   pendingChanges = undefined;
   pendingBaseText = undefined;
   pendingLineSeparator = undefined;
+  suppressStateUntil = performance.now() + 250;
   vscode.postMessage({ type: 'save', uri: documentUri, expectedText, text });
 }
 
@@ -650,7 +785,7 @@ function runCommand(command: EditorCommand, payload?: unknown): void {
       wrapSelection(view, '`', '`');
       return;
     case 'insertLink':
-      wrapLink(view);
+      void openLinkDialog();
       return;
     case 'setHeading':
       setHeading(view, typeof payload === 'number' ? Math.max(0, Math.min(6, payload)) : 1);
@@ -711,6 +846,7 @@ function runCommand(command: EditorCommand, payload?: unknown): void {
 }
 
 function applyDiagnostics(diagnostics: readonly EditorDiagnostic[]): void {
+  currentDiagnostics = diagnostics;
   const ranges = diagnostics.flatMap((diagnostic) => {
     const from = Math.max(0, Math.min(diagnostic.from, view.state.doc.length));
     const to = Math.max(from, Math.min(diagnostic.to, view.state.doc.length));
@@ -722,6 +858,7 @@ function applyDiagnostics(diagnostics: readonly EditorDiagnostic[]): void {
     }).range(from, to)];
   });
   view.dispatch({ effects: setDiagnosticDecorations.of(Decoration.set(ranges, true)) });
+  updateDocumentStatus();
 }
 
 function focusDocumentAnchor(fragment: string): void {
@@ -758,6 +895,7 @@ function applyViewState(state: ViewState): void {
     button?.classList.toggle('active', active);
     button?.setAttribute('aria-pressed', String(active));
   }
+  updateDocumentStatus();
 }
 
 function applySettings(refreshDecorations = false): void {
@@ -768,6 +906,10 @@ function applySettings(refreshDecorations = false): void {
   // When capped, center the content; when filling the window, use a fixed gutter.
   const paddingX = '24px';
   document.documentElement.style.setProperty('--markda-padding-x', paddingX);
+  document.documentElement.style.setProperty('--markda-font-size', `${settings.fontSize ?? 16}px`);
+  document.documentElement.style.setProperty('--markda-line-height', String(settings.lineHeight ?? 1.6));
+  document.documentElement.style.setProperty('--markda-paragraph-spacing', `${settings.paragraphSpacing ?? 0}em`);
+  if (settings.fontFamily?.trim()) document.documentElement.style.setProperty('--markda-font-body', settings.fontFamily);
   const dark = usesDarkColors();
   const colorMode = dark ? 'dark' : 'light';
   const previousColorMode = document.documentElement.dataset.markdaColorMode;
@@ -826,10 +968,14 @@ function updateImageSource(payload: unknown, remove: boolean): void {
     return;
   }
   if (!('newSource' in payload) || typeof payload.newSource !== 'string') return;
-  const relative = line.text.indexOf(payload.source);
-  if (relative < 0) return;
-  const from = line.from + relative;
-  view.dispatch({ changes: { from, to: from + payload.source.length, insert: payload.newSource } });
+  const documentText = view.state.doc.toString();
+  const changes: { from: number; to: number; insert: string }[] = [];
+  let from = 0;
+  while ((from = documentText.indexOf(payload.source, from)) >= 0) {
+    changes.push({ from, to: from + payload.source.length, insert: payload.newSource });
+    from += payload.source.length;
+  }
+  if (changes.length) view.dispatch({ changes });
 }
 
 function toggleLinePrefix(prefix: string): void {
@@ -898,14 +1044,173 @@ function clearFormatting(editor: EditorView): boolean {
 function insertTableFromDialog(): void {
   const columns = clampNumber(Number(document.querySelector<HTMLInputElement>('#table-columns')?.value), 1, 20);
   const rows = clampNumber(Number(document.querySelector<HTMLInputElement>('#table-rows')?.value), 1, 100);
-  const header = `| ${Array.from({ length: columns }, (_value, index) => `Column ${index + 1}`).join(' | ')} |`;
+  const header = `| ${Array.from({ length: columns }, (_value, index) => `${t('columnShort')} ${index + 1}`).join(' | ')} |`;
   const separator = `| ${Array.from({ length: columns }, () => '---').join(' | ')} |`;
   const row = `| ${Array.from({ length: columns }, () => '').join(' | ')} |`;
   insertAtSelection([header, separator, ...Array.from({ length: rows }, () => row)].join('\n'));
 }
 
+async function openLinkDialog(): Promise<void> {
+  const selection = view.state.selection.main;
+  linkDialogSelection = { from: selection.from, to: selection.to };
+  const selected = view.state.sliceDoc(selection.from, selection.to);
+  const existing = selected.match(/^\[([^\]]*)\]\((\S+?)(?:\s+["']([^"']*)["'])?\)$/u);
+  const textInput = document.querySelector<HTMLInputElement>('#link-text')!;
+  const urlInput = document.querySelector<HTMLInputElement>('#link-url')!;
+  const titleInput = document.querySelector<HTMLInputElement>('#link-title')!;
+  const targets = document.querySelector<HTMLDataListElement>('#markda-link-targets')!;
+  targets.replaceChildren(...headingAnchors(view.state.doc.toString()).map((heading) => {
+    const option = document.createElement('option');
+    option.value = `#${heading.slug}`;
+    option.label = heading.text;
+    return option;
+  }));
+  textInput.value = existing?.[1] ?? selected;
+  urlInput.value = existing?.[2] ?? '';
+  titleInput.value = existing?.[3] ?? '';
+  if (!urlInput.value) {
+    try {
+      const clipboard = await navigator.clipboard.readText();
+      if (/^(?:https?:\/\/|\.{0,2}\/|#)/iu.test(clipboard.trim())) urlInput.value = clipboard.trim();
+    } catch { /* Clipboard permission is optional inside the webview. */ }
+  }
+  linkDialog.showModal();
+  queueMicrotask(() => (textInput.value ? urlInput : textInput).focus());
+}
+
+function insertLinkFromDialog(): void {
+  if (!linkDialogSelection) return;
+  const text = document.querySelector<HTMLInputElement>('#link-text')!.value || document.querySelector<HTMLInputElement>('#link-url')!.value;
+  const url = document.querySelector<HTMLInputElement>('#link-url')!.value.trim();
+  const title = document.querySelector<HTMLInputElement>('#link-title')!.value.trim();
+  if (!url) return;
+  const escapedText = text.replace(/[[\]]/gu, '\\$&');
+  const escapedUrl = url.replace(/[()]/gu, '\\$&');
+  const escapedTitle = title.replace(/"/gu, '\\"');
+  const insert = `[${escapedText}](${escapedUrl}${escapedTitle ? ` "${escapedTitle}"` : ''})`;
+  view.dispatch({
+    changes: { from: linkDialogSelection.from, to: linkDialogSelection.to, insert },
+    selection: EditorSelection.range(linkDialogSelection.from + 1, linkDialogSelection.from + 1 + escapedText.length),
+  });
+}
+
+interface QuickInsertItem {
+  readonly label: string;
+  readonly icon: string;
+  readonly keywords: string;
+  readonly action: () => void;
+}
+
+const quickInsertItems: readonly QuickInsertItem[] = [
+  ...Array.from({ length: 6 }, (_value, index): QuickInsertItem => ({
+    label: t('heading', index + 1), icon: 'symbol-key', keywords: `h${index + 1} heading`,
+    action: () => setHeading(view, index + 1),
+  })),
+  { label: t('bulletedList'), icon: 'list-unordered', keywords: 'list bullet', action: () => toggleLinePrefix('- ') },
+  { label: t('orderedList'), icon: 'list-ordered', keywords: 'list numbered', action: toggleOrderedList },
+  { label: t('taskList'), icon: 'checklist', keywords: 'todo checkbox', action: () => toggleLinePrefix('- [ ] ') },
+  { label: t('blockquote'), icon: 'quote', keywords: 'quote', action: toggleBlockquote },
+  { label: t('codeBlock'), icon: 'symbol-method', keywords: 'code fence', action: () => { wrapCodeBlock(view); } },
+  { label: t('insertTable'), icon: 'table', keywords: 'table', action: () => tableDialog.showModal() },
+  { label: t('insertImages'), icon: 'file-media', keywords: 'image picture', action: () => vscode.postMessage({ type: 'requestImage', selection: currentSelection() }) },
+  { label: t('insertMath'), icon: 'symbol-operator', keywords: 'math equation', action: () => insertAtSelection('$$\n\\displaystyle x = 0\n$$') },
+  { label: t('horizontalRule'), icon: 'remove', keywords: 'rule divider', action: () => insertAtSelection('---') },
+  { label: t('tableOfContents'), icon: 'list-tree', keywords: 'toc contents', action: () => insertAtSelection('[toc]') },
+  { label: t('frontMatter'), icon: 'settings', keywords: 'yaml metadata', action: () => insertAtSelection('---\ntitle: \n---\n\n') },
+  { label: t('callout'), icon: 'info', keywords: 'alert note callout', action: () => insertAtSelection('> [!NOTE]\n> ') },
+  { label: t('footnote'), icon: 'references', keywords: 'footnote reference', action: () => insertAtSelection('[^1]\n\n[^1]: ') },
+];
+
+const quickInsert = document.querySelector<HTMLElement>('#quick-insert')!;
+const quickInsertFilter = document.querySelector<HTMLInputElement>('#quick-insert-filter')!;
+const quickInsertList = document.querySelector<HTMLElement>('#quick-insert-items')!;
+function renderQuickInsertItems(filter = '', contextual = false): void {
+  const normalized = filter.trim().toLocaleLowerCase();
+  const items = (contextual
+    ? [
+        { label: t('bold'), icon: 'bold', keywords: 'format strong', action: () => wrapSelection(view, '**', '**') },
+        { label: t('italic'), icon: 'italic', keywords: 'format emphasis', action: () => wrapSelection(view, '*', '*') },
+        { label: t('insertLink'), icon: 'link', keywords: 'url link', action: () => { void openLinkDialog(); } },
+        { label: t('clearFormatting'), icon: 'clear-all', keywords: 'plain reset', action: () => { clearFormatting(view); } },
+        { label: t('moveBlockUp'), icon: 'arrow-up', keywords: 'block move', action: () => { moveCurrentBlock(view, -1); } },
+        { label: t('moveBlockDown'), icon: 'arrow-down', keywords: 'block move', action: () => { moveCurrentBlock(view, 1); } },
+        { label: t('duplicateBlock'), icon: 'files', keywords: 'block duplicate copy', action: () => { duplicateCurrentBlock(view); } },
+        ...quickInsertItems,
+      ]
+    : quickInsertItems).filter((item) => `${item.label} ${item.keywords}`.toLocaleLowerCase().includes(normalized));
+  quickInsertList.replaceChildren();
+  for (const [index, item] of items.entries()) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('role', 'option');
+    button.dataset.index = String(index);
+    button.innerHTML = `<i class="codicon codicon-${item.icon}" aria-hidden="true"></i><span></span>`;
+    button.querySelector('span')!.textContent = item.label;
+    button.addEventListener('click', () => {
+      closeQuickInsert();
+      item.action();
+      view.focus();
+    });
+    quickInsertList.append(button);
+  }
+  if (!items.length) {
+    const empty = document.createElement('span');
+    empty.className = 'markda-quick-insert-empty';
+    empty.textContent = t('noCommands');
+    quickInsertList.append(empty);
+  }
+}
+
+function openQuickInsert(x?: number, y?: number, contextual = false): void {
+  quickInsert.hidden = false;
+  quickInsert.dataset.contextual = String(contextual);
+  quickInsert.style.left = `${Math.max(8, Math.min(x ?? 24, window.innerWidth - 310))}px`;
+  quickInsert.style.top = `${Math.max(8, Math.min(y ?? 64, window.innerHeight - 390))}px`;
+  quickInsertFilter.value = '';
+  renderQuickInsertItems('', contextual);
+  quickInsertFilter.focus();
+}
+
+function closeQuickInsert(): void {
+  quickInsert.hidden = true;
+  quickInsertFilter.value = '';
+}
+
+quickInsertFilter.addEventListener('input', () => renderQuickInsertItems(
+  quickInsertFilter.value, quickInsert.dataset.contextual === 'true',
+));
+quickInsert.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeQuickInsert();
+    view.focus();
+    return;
+  }
+  const options = [...quickInsertList.querySelectorAll<HTMLButtonElement>('button')];
+  const active = document.activeElement;
+  const index = options.indexOf(active as HTMLButtonElement);
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    (options[index + 1] ?? options[0])?.focus();
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    (options[index - 1] ?? options.at(-1))?.focus();
+  }
+});
+document.addEventListener('pointerdown', (event) => {
+  if (!quickInsert.hidden && event.target instanceof Node && !quickInsert.contains(event.target)) closeQuickInsert();
+});
+
 function clampNumber(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, Number.isFinite(value) ? Math.round(value) : minimum));
+}
+
+function activateOnKeyboard(event: Event, action: () => void): void {
+  if (!(event instanceof KeyboardEvent)
+    || (event.key !== 'Enter' && event.key !== ' ')
+    || event.repeat) return;
+  event.preventDefault();
+  action();
 }
 
 async function receiveImageFiles(files: FileList | undefined, event: Event): Promise<void> {
@@ -992,11 +1297,16 @@ function updateDocumentDerivedState(): void {
   cachedDocumentText = source;
   cachedTable = undefined;
   const { headings, statistics: stat } = analyzeDocument(source);
+  cachedDocumentHeadings = headings;
+  cachedDocumentStatistics = stat;
   vscode.postMessage({ type: 'outline', headings });
   vscode.postMessage({ type: 'statistics', statistics: stat });
   const mode = view.state.field(modeField);
-  vscode.postMessage({ type: 'state', sourceMode: mode.sourceMode, focusMode: mode.focusMode, typewriterMode: mode.typewriterMode, cursor: view.state.selection.main.head });
+  if (performance.now() >= suppressStateUntil) {
+    vscode.postMessage({ type: 'state', sourceMode: mode.sourceMode, focusMode: mode.focusMode, typewriterMode: mode.typewriterMode, cursor: view.state.selection.main.head });
+  }
   updateTableToolbar(source);
+  updateDocumentStatus(stat);
 }
 
 function scheduleDerivedStateUpdate(): void {
@@ -1010,6 +1320,94 @@ function calculateStatistics(): DocumentStatistics {
   const selection = view.state.selection.main;
   return getStatistics(view.state.doc.toString(), view.state.sliceDoc(selection.from, selection.to));
 }
+
+function setSyncState(state: 'saved' | 'saving' | 'pending' | 'conflict'): void {
+  syncStatus.dataset.state = state;
+  syncStatus.textContent = t(state === 'saved' ? 'syncSaved'
+    : state === 'saving' ? 'syncSaving'
+      : state === 'pending' ? 'syncPending' : 'syncConflict');
+}
+
+function updateSelectionToolbar(): void {
+  if (!view.dom.isConnected) return;
+  const selection = view.state.selection.main;
+  if (selection.empty || view.state.field(modeField).sourceMode || !view.hasFocus) {
+    selectionToolbar.hidden = true;
+    return;
+  }
+  const start = view.coordsAtPos(selection.from);
+  const end = view.coordsAtPos(selection.to);
+  if (!start || !end) {
+    selectionToolbar.hidden = true;
+    return;
+  }
+  selectionToolbar.hidden = false;
+  selectionToolbar.style.left = `${Math.max(8, Math.min((start.left + end.right) / 2 - 100, window.innerWidth - 220))}px`;
+  selectionToolbar.style.top = `${Math.max(8, Math.min(start.top - 38, window.innerHeight - 44))}px`;
+}
+
+function updateDocumentStatus(
+  statistics = cachedDocumentStatistics,
+  headings = cachedDocumentHeadings,
+): void {
+  if (!view.dom.isConnected) return;
+  const mode = view.state.field(modeField);
+  const modeText = mode.sourceMode ? t('sourceShort') : t('liveShort');
+  if (documentModeStatus.textContent !== modeText) documentModeStatus.textContent = modeText;
+  if (!documentModeStatus.title) documentModeStatus.title = t('toggleSourceMode');
+  const statisticsText = `${t('wordsShort', statistics.words)} · ${t('charactersShort', statistics.characters)}`;
+  if (documentStatisticsStatus.textContent !== statisticsText) documentStatisticsStatus.textContent = statisticsText;
+  const cursor = view.state.selection.main.head;
+  const active = activeHeadingAt(headings, cursor);
+  const sectionText = active ? `H${active.level} ${active.text}` : '';
+  const sectionFrom = active ? String(active.from) : '';
+  if (documentSectionStatus.textContent !== sectionText) documentSectionStatus.textContent = sectionText;
+  if (documentSectionStatus.dataset.from !== sectionFrom) documentSectionStatus.dataset.from = sectionFrom;
+  if (documentSectionStatus.hidden === Boolean(active)) documentSectionStatus.hidden = !active;
+  const problemsText = currentDiagnostics.length ? `${t('diagnostics')}: ${currentDiagnostics.length}` : '';
+  if (documentProblemsStatus.textContent !== problemsText) documentProblemsStatus.textContent = problemsText;
+  if (documentProblemsStatus.hidden === Boolean(currentDiagnostics.length)) {
+    documentProblemsStatus.hidden = !currentDiagnostics.length;
+  }
+  const welcomeHidden = view.state.doc.length !== 0;
+  if (welcome.hidden !== welcomeHidden) welcome.hidden = welcomeHidden;
+  const line = view.state.doc.lineAt(cursor);
+  const level = line.text.match(/^#{1,6}(?=\s)/u)?.[0].length ?? 0;
+  if (paragraphStyle.value !== String(level)) paragraphStyle.value = String(level);
+}
+
+function activeHeadingAt(headings: readonly Heading[], position: number): Heading | undefined {
+  let low = 0;
+  let high = headings.length - 1;
+  let active: Heading | undefined;
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    const heading = headings[middle]!;
+    if (heading.from <= position) {
+      active = heading;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return active;
+}
+
+documentModeStatus.addEventListener('click', () => runCommand('toggleSourceMode'));
+documentSectionStatus.addEventListener('click', (event) => {
+  const from = Number((event.currentTarget as HTMLButtonElement).dataset.from);
+  if (!Number.isInteger(from)) return;
+  view.dispatch({ selection: EditorSelection.cursor(from), effects: EditorView.scrollIntoView(from, { y: 'center' }) });
+  view.focus();
+});
+documentProblemsStatus.addEventListener('click', () => {
+  const cursor = view.state.selection.main.head;
+  const diagnostic = currentDiagnostics.find((item) => cursor >= item.from && cursor <= item.to) ?? currentDiagnostics[0];
+  if (!diagnostic) return;
+  view.dispatch({ selection: EditorSelection.range(diagnostic.from, diagnostic.to), effects: EditorView.scrollIntoView(diagnostic.from, { y: 'center' }) });
+  vscode.postMessage({ type: 'requestCodeActions', from: diagnostic.from, to: diagnostic.to });
+});
+welcome.addEventListener('click', () => view.focus());
 
 function extractHeadings(text: string): Heading[] {
   return analyzeDocument(text).headings;
@@ -1080,6 +1478,9 @@ function moveCursorVertically(editor: EditorView, dir: 1 | -1, extend: boolean):
 }
 
 function createMarkdaKeymap() {
+  const whenMarkdaShortcutsHavePriority = (
+    run: (editor: EditorView) => boolean,
+  ) => (editor: EditorView): boolean => settings.enableDefaultKeybindings === true && run(editor);
   return [
     { key: 'Mod-f', run: openMarkdaSearchPanel },
     { key: 'Enter', run: (editor: EditorView) => insertLiveLineBreak(editor, false) },
@@ -1095,23 +1496,99 @@ function createMarkdaKeymap() {
     { key: 'ArrowDown', run: (editor: EditorView) => moveCursorVertically(editor, 1, false) },
     { key: 'Shift-ArrowUp', run: (editor: EditorView) => moveCursorVertically(editor, -1, true) },
     { key: 'Shift-ArrowDown', run: (editor: EditorView) => moveCursorVertically(editor, 1, true) },
+    { key: 'Alt-ArrowUp', run: whenMarkdaShortcutsHavePriority((editor) => moveCurrentBlock(editor, -1)) },
+    { key: 'Alt-ArrowDown', run: whenMarkdaShortcutsHavePriority((editor) => moveCurrentBlock(editor, 1)) },
+    { key: 'Mod-Shift-d', run: whenMarkdaShortcutsHavePriority(duplicateCurrentBlock) },
     { key: 'Tab', run: (editor: EditorView) => navigateTableCell(editor, false) },
     { key: 'Shift-Tab', run: (editor: EditorView) => navigateTableCell(editor, true) },
-    { key: 'Mod-b', run: (editor: EditorView) => wrapSelection(editor, '**', '**') },
-    { key: 'Mod-i', run: (editor: EditorView) => wrapSelection(editor, '*', '*') },
-    { key: 'Mod-k', run: (editor: EditorView) => wrapLink(editor) },
-    { key: 'Mod-Shift-`', run: (editor: EditorView) => wrapSelection(editor, '`', '`') },
-    { key: 'Mod-Shift-[', run: () => { toggleOrderedList(); return true; } },
-    { key: 'Mod-Shift-]', run: () => { toggleLinePrefix('- '); return true; } },
-    { key: 'Mod-Shift-q', run: () => { toggleBlockquote(); return true; } },
-    { key: 'Mod-Shift-k', run: (editor: EditorView) => wrapCodeBlock(editor) },
-    { key: 'Alt-Shift-5', run: (editor: EditorView) => wrapSelection(editor, '~~', '~~') },
+    { key: 'Mod-b', run: whenMarkdaShortcutsHavePriority((editor) => wrapSelection(editor, '**', '**')) },
+    { key: 'Mod-i', run: whenMarkdaShortcutsHavePriority((editor) => wrapSelection(editor, '*', '*')) },
+    { key: 'Mod-k', run: whenMarkdaShortcutsHavePriority(() => { void openLinkDialog(); return true; }) },
+    { key: '/', run: (editor: EditorView) => {
+      const selection = editor.state.selection.main;
+      if (!selection.empty || editor.state.field(modeField).sourceMode) return false;
+      const line = editor.state.doc.lineAt(selection.head);
+      if (editor.state.sliceDoc(line.from, selection.head).trim()) return false;
+      const coords = editor.coordsAtPos(selection.head);
+      openQuickInsert(coords?.left, coords?.bottom);
+      return true;
+    } },
+    { key: 'Mod-Shift-`', run: whenMarkdaShortcutsHavePriority((editor) => wrapSelection(editor, '`', '`')) },
+    { key: 'Mod-Shift-[', run: whenMarkdaShortcutsHavePriority(() => { toggleOrderedList(); return true; }) },
+    { key: 'Mod-Shift-]', run: whenMarkdaShortcutsHavePriority(() => { toggleLinePrefix('- '); return true; }) },
+    { key: 'Mod-Shift-q', run: whenMarkdaShortcutsHavePriority(() => { toggleBlockquote(); return true; }) },
+    { key: 'Mod-Shift-k', run: whenMarkdaShortcutsHavePriority((editor) => wrapCodeBlock(editor)) },
+    { key: 'Alt-Shift-5', run: whenMarkdaShortcutsHavePriority((editor) => wrapSelection(editor, '~~', '~~')) },
     ...Array.from({ length: 6 }, (_, index) => ({
       key: `Mod-${index + 1}`,
-      run: (editor: EditorView) => setHeading(editor, index + 1),
+      run: whenMarkdaShortcutsHavePriority((editor) => setHeading(editor, index + 1)),
     })),
-    { key: 'Mod-0', run: (editor: EditorView) => setHeading(editor, 0) },
+    { key: 'Mod-0', run: whenMarkdaShortcutsHavePriority((editor) => setHeading(editor, 0)) },
   ];
+}
+
+function currentBlockLines(editor: EditorView): { start: number; end: number } {
+  const doc = editor.state.doc;
+  const cursorLine = doc.lineAt(editor.state.selection.main.head).number;
+  let start = cursorLine;
+  let end = cursorLine;
+  while (start > 1 && doc.line(start - 1).text.trim()) start--;
+  while (end < doc.lines && doc.line(end + 1).text.trim()) end++;
+  return { start, end };
+}
+
+function duplicateCurrentBlock(editor: EditorView): boolean {
+  const { start, end } = currentBlockLines(editor);
+  const from = editor.state.doc.line(start).from;
+  const to = editor.state.doc.line(end).to;
+  const source = editor.state.sliceDoc(from, to);
+  const separator = editor.state.sliceDoc(to, Math.min(editor.state.doc.length, to + 2)).startsWith('\r\n') ? '\r\n' : '\n';
+  editor.dispatch({
+    changes: { from: to, insert: `${separator}${source}` },
+    selection: EditorSelection.range(to + separator.length, to + separator.length + source.length),
+  });
+  return true;
+}
+
+function moveCurrentBlock(editor: EditorView, direction: -1 | 1): boolean {
+  const doc = editor.state.doc;
+  const current = currentBlockLines(editor);
+  if ((direction < 0 && current.start <= 1) || (direction > 0 && current.end >= doc.lines)) return false;
+  if (direction < 0) {
+    let previousEnd = current.start - 1;
+    while (previousEnd > 1 && !doc.line(previousEnd).text.trim()) previousEnd--;
+    let previousStart = previousEnd;
+    while (previousStart > 1 && doc.line(previousStart - 1).text.trim()) previousStart--;
+    const from = doc.line(previousStart).from;
+    const previousTo = doc.line(previousEnd).to;
+    const currentFrom = doc.line(current.start).from;
+    const currentTo = doc.line(current.end).to;
+    const previousText = editor.state.sliceDoc(from, previousTo);
+    const between = editor.state.sliceDoc(previousTo, currentFrom);
+    const currentText = editor.state.sliceDoc(currentFrom, currentTo);
+    editor.dispatch({
+      changes: { from, to: currentTo, insert: `${currentText}${between}${previousText}` },
+      selection: EditorSelection.range(from, from + currentText.length),
+    });
+    return true;
+  }
+  let nextStart = current.end + 1;
+  while (nextStart < doc.lines && !doc.line(nextStart).text.trim()) nextStart++;
+  let nextEnd = nextStart;
+  while (nextEnd < doc.lines && doc.line(nextEnd + 1).text.trim()) nextEnd++;
+  const currentFrom = doc.line(current.start).from;
+  const currentTo = doc.line(current.end).to;
+  const nextFrom = doc.line(nextStart).from;
+  const nextTo = doc.line(nextEnd).to;
+  const currentText = editor.state.sliceDoc(currentFrom, currentTo);
+  const between = editor.state.sliceDoc(currentTo, nextFrom);
+  const nextText = editor.state.sliceDoc(nextFrom, nextTo);
+  const selectionFrom = currentFrom + nextText.length + between.length;
+  editor.dispatch({
+    changes: { from: currentFrom, to: nextTo, insert: `${nextText}${between}${currentText}` },
+    selection: EditorSelection.range(selectionFrom, selectionFrom + currentText.length),
+  });
+  return true;
 }
 
 function insertLiveLineBreak(editor: EditorView, shiftKey: boolean): boolean {
@@ -1139,6 +1616,13 @@ function insertLiveLineBreak(editor: EditorView, shiftKey: boolean): boolean {
 }
 
 function updateTableToolbar(source = cachedDocumentText): void {
+  const activeElement = document.activeElement;
+  const tableToolbar = document.querySelector<HTMLElement>('#table-toolbar');
+  if (activeElement && activeElement !== document.body
+    && !view.dom.contains(activeElement) && !tableToolbar?.contains(activeElement)) {
+    appRoot.classList.remove('table-active');
+    return;
+  }
   if (activeLiveTableCursor) {
     if (!source) source = view.state.doc.toString();
     const table = findMarkdownTable(source, activeLiveTableCursor.from,
@@ -1378,10 +1862,12 @@ function wirePreviewNavigation(): void {
     const heading = headings[index];
     if (!heading) return;
     element.tabIndex = 0;
-    element.title = 'Click to edit this section';
+    element.title = t('editSection');
     const focus = () => { view.dispatch({ selection: EditorSelection.cursor(heading.from), effects: EditorView.scrollIntoView(heading.from, { y: 'center' }) }); view.focus(); };
     element.addEventListener('click', focus);
-    element.addEventListener('keydown', (event) => { if (event.key === 'Enter') focus(); });
+    element.setAttribute('role', 'button');
+    element.setAttribute('aria-label', `${element.textContent ?? ''}. ${t('editHere')}`);
+    element.addEventListener('keydown', (event) => activateOnKeyboard(event, focus));
   });
 }
 
@@ -1698,9 +2184,9 @@ class TocWidget extends WidgetType {
   toDOM(): HTMLElement {
     const nav = document.createElement('nav');
     nav.className = 'markda-live-toc';
-    nav.setAttribute('aria-label', 'Table of contents');
+    nav.setAttribute('aria-label', t('tableOfContents'));
     const title = document.createElement('strong');
-    title.textContent = 'Table of contents';
+    title.textContent = t('tableOfContents');
     const list = document.createElement('ol');
     const headings = this.headings;
     const minimum = headings.length ? Math.min(...headings.map((heading) => heading.level)) : 1;
@@ -1723,7 +2209,7 @@ class TocWidget extends WidgetType {
     if (!headings.length) {
       const empty = document.createElement('span');
       empty.className = 'markda-toc-empty';
-      empty.textContent = 'Add headings to build this table of contents.';
+      empty.textContent = t('tocEmpty');
       nav.append(title, empty);
     } else {
       nav.append(title, list);
@@ -1763,10 +2249,10 @@ class FrontMatterWidget extends WidgetType {
     const header = document.createElement('div');
     header.className = 'markda-front-matter-header';
     const title = document.createElement('strong');
-    title.textContent = 'Front Matter';
+    title.textContent = t('frontMatter');
     const toggle = document.createElement('button');
     toggle.type = 'button';
-    toggle.textContent = 'Edit YAML';
+    toggle.textContent = t('editYaml');
     header.append(title, toggle);
     const fields = document.createElement('div');
     fields.className = 'markda-front-matter-fields';
@@ -1777,7 +2263,7 @@ class FrontMatterWidget extends WidgetType {
     sourceEditor.hidden = true;
     const loading = document.createElement('span');
     loading.className = 'markda-toc-empty';
-    loading.textContent = 'Loading YAML fields…';
+    loading.textContent = t('loadingYaml');
     fields.append(loading);
     void loadYaml().then((yamlApi) => {
       if (!container.isConnected) return;
@@ -1808,7 +2294,7 @@ class FrontMatterWidget extends WidgetType {
         } else {
           const value = document.createElement('code');
           value.textContent = String(pair.value).trim().replace(/\s+/gu, ' ');
-          value.title = 'Use Edit YAML for nested values';
+          value.title = t('nestedYaml');
           row.append(label, value);
         }
         fields.append(row);
@@ -1816,7 +2302,7 @@ class FrontMatterWidget extends WidgetType {
       if (!yaml.contents.items.length) {
         const empty = document.createElement('span');
         empty.className = 'markda-toc-empty';
-        empty.textContent = 'Use Edit YAML to add document metadata.';
+        empty.textContent = t('yamlEmpty');
         fields.append(empty);
       }
     }).catch((error: unknown) => {
@@ -1870,7 +2356,7 @@ class ThematicBreakWidget extends WidgetType {
   toDOM(): HTMLElement {
     const rule = document.createElement('hr');
     rule.className = 'markda-thematic-break';
-    rule.title = 'Horizontal rule';
+    rule.title = t('horizontalRule');
     rule.addEventListener('click', () => {
       livePreviewSelectionFocused = true;
       this.editor.dispatch({ selection: EditorSelection.cursor(this.from) });
@@ -1922,7 +2408,7 @@ class TrailingParagraphWidget extends WidgetType {
     target.tabIndex = 0;
     target.setAttribute('role', 'button');
     target.setAttribute('aria-label', t('addParagraph'));
-    target.title = 'Click to add a paragraph after this block';
+    target.title = t('addParagraph');
     const append = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
@@ -1977,7 +2463,7 @@ class InlineImageWidget extends WidgetType {
     container.tabIndex = 0;
     container.setAttribute('role', 'button');
     container.setAttribute('aria-label', t('imageEdit', this.alt || this.source));
-    container.title = 'Click to edit image Markdown';
+    container.title = t('imageEdit', this.alt || t('image'));
     if (/^https?:/iu.test(this.source) && settings.security.allowRemoteResources !== 'always') {
       container.classList.add('markda-inline-image-blocked');
       container.textContent = this.alt || t('remoteImage');
@@ -2020,7 +2506,7 @@ class FootnoteReferenceWidget extends WidgetType {
     reference.tabIndex = 0;
     reference.setAttribute('role', 'button');
     reference.setAttribute('aria-label', t('footnoteEdit', this.label));
-    reference.title = 'Click to edit footnote reference';
+    reference.title = t('footnoteEdit', this.label);
     reference.textContent = this.label;
     const edit = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
@@ -2047,7 +2533,7 @@ class InlineHtmlWidget extends WidgetType {
     container.tabIndex = 0;
     container.setAttribute('role', 'button');
     container.setAttribute('aria-label', t('inlineHtmlEdit'));
-    container.title = 'Click to edit HTML source';
+    container.title = t('inlineHtmlEdit');
     container.innerHTML = sanitizeHtmlFragment(this.source);
     removeUnsafeHtmlNodes(container);
     secureRenderedHtml(container);
@@ -2077,7 +2563,7 @@ class EntityWidget extends WidgetType {
     value.tabIndex = 0;
     value.setAttribute('role', 'button');
     value.setAttribute('aria-label', t('entityEdit', decoded));
-    value.title = 'Click to edit character entity';
+    value.title = t('entityEdit', value.textContent ?? '');
     value.textContent = decoded;
     const edit = () => {
       livePreviewSelectionFocused = true;
@@ -2085,7 +2571,7 @@ class EntityWidget extends WidgetType {
       this.editor.focus();
     };
     value.addEventListener('click', edit);
-    value.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') edit(); });
+    value.addEventListener('keydown', (event) => activateOnKeyboard(event, edit));
     return value;
   }
 
@@ -2173,7 +2659,7 @@ class ReferenceDefinitionWidget extends WidgetType {
     destinationInput.setAttribute('aria-label', t('referenceDestination'));
     const titleInput = document.createElement('input');
     titleInput.value = this.definition.title ?? '';
-    titleInput.placeholder = 'Optional title';
+    titleInput.placeholder = t('optionalTitle');
     titleInput.setAttribute('aria-label', t('referenceTitle'));
     const commit = () => commitReferenceDefinition(
       this.editor, this.from, labelInput.value, destinationInput.value, titleInput.value,
@@ -2270,11 +2756,18 @@ class HtmlBlockWidget extends WidgetType {
 class ImageWidget extends WidgetType {
   private disposeEditor: (() => void) | undefined;
 
-  constructor(private readonly editor: EditorView, private readonly from: number, private readonly alt: string, private readonly source: string) { super(); }
+  constructor(
+    private readonly editor: EditorView,
+    private readonly from: number,
+    private readonly alt: string,
+    private readonly source: string,
+    private readonly title = '',
+  ) { super(); }
   toDOM(): HTMLElement {
     const figure = document.createElement('figure');
     figure.className = 'markda-live-image';
-    figure.tabIndex = 0;
+    const configuredWidth = this.title.match(/^width=(\d{1,3})%$/u)?.[1];
+    if (configuredWidth) figure.style.width = `${Math.max(10, Math.min(100, Number(configuredWidth)))}%`;
     const image = document.createElement('img');
     image.alt = this.alt;
     if (/^https?:/iu.test(this.source) && settings.security.allowRemoteResources !== 'always') {
@@ -2290,13 +2783,17 @@ class ImageWidget extends WidgetType {
     const caption = document.createElement('figcaption');
     caption.textContent = this.alt || t('image');
     figure.append(caption);
+    const controls = document.createElement('div');
+    controls.className = 'markda-image-controls';
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.textContent = t('editHere');
+    controls.append(editButton);
     if (!/^(?:https?:|data:|vscode-webview:)/iu.test(this.source)) {
-      const controls = document.createElement('div');
-      controls.className = 'markda-image-controls';
       const actions: readonly ['move' | 'copy' | 'delete', string][] = [
-        ['move', 'Move / Rename'],
-        ['copy', 'Copy'],
-        ['delete', 'Delete'],
+        ['move', t('moveRename')],
+        ['copy', t('copyAction')],
+        ['delete', t('deleteAction')],
       ];
       for (const [action, label] of actions) {
         const button = document.createElement('button');
@@ -2305,21 +2802,33 @@ class ImageWidget extends WidgetType {
         button.addEventListener('click', () => vscode.postMessage({ type: 'manageImage', source: this.source, from: this.from, action }));
         controls.append(button);
       }
-      figure.append(controls);
     }
+    figure.append(controls);
     const editorPanel = document.createElement('div');
     editorPanel.className = 'markda-image-editor';
     editorPanel.hidden = true;
     const altInput = document.createElement('input');
     altInput.value = this.alt;
-    altInput.placeholder = 'Alt text';
+    altInput.placeholder = t('imageAlt');
     const sourceInput = document.createElement('input');
     sourceInput.value = this.source;
-    sourceInput.placeholder = 'Image path or URL';
-    const commit = () => commitImage(this.editor, this.from, altInput.value, sourceInput.value);
+    sourceInput.placeholder = t('imagePathOrUrl');
+    const widthLabel = document.createElement('label');
+    widthLabel.textContent = t('imageWidth');
+    const widthInput = document.createElement('input');
+    widthInput.type = 'range';
+    widthInput.min = '10';
+    widthInput.max = '100';
+    widthInput.value = configuredWidth ?? '100';
+    widthInput.setAttribute('aria-label', t('imageWidth'));
+    widthLabel.append(widthInput);
+    const commit = () => commitImage(this.editor, this.from, altInput.value, sourceInput.value,
+      Number(widthInput.value) < 100 ? `width=${widthInput.value}%` : '');
     altInput.addEventListener('change', commit);
     sourceInput.addEventListener('change', commit);
-    editorPanel.append(altInput, sourceInput);
+    widthInput.addEventListener('input', () => { figure.style.width = `${widthInput.value}%`; });
+    widthInput.addEventListener('change', commit);
+    editorPanel.append(altInput, sourceInput, widthLabel);
     editorPanel.addEventListener('focusin', () => { activeImageFrom = this.from; });
     editorPanel.addEventListener('focusout', () => queueMicrotask(() => {
       if (editorPanel.contains(document.activeElement)) return;
@@ -2330,25 +2839,28 @@ class ImageWidget extends WidgetType {
     const editorBinding = bindWidgetEditor(this.editor, editorPanel, image.isConnected ? image : caption, figure);
     this.disposeEditor = editorBinding.dispose;
     const edit = editorBinding.toggle;
-    figure.addEventListener('dblclick', edit);
-    figure.addEventListener('keydown', (event) => { if (event.key === 'Enter') edit(); });
+    editButton.addEventListener('click', edit);
+    figure.addEventListener('dblclick', (event) => {
+      if (!(event.target instanceof Element) || !event.target.closest('button,input')) edit();
+    });
     return figure;
   }
   ignoreEvent(): boolean { return true; }
   destroy(): void { this.disposeEditor?.(); }
   eq(other: ImageWidget): boolean {
     return other.from === this.from && (activeImageFrom === this.from
-      || (other.source === this.source && other.alt === this.alt));
+      || (other.source === this.source && other.alt === this.alt && other.title === this.title));
   }
 }
 
-function commitImage(editor: EditorView, from: number, alt: string, source: string): void {
+function commitImage(editor: EditorView, from: number, alt: string, source: string, title = ''): void {
   const line = editor.state.doc.lineAt(Math.min(from, editor.state.doc.length));
   if (!/^\s*!\[[^\]]*\]\([^)]+\)\s*$/u.test(line.text)) return;
   const indentation = line.text.match(/^\s*/u)?.[0] ?? '';
   const safeAlt = alt.replaceAll(']', '\\]');
   const safeSource = source.replaceAll(')', '\\)');
-  editor.dispatch({ changes: { from: line.from, to: line.to, insert: `${indentation}![${safeAlt}](${safeSource})` } });
+  const safeTitle = title.replaceAll('"', '\\"');
+  editor.dispatch({ changes: { from: line.from, to: line.to, insert: `${indentation}![${safeAlt}](${safeSource}${safeTitle ? ` "${safeTitle}"` : ''})` } });
 }
 
 class IndentedCodeWidget extends WidgetType {
@@ -2563,7 +3075,7 @@ class CodeBlockWidget extends WidgetType {
       rendered.textContent = this.source;
       rendered.tabIndex = 0;
       rendered.setAttribute('role', 'button');
-      rendered.setAttribute('aria-label', 'Edit math source');
+      rendered.setAttribute('aria-label', t('editMath'));
       const sourceEditor = createBlockSourceEditor(this.editor, this.source,
         (value) => commitCodeBlock(this.editor, this.from, value, undefined));
       sourceEditor.hidden = true;
@@ -2575,9 +3087,9 @@ class CodeBlockWidget extends WidgetType {
       const editorBinding = bindWidgetEditor(this.editor, sourceEditor, rendered, container);
       this.disposeEditor = editorBinding.dispose;
       const toggle = editorBinding.toggle;
-      rendered.title = 'Click to edit math source';
+      rendered.title = t('editMathClick');
       rendered.addEventListener('click', toggle);
-      rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') toggle(); });
+      rendered.addEventListener('keydown', (event) => activateOnKeyboard(event, toggle));
       container.append(rendered, sourceEditor);
       void renderKatexInto(rendered, this.source, true);
     } else if (this.language === 'mermaid' && settings.markdown.diagrams) {
@@ -2588,7 +3100,7 @@ class CodeBlockWidget extends WidgetType {
       rendered.dataset.markdaSource = this.source;
       rendered.tabIndex = 0;
       rendered.setAttribute('role', 'button');
-      rendered.setAttribute('aria-label', 'Edit Mermaid source');
+      rendered.setAttribute('aria-label', t('editMermaid'));
       const sourceEditor = createBlockSourceEditor(this.editor, this.source,
         (value) => commitCodeBlock(this.editor, this.from, value, undefined));
       sourceEditor.hidden = true;
@@ -2600,13 +3112,29 @@ class CodeBlockWidget extends WidgetType {
       const editorBinding = bindWidgetEditor(this.editor, sourceEditor, rendered, container);
       this.disposeEditor = editorBinding.dispose;
       const toggle = editorBinding.toggle;
-      rendered.title = 'Click to edit Mermaid source';
+      rendered.title = t('editMermaidClick');
       rendered.addEventListener('click', toggle);
-      rendered.addEventListener('keydown', (event) => { if (event.key === 'Enter') toggle(); });
+      rendered.addEventListener('keydown', (event) => activateOnKeyboard(event, toggle));
       container.append(rendered, sourceEditor);
       void renderLiveMermaid(rendered, this.source);
     } else {
+      container.classList.add('markda-fenced-code');
       const pre = document.createElement('pre');
+      const toolbar = document.createElement('div');
+      toolbar.className = 'markda-code-toolbar';
+      const language = document.createElement('input');
+      language.value = this.language;
+      language.placeholder = t('codeLanguage');
+      language.setAttribute('aria-label', t('codeLanguage'));
+      language.setAttribute('list', 'markda-code-languages');
+      language.addEventListener('change', () => commitCodeBlock(this.editor, this.from, undefined, language.value.trim()));
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.title = t('copyCode');
+      copy.setAttribute('aria-label', t('copyCode'));
+      copy.innerHTML = '<i class="codicon codicon-copy" aria-hidden="true"></i>';
+      copy.addEventListener('click', () => vscode.postMessage({ type: 'copyToClipboard', text: editablePlainText(code) }));
+      toolbar.append(language, copy);
       const code = document.createElement('code');
       code.className = this.language ? `language-${this.language}` : '';
       code.textContent = this.source;
@@ -2661,7 +3189,7 @@ class CodeBlockWidget extends WidgetType {
         if (activeCodeFrom === this.from) activeCodeFrom = undefined;
       });
       pre.append(code);
-      container.append(pre);
+      container.append(toolbar, pre);
     }
     return container;
   }
@@ -2779,7 +3307,7 @@ class TableWidget extends WidgetType {
         if (rowIndex === 0) {
           element.draggable = true;
           element.dataset.column = String(column);
-          element.title = 'Right-click to change alignment; drag to reorder';
+          element.title = t('tableInteractionHint');
           element.addEventListener('contextmenu', (event) => { event.preventDefault(); this.cycleAlignment(column); });
         }
         const commitGate = new CompositionCommitGate();
@@ -3005,7 +3533,7 @@ class MathWidget extends WidgetType {
     if (this.displayMode && this.editor && this.from !== undefined) {
       element.tabIndex = 0;
       element.setAttribute('role', 'button');
-      element.setAttribute('aria-label', 'Edit math source');
+      element.setAttribute('aria-label', t('editMath'));
       const sourceEditor = createBlockSourceEditor(this.editor, this.source,
         (value) => commitBlockMath(this.editor!, this.from!, value));
       sourceEditor.hidden = true;
@@ -3018,17 +3546,17 @@ class MathWidget extends WidgetType {
       });
       const editorBinding = bindWidgetEditor(this.editor, sourceEditor, element, wrapper);
       this.disposeEditor = editorBinding.dispose;
-      element.title = 'Click to edit math source';
+      element.title = t('editMathClick');
       element.addEventListener('click', editorBinding.toggle);
-      element.addEventListener('keydown', (event) => { if (event instanceof KeyboardEvent && event.key === 'Enter') editorBinding.toggle(); });
+      element.addEventListener('keydown', (event) => activateOnKeyboard(event, editorBinding.toggle));
       wrapper.append(element, sourceEditor);
       return wrapper;
     }
     if (this.editor && this.from !== undefined) {
-      element.title = 'Click to edit inline math source';
+      element.title = t('editInlineMathClick');
       element.tabIndex = 0;
       element.setAttribute('role', 'button');
-      element.setAttribute('aria-label', 'Edit inline math source');
+      element.setAttribute('aria-label', t('editInlineMath'));
       const edit = () => {
         const position = Math.min(this.from! + 1, this.editor!.state.doc.length);
         livePreviewSelectionFocused = true;
@@ -3036,7 +3564,7 @@ class MathWidget extends WidgetType {
         this.editor!.focus();
       };
       element.addEventListener('click', edit);
-      element.addEventListener('keydown', (event) => { if (event instanceof KeyboardEvent && event.key === 'Enter') edit(); });
+      element.addEventListener('keydown', (event) => activateOnKeyboard(event, edit));
     }
     return element;
   }
@@ -3333,7 +3861,17 @@ function beginLivePreviewPointer(event: MouseEvent, editor: EditorView): boolean
       ownerWindow.requestAnimationFrame(() => {
         if (generation !== livePreviewPointerGeneration || !editor.dom.isConnected) return;
         editor.dispatch({ effects: settleLivePreview.of(generation) });
-        ownerWindow.requestAnimationFrame(() => syncNativeSelection(editor));
+        ownerWindow.requestAnimationFrame(() => {
+          if (generation !== livePreviewPointerGeneration || !editor.dom.isConnected) return;
+          // Settling can reveal Markdown markers and change line geometry without
+          // changing the logical selection. CodeMirror's drawn selection layer
+          // only refreshes for selection/viewport updates, so explicitly set the
+          // unchanged selection after the new geometry has been measured. This
+          // removes stale rectangles that otherwise make a two-line drag appear
+          // to select both the old and the new line positions.
+          editor.dispatch({ selection: editor.state.selection });
+          syncNativeSelection(editor);
+        });
       });
     });
   };
@@ -3876,9 +4414,10 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
         processedUntil = end + 1;
         continue;
       }
-      const image = text.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/u);
+      const image = text.match(/^\s*!\[([^\]]*)\]\((<[^>]+>|(?:\\.|[^\s)])+)(?:\s+["']([^"']*)["'])?\)\s*$/u);
       if (image) {
-        decorations.push({ from: line.from, to: blockDecorationTo(editor.state, line.to), decoration: Decoration.replace({ widget: new ImageWidget(editor, line.from, image[1] ?? '', image[2] ?? ''), block: true }) });
+        const source = (image[2] ?? '').replace(/^<|>$/gu, '');
+        decorations.push({ from: line.from, to: blockDecorationTo(editor.state, line.to), decoration: Decoration.replace({ widget: new ImageWidget(editor, line.from, image[1] ?? '', source, image[3] ?? ''), block: true }) });
       }
       // GitHub Alert (Callout), with the older bold-label form retained for compatibility.
       const calloutMatch = text.match(/^>\s*(?:\[!(Note|Tip|Important|Warning|Caution)\]|\*\*(Note|Tip|Important|Warning|Caution)\*\*)\s*$/iu);
@@ -4488,12 +5027,12 @@ html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--markda-fg);
 .markda-meta{font-size:0!important;line-height:0!important;letter-spacing:0!important;color:transparent!important}.markda-meta.markda-meta-expanded{font-size:inherit!important;line-height:inherit!important;letter-spacing:inherit!important;color:var(--markda-muted)!important}
 .markda-list-bullet-source{font-size:0;color:var(--markda-muted)}.markda-list-bullet-source::after{content:'•';display:inline-block;min-width:.8em;font-size:var(--vscode-editor-font-size);font-weight:700;text-align:center}.markda-list-bullet-source.markda-meta-expanded{font-size:inherit;color:inherit}.markda-list-bullet-source.markda-meta-expanded::after{content:none}
 button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--markda-hover)}button.active{background:var(--markda-active)}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--markda-focus);outline-offset:2px}
-.markda-shell{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr)}.markda-toolbar{grid-area:1/1;min-height:36px;padding:4px 10px;display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);overflow-x:auto}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto}.toolbar-separator{height:18px;border-left:1px solid var(--markda-border);margin:0 5px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
-.table-toolbar{grid-area:2/1;align-self:start;z-index:300;display:none;width:100%;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
-.markda-workspace{grid-area:2/1;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
-.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:16px;color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:30px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:1.6}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:1.6}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
+.markda-shell{position:relative;height:100%;display:grid;grid-template-rows:minmax(0,1fr) 24px}.markda-toolbar{position:absolute;top:0;right:0;left:0;z-index:500;min-height:40px;padding:5px 10px;display:flex;align-items:center;gap:2px;overflow-x:auto;overflow-y:hidden;background:color-mix(in srgb,var(--markda-elevated) 92%,transparent);border:0;border-bottom:1px solid color-mix(in srgb,var(--markda-border) 78%,transparent);border-radius:0;box-shadow:none;backdrop-filter:blur(12px)}.markda-toolbar:not(.expanded)>:not(#toolbar-toggle){display:none}.markda-toolbar:not(.expanded){top:6px;right:8px;left:auto;min-height:32px;padding:2px;background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:8px;box-shadow:0 2px 8px color-mix(in srgb,var(--markda-widget-shadow) 55%,transparent)}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto;min-height:28px;border-radius:6px}.markda-toolbar button.active{color:var(--markda-accent);background:color-mix(in srgb,var(--markda-active) 72%,transparent)}.markda-style-picker select{height:28px;max-width:9em;padding:0 6px;color:var(--markda-fg);background:transparent;border:1px solid transparent;border-radius:6px}.markda-style-picker select:hover{background:var(--markda-hover)}.markda-style-picker select:focus-visible{outline:2px solid var(--markda-focus);outline-offset:-2px}.toolbar-separator{height:16px;border-left:1px solid color-mix(in srgb,var(--markda-border) 72%,transparent);margin:0 6px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
+.table-toolbar{grid-area:1/1;align-self:start;z-index:300;display:none;width:100%;min-height:42px;padding:7px 52px 7px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
+.markda-workspace{grid-area:1/1;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:48px 30px 30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
+.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:var(--markda-font-size,16px);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:48px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-line+.cm-line{margin-top:var(--markda-paragraph-spacing,0)}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
 .cm-editor .markda-block-selection{position:relative}.cm-editor .markda-block-selection::after{content:"";position:absolute;inset:0;z-index:20;pointer-events:none;border:2px solid var(--markda-selection);border-radius:4px;background:color-mix(in srgb,var(--markda-selection) 48%,transparent)}
-.cm-editor .cm-panels-top:has(.cm-search){position:absolute;top:0;right:14px;left:auto;z-index:400;color:var(--markda-fg);background:transparent;border:0}
+.cm-editor .cm-panels-top:has(.cm-search){position:absolute;top:0;right:14px;left:auto;z-index:600;color:var(--markda-fg);background:transparent;border:0}
 .cm-editor .cm-panel.cm-search{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) repeat(6,24px);grid-template-rows:24px 24px;gap:3px;width:min(454px,calc(100vw - 32px));padding:4px 28px;color:var(--markda-fg);background:var(--markda-find-widget);border:1px solid var(--markda-border);border-top:0;box-shadow:0 2px 8px var(--markda-widget-shadow);font:13px/1 var(--markda-font-body)}
 .cm-editor .cm-panel.cm-search.markda-replace-collapsed{grid-template-rows:24px}.cm-search.markda-replace-collapsed input[name=replace],.cm-search.markda-replace-collapsed button[name=replace],.cm-search.markda-replace-collapsed button[name=replaceAll]{display:none!important}
 .cm-search .cm-textfield{min-width:0;height:24px;margin:0!important;padding:2px 6px;color:var(--markda-fg);background:var(--markda-find-input);border:1px solid var(--markda-border);border-radius:0;font:inherit}.cm-search .cm-textfield:focus{outline:1px solid var(--markda-focus);outline-offset:-1px;border-color:var(--markda-focus)}
@@ -4513,22 +5052,29 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .markda-emoji{display:inline-block;min-width:1em;text-align:center}.markda-diagnostic{text-decoration-line:underline;text-decoration-style:wavy;text-underline-offset:3px}.markda-diagnostic-error{text-decoration-color:var(--markda-error)}.markda-diagnostic-warning{text-decoration-color:var(--markda-warning)}.markda-diagnostic-information{text-decoration-color:var(--markda-info)}.markda-diagnostic-hint{text-decoration-color:var(--markda-muted)}
 .markda-live-toc,.markda-front-matter{margin:12px 0;padding:14px 16px;border:1px solid var(--markda-border);border-radius:7px;background:var(--markda-surface)}.markda-live-toc ol{list-style:none;margin:8px 0 0;padding:0}.markda-live-toc li{margin-left:calc(var(--markda-toc-depth,0) * 18px)}.markda-live-toc button{min-height:24px;padding:2px 4px;color:var(--markda-link);text-align:left}.markda-toc-empty{display:block;margin-top:6px;color:var(--markda-muted);font-style:italic}
 .markda-front-matter-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.markda-front-matter-header button{min-height:24px;font-size:12px}.markda-front-matter-fields{display:grid;gap:6px}.markda-front-matter-fields label{display:grid;grid-template-columns:minmax(7em,.4fr) minmax(10em,1fr);gap:10px;align-items:center}.markda-front-matter-fields input{min-width:0;padding:5px 7px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}.markda-front-matter-fields code{overflow:hidden;color:var(--markda-muted);text-overflow:ellipsis;white-space:nowrap}.markda-front-matter-source{min-height:8em}.markda-front-matter-error{color:var(--markda-error)}
-.markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em;accent-color:var(--markda-accent)}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover{border-color:var(--markda-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{color:var(--markda-muted);text-align:center;font-size:.9em}
-.markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
-.markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-math-wrap{display:flow-root}.markda-block-source-editor{display:block;width:100%;min-height:0;overflow-y:hidden;resize:none;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
+.markda-task-checkbox{margin:0 6px 0 1px;vertical-align:baseline;width:1em;height:1em;accent-color:var(--markda-accent)}.markda-live-image{margin:12px 0;max-width:100%;width:max-content;overflow:auto;border:1px solid transparent;border-radius:6px;padding:6px}.markda-live-image:hover,.markda-live-image:focus-within{border-color:var(--markda-border)}.markda-live-image img{display:block;max-width:100%;max-height:70vh}.markda-live-image figcaption{color:var(--markda-muted);text-align:center;font-size:.9em}
+.markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px;opacity:0;transition:opacity .12s}.markda-live-image:hover .markda-image-controls,.markda-live-image:focus-within .markda-image-controls{opacity:1}.markda-image-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
+.markda-image-editor label{grid-column:1/-1;display:flex;align-items:center;gap:8px}.markda-image-editor label input{flex:1}.markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-math-wrap{display:flow-root}.markda-block-source-editor{display:block;width:100%;min-height:0;overflow-y:hidden;resize:none;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
 .markda-footnote-definition{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;margin:.45em 0;padding:6px 9px;color:var(--markda-muted);background:var(--markda-surface);border-radius:4px}.markda-footnote-definition-content{min-height:1.5em;white-space:pre-wrap;outline:none}.markda-reference-definition{display:grid;grid-template-columns:minmax(7em,.5fr) auto minmax(10em,1fr) minmax(8em,.7fr);gap:6px;align-items:center;margin:.45em 0;padding:6px 9px;background:var(--markda-surface);border-radius:4px}.markda-reference-definition input{min-width:0;padding:4px 6px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}
 .markda-html-block{margin:.6em 0;padding:8px;outline:none;border:1px solid transparent;border-radius:4px}.markda-html-block:focus-within{border-color:var(--markda-border)}.markda-html-block-content{outline:none}.markda-html-empty{color:var(--markda-muted);font-style:italic}
-.markda-live-code{margin:15px 0;max-width:100%;overflow:auto;font-family:var(--markda-font-mono);font-size:.9em}.markda-live-code pre{margin:0;padding:8px 4px 6px;border:1px solid var(--markda-border);border-radius:3px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-syntax-comment{color:var(--markda-syntax-comment)}.markda-syntax-constant{color:var(--markda-syntax-constant)}.markda-syntax-entity{color:var(--markda-syntax-entity)}.markda-syntax-keyword{color:var(--markda-syntax-keyword)}.markda-syntax-string{color:var(--markda-syntax-string)}.markda-syntax-variable{color:var(--markda-syntax-variable)}.markda-code-rendered{padding:10px}
+.markda-live-code{margin:15px 0;max-width:100%;overflow:auto;font-family:var(--markda-font-mono);font-size:.9em}.markda-live-code pre{margin:0;padding:8px 4px 6px;border:1px solid var(--markda-border);border-radius:4px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-syntax-comment{color:var(--markda-syntax-comment)}.markda-syntax-constant{color:var(--markda-syntax-constant)}.markda-syntax-entity{color:var(--markda-syntax-entity)}.markda-syntax-keyword{color:var(--markda-syntax-keyword)}.markda-syntax-string{color:var(--markda-syntax-string)}.markda-syntax-variable{color:var(--markda-syntax-variable)}.markda-code-rendered{padding:10px}
+.markda-fenced-code{overflow:hidden;border:1px solid var(--markda-border);border-radius:4px;background:var(--markda-surface)}.markda-fenced-code pre{overflow:auto;border:0;border-radius:0}.markda-code-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:4px;min-height:26px;padding:2px 3px;background:var(--markda-surface);border-bottom:1px solid var(--markda-border)}.markda-code-toolbar input{width:10em;min-width:0;padding:2px 5px;color:var(--markda-muted);background:transparent;border:0;font:inherit;text-align:left}.markda-code-toolbar input:focus-visible{outline:1px solid var(--markda-focus);outline-offset:-1px;border-radius:2px}.markda-code-toolbar button{display:grid;place-items:center;width:24px;min-height:22px;padding:1px;color:var(--markda-fg);border-radius:2px}.markda-code-toolbar button:hover{background:var(--markda-hover)}
 .markda-trailing-paragraph{min-height:1.7em;margin-top:2px;border-radius:3px;cursor:text}.markda-trailing-paragraph:hover,.markda-trailing-paragraph:focus{background:var(--markda-line-highlight);outline:none}.markda-trailing-paragraph:focus::before{content:"";display:inline-block;height:1.35em;border-left:2px solid var(--markda-cursor-color);box-shadow:none;vertical-align:middle}
 .markda-live-table-wrap{overflow:auto;margin:.8em 0;color:var(--markda-fg)}.markda-live-table-wrap table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap tbody tr:nth-child(2n){background:var(--markda-surface)}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:6px 13px;min-width:70px;resize:horizontal;overflow:auto;color:var(--markda-fg);background:transparent}.markda-live-table-wrap th{font-weight:700;background:var(--markda-surface)}.markda-live-table-wrap th:focus-visible,.markda-live-table-wrap td:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--markda-focus)}.markda-live-table-wrap code{padding:0 2px;color:var(--markda-fg);background:var(--markda-inline-code);border:1px solid var(--markda-border);border-radius:3px;font-family:var(--markda-font-mono);font-size:.9em}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
-.markda-callout{margin:12px 0;padding:12px 16px;border-radius:6px;border-left:4px solid;background:var(--markda-surface)}.markda-callout-title{font-weight:600;margin-bottom:4px}.markda-callout-content{color:var(--markda-fg)}.markda-callout-edit{margin-top:8px;font-size:11px;padding:2px 8px;opacity:0}.markda-callout:hover .markda-callout-edit{opacity:1}
+.markda-callout{margin:12px 0;padding:12px 16px;border-radius:6px;border-left:4px solid;background:var(--markda-surface)}.markda-callout-title{font-weight:600;margin-bottom:4px}.markda-callout-content{color:var(--markda-fg)}.markda-callout-edit{margin-top:8px;font-size:11px;padding:2px 8px;opacity:0}.markda-callout:hover .markda-callout-edit,.markda-callout-edit:focus-visible{opacity:1}
 .markda-callout-note{border-color:var(--markda-info);background:var(--markda-info-bg)}.markda-callout-note .markda-callout-title{color:var(--markda-info)}.markda-callout-tip{border-color:var(--markda-tip);background:var(--markda-tip-bg)}.markda-callout-tip .markda-callout-title{color:var(--markda-tip)}
 .markda-callout-important,.markda-callout-warning{border-color:var(--markda-warning);background:var(--markda-warning-bg)}.markda-callout-important .markda-callout-title,.markda-callout-warning .markda-callout-title{color:var(--markda-warning)}.markda-callout-caution{border-color:var(--markda-error);background:var(--markda-error-bg)}.markda-callout-caution .markda-callout-title{color:var(--markda-error)}
-dialog{color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:260px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:76px;padding:5px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
+dialog{color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:300px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:min(320px,55vw);padding:5px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}#table-dialog input{width:76px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
+.visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+.markda-status{grid-row:2;display:flex;align-items:center;gap:2px;min-width:0;padding:0 8px;color:var(--markda-muted);background:var(--markda-surface);border-top:1px solid var(--markda-border);font-size:12px}.markda-status button,.markda-status span{min-height:20px;padding:1px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.markda-status button{color:inherit}.markda-status button:hover{color:var(--markda-fg)}#document-section-status{max-width:32vw}#document-sync-status[data-state=conflict]{color:var(--markda-error)}#document-sync-status[data-state=pending],#document-sync-status[data-state=saving]{color:var(--markda-accent)}
+.markda-quick-insert{position:fixed;z-index:900;width:300px;max-height:360px;padding:6px;color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px #0007}.markda-quick-insert[hidden]{display:none}.markda-quick-insert input{width:100%;padding:7px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border);border-radius:4px}.markda-quick-insert [role=listbox]{max-height:305px;margin-top:5px;overflow:auto}.markda-quick-insert [role=option]{display:flex;width:100%;align-items:center;gap:8px;text-align:left}.markda-quick-insert [role=option]:focus{background:var(--markda-active);outline:1px solid var(--markda-focus)}.markda-quick-insert-empty{display:block;padding:10px;color:var(--markda-muted)}
+.markda-selection-toolbar{position:fixed;z-index:850;display:flex;padding:2px;color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:5px;box-shadow:0 4px 16px #0005}.markda-selection-toolbar[hidden]{display:none}.markda-selection-toolbar button{min-height:26px;padding:2px 7px}
+.markda-welcome{position:absolute;top:38%;left:50%;z-index:2;display:grid;gap:8px;width:min(480px,80vw);padding:24px;transform:translate(-50%,-50%);color:var(--markda-muted);text-align:center;pointer-events:none}.markda-welcome strong{color:var(--markda-fg);font-size:1.3em}.markda-welcome[hidden]{display:none}
 body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
 #preview{color:var(--markda-fg);background:var(--markda-bg)}#preview h1,#preview h2,#preview h3,#preview h4,#preview h5,#preview h6{position:relative;margin:1rem 0;color:var(--markda-fg);font-weight:700;line-height:1.4}#preview h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}#preview h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}#preview h3{font-size:1.5em;line-height:1.43}#preview h4{font-size:1.25em}#preview h5{font-size:1em}#preview h6{font-size:1em;color:var(--markda-muted)}#preview p,#preview blockquote,#preview ul,#preview ol,#preview dl,#preview table{margin:.8em 0}#preview ul,#preview ol{padding-left:30px}#preview li>ul,#preview li>ol{margin:0}#preview hr{box-sizing:content-box;height:2px;margin:16px 0;padding:0;overflow:hidden;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}#preview pre{overflow:auto;margin:15px 0;padding:8px 4px 6px;color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);border-radius:3px}#preview code{font-family:var(--markda-font-mono);font-size:.9em;color:var(--markda-fg)}#preview :not(pre)>code{padding:0 2px;background:var(--markda-inline-code);border:1px solid var(--markda-border);border-radius:3px}#preview pre code{padding:0;color:var(--markda-fg);background:transparent;border:0}#preview blockquote{padding:0 15px;color:var(--markda-muted);background:transparent;border-left:4px solid var(--markda-border)}#preview blockquote p{color:inherit}#preview table{border-collapse:collapse;width:100%;padding:0;color:var(--markda-fg);background:var(--markda-bg);word-break:initial}#preview tr:nth-child(2n),#preview thead{background:var(--markda-surface)}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 13px;color:var(--markda-fg);background:transparent}#preview th{font-weight:700}#preview input{accent-color:var(--markda-accent)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
 #preview .markda-toc{margin:1em 0;padding:12px 16px;border:1px solid var(--markda-border);border-radius:6px;background:var(--markda-surface)}#preview .markda-toc ul{list-style:none;margin:0;padding:0}#preview .markda-toc-level-1{margin-left:18px}#preview .markda-toc-level-2{margin-left:36px}#preview .markda-toc-level-3{margin-left:54px}#preview .markda-toc-level-4,#preview .markda-toc-level-5{margin-left:72px}
-@media(max-width:760px){.markda-toolbar button span:not(.math-icon){display:none}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}}
+@media(min-width:1100px){.markda-toolbar:not(.expanded)>:not(#toolbar-toggle){display:flex}.markda-toolbar:not(.expanded)>.markda-style-picker{display:block}.markda-toolbar:not(.expanded)>.toolbar-separator{display:block}.markda-toolbar:not(.expanded){top:0;right:0;left:0;min-height:40px;padding:5px 10px;background:color-mix(in srgb,var(--markda-elevated) 92%,transparent);border:0;border-bottom:1px solid color-mix(in srgb,var(--markda-border) 78%,transparent);border-radius:0;box-shadow:none}.markda-toolbar>#toolbar-toggle{display:none}}
+@media(max-width:760px){.markda-toolbar button span:not(.math-icon){display:none}.markda-style-picker{display:none!important}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}#document-section-status{display:none}}
   @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 `; }
 

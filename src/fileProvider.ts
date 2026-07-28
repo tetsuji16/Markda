@@ -13,12 +13,14 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
   private fileItems = new Map<string, FileItem>();
   private filter = '';
   private recent: vscode.Uri[];
+  private pinned: vscode.Uri[];
   private current = '';
   private hasFetched = false;
   private refreshPromise: Promise<void> | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.recent = context.globalState.get<string[]>('markda.recentFiles', []).map((value) => vscode.Uri.parse(value));
+    this.pinned = context.globalState.get<string[]>('markda.pinnedFiles', []).map((value) => vscode.Uri.parse(value));
   }
 
   async refresh(): Promise<void> {
@@ -42,6 +44,8 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
   deleteFiles(uris: readonly vscode.Uri[]): void {
     if (!this.hasFetched) return;
     this.files = this.files.filter((file) => !uris.some((uri) => isSameOrDescendant(uri.fsPath, file.fsPath)));
+    this.pinned = this.pinned.filter((file) => !uris.some((uri) => isSameOrDescendant(uri.fsPath, file.fsPath)));
+    void this.context.globalState.update('markda.pinnedFiles', this.pinned.map((item) => item.toString()));
     this.rebuild();
   }
 
@@ -59,6 +63,11 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
       if (isMarkdownUri(replacement)) next.set(replacement.toString(), replacement);
     }
     this.files = sortUris(next.values());
+    this.pinned = this.pinned.map((uri) => {
+      const rename = files.find((file) => isSameOrDescendant(file.oldUri.fsPath, uri.fsPath));
+      return rename ? vscode.Uri.file(path.join(rename.newUri.fsPath, path.relative(rename.oldUri.fsPath, uri.fsPath))) : uri;
+    });
+    void this.context.globalState.update('markda.pinnedFiles', this.pinned.map((item) => item.toString()));
     this.rebuild();
   }
 
@@ -113,12 +122,29 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
     this.rebuildRecent();
   }
 
+  togglePin(uri: vscode.Uri): void {
+    const key = uri.toString();
+    this.pinned = this.pinned.some((item) => item.toString() === key)
+      ? this.pinned.filter((item) => item.toString() !== key)
+      : [uri, ...this.pinned].slice(0, 30);
+    void this.context.globalState.update('markda.pinnedFiles', this.pinned.map((item) => item.toString()));
+    this.rebuildRecent();
+  }
+
   private rebuildRecent(): void {
+    const pinned = new FolderItem(vscode.l10n.t('Pinned'), '');
+    pinned.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
+    pinned.iconPath = new vscode.ThemeIcon('pinned');
+    pinned.children.push(...this.pinned.filter((uri) => !this.filter || uri.fsPath.toLowerCase().includes(this.filter)).map((uri) => new FileItem(uri, vscode.l10n.t('Pinned'), uri.toString() === this.current, true)));
     const recent = new FolderItem(vscode.l10n.t('Recent'), '');
     recent.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
     recent.iconPath = new vscode.ThemeIcon('history');
     recent.children.push(...this.recent.filter((uri) => !this.filter || uri.fsPath.toLowerCase().includes(this.filter)).map((uri) => new FileItem(uri, vscode.l10n.t('Recent'), uri.toString() === this.current)));
-    this.roots = recent.children.length ? [recent, ...this.contentRoots] : this.contentRoots;
+    this.roots = [
+      ...(pinned.children.length ? [pinned] : []),
+      ...(recent.children.length ? [recent] : []),
+      ...this.contentRoots,
+    ];
     this.changeEmitter.fire(undefined);
   }
 
@@ -147,12 +173,12 @@ class FolderItem extends vscode.TreeItem {
 
 class FileItem extends vscode.TreeItem {
   private readonly defaultDescription: string;
-  constructor(readonly uri: vscode.Uri, relative: string, active = false) {
+  constructor(readonly uri: vscode.Uri, relative: string, active = false, pinned = false) {
     super(path.basename(uri.fsPath), vscode.TreeItemCollapsibleState.None);
     this.resourceUri = uri;
     this.defaultDescription = path.dirname(relative) === '.' ? '' : path.dirname(relative);
     this.command = { command: 'markda.open', title: vscode.l10n.t('Open with markda'), arguments: [uri] };
-    this.contextValue = 'markdaFile';
+    this.contextValue = pinned ? 'markdaFilePinned' : 'markdaFile';
     this.accessibilityInformation = { label: `${path.basename(uri.fsPath)}, ${relative}` };
     this.setActive(active);
   }

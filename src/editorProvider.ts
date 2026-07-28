@@ -7,6 +7,7 @@ import { getStatistics } from './statistics.js';
 import { findMinimalChange } from './textChange.js';
 import { OutlineProvider } from './outlineProvider.js';
 import { isRtlLocale } from './localization.js';
+import { isMarkdownDocumentPath, parseDocumentLink } from './documentLink.js';
 
 interface EditorView {
   panel: vscode.WebviewPanel;
@@ -144,6 +145,9 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       case 'manageImage':
         await this.manageImage(view, message.source, message.from, message.action);
         return;
+      case 'requestCodeActions':
+        await this.showCodeActions(view, message.from, message.to);
+        return;
       case 'copyToClipboard':
         await vscode.env.clipboard.writeText(message.text);
         return;
@@ -154,6 +158,13 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
         this.themeMode = message.mode;
         this.broadcastSettings();
         await vscode.workspace.getConfiguration('markda').update('editor.themeMode', message.mode, vscode.ConfigurationTarget.Global);
+        return;
+      case 'updateDefaultKeybindings':
+        await vscode.workspace.getConfiguration('markda').update(
+          'editor.enableDefaultKeybindings',
+          message.enabled,
+          vscode.ConfigurationTarget.Global,
+        );
         return;
       case 'state':
         await vscode.commands.executeCommand('setContext', 'markda.sourceMode', message.sourceMode);
@@ -191,7 +202,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const change = findMinimalChange(expectedText, text);
     const edit = new vscode.WorkspaceEdit();
     edit.replace(view.document.uri, new vscode.Range(view.document.positionAt(change.from), view.document.positionAt(change.to)), change.insert);
-    await vscode.workspace.applyEdit(edit);
+    if (!await vscode.workspace.applyEdit(edit)) this.resync(view);
   }
 
   private async saveDocument(view: EditorView, uri: string, expectedText: string, text: string): Promise<void> {
@@ -365,39 +376,70 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
   }
 
   private async openLink(documentUri: vscode.Uri, href: string): Promise<void> {
-    if (/^https?:/iu.test(href)) {
+    const link = parseDocumentLink(href);
+    if (link.kind === 'unsupported') {
+      void vscode.window.showWarningMessage(vscode.l10n.t('markda: This link type cannot be opened safely.'));
+      return;
+    }
+    if (link.kind === 'external') {
       const policy = vscode.workspace.getConfiguration('markda', documentUri).get<string>('security.allowRemoteResources', 'prompt');
       if (policy === 'never') return;
       if (policy === 'prompt') {
         const open = vscode.l10n.t('Open');
-        const choice = await vscode.window.showWarningMessage(vscode.l10n.t('Open external link?\n{0}', href), { modal: true }, open);
+        const choice = await vscode.window.showWarningMessage(vscode.l10n.t('Open external link?\n{0}', link.href), { modal: true }, open);
         if (choice !== open) return;
       }
-      await vscode.env.openExternal(vscode.Uri.parse(href));
+      await vscode.env.openExternal(vscode.Uri.parse(link.href));
       return;
     }
-    const [pathPart = '', fragment] = href.split('#', 2);
-    if (!pathPart && fragment) {
+    if (link.kind === 'anchor') {
       const current = [...this.views].find((view) => view.document.uri.toString() === documentUri.toString());
-      if (current) this.post(current, { type: 'command', command: 'focusAnchor', payload: { fragment } });
+      if (current) this.post(current, { type: 'command', command: 'focusAnchor', payload: { fragment: link.fragment } });
       return;
     }
-    const target = vscode.Uri.joinPath(documentUri, '..', pathPart);
-    if (target.scheme !== 'file') {
+    if (documentUri.scheme !== 'file') {
       void vscode.window.showWarningMessage(vscode.l10n.t('markda: Only local file links can be opened.'));
       return;
     }
+    const target = vscode.Uri.file(path.resolve(path.dirname(documentUri.fsPath), link.path));
     const workspace = vscode.workspace.getWorkspaceFolder(documentUri);
     const allowedRoot = workspace?.uri.fsPath ?? path.dirname(documentUri.fsPath);
     if (!isInside(allowedRoot, target.fsPath)) {
       void vscode.window.showWarningMessage(vscode.l10n.t('markda: Links outside the workspace cannot be opened.'));
       return;
     }
-    await vscode.commands.executeCommand('vscode.openWith', target, MarkdaEditorProvider.viewType);
-    if (fragment) {
-      const opened = [...this.views].find((view) => view.document.uri.fsPath === target.fsPath);
-      if (opened) this.post(opened, { type: 'command', command: 'focusAnchor', payload: { fragment } });
+    if (!isMarkdownDocumentPath(target.fsPath)) {
+      await vscode.commands.executeCommand('vscode.open', target);
+      return;
     }
+    await vscode.commands.executeCommand('vscode.openWith', target, MarkdaEditorProvider.viewType);
+    if (link.fragment) {
+      const opened = [...this.views].find((view) => view.document.uri.fsPath === target.fsPath);
+      if (opened) this.post(opened, { type: 'command', command: 'focusAnchor', payload: { fragment: link.fragment } });
+    }
+  }
+
+  private async showCodeActions(view: EditorView, from: number, to: number): Promise<void> {
+    const range = new vscode.Range(view.document.positionAt(from), view.document.positionAt(to));
+    const actions = await vscode.commands.executeCommand<(vscode.CodeAction | vscode.Command)[]>(
+      'vscode.executeCodeActionProvider', view.document.uri, range,
+    ) ?? [];
+    if (!actions.length) {
+      void vscode.window.showInformationMessage(vscode.l10n.t('markda: No fixes are available for this problem.'));
+      return;
+    }
+    const picked = await vscode.window.showQuickPick<(vscode.QuickPickItem & { action: vscode.CodeAction | vscode.Command })>(actions.map((action) => ({
+      label: action.title,
+      ...('kind' in action && action.kind ? { description: action.kind.value } : {}),
+      action,
+    })), { placeHolder: vscode.l10n.t('Choose a fix') });
+    if (!picked) return;
+    const action = picked.action;
+    if ('edit' in action && action.edit) await vscode.workspace.applyEdit(action.edit);
+    const command: vscode.Command | undefined = typeof action.command === 'string'
+      ? action as vscode.Command
+      : (action as vscode.CodeAction).command;
+    if (command) await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
   }
 
   private postDiagnostics(view: EditorView): void {

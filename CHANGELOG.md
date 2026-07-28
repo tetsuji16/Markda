@@ -4,6 +4,26 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.20 - 2026-07-28
+
+- Disabled contributed Markda keybindings by default to avoid overriding VS
+  Code shortcuts. They can be restored with the
+  `markda.editor.enableDefaultKeybindings` setting, switched directly from the
+  editor toolbar, or assigned individually.
+- Added responsive document formatting controls, an H1–H6 style picker, a
+  selection toolbar, link editor, slash insertion, and contextual block menu.
+- Added visible synchronization state, in-editor statistics/current-section
+  status, diagnostic quick fixes, and empty-document onboarding.
+- Added file pin/rename/trash/reveal actions plus outline rename, level, and
+  section-movement controls.
+- Added image resizing and asset auditing, code language/copy controls, and
+  block move/duplicate shortcuts.
+- Added PNG export, PDF paper and margin settings, theme selection, typography
+  controls, and writing presets.
+- Removed full-document statistics and heading scans from cursor movement and
+  cached status-bar elements and derived document state for faster editing in
+  large documents.
+
 ## 0.1.19 - 2026-07-27
 
 - Unified source and live-code syntax colors behind the same light/dark CSS palette so every programming-code surface follows theme changes and custom themes consistently.

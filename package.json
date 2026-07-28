@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "%extension.description%",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "publisher": "tetsuji16",
   "license": "MIT",
   "l10n": "./l10n",
@@ -333,6 +333,71 @@
         "category": "markda"
       },
       {
+        "command": "markda.exportImage",
+        "title": "%command.exportImage%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.pinFile",
+        "title": "%command.pinFile%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.auditImages",
+        "title": "%command.auditImages%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.renameFile",
+        "title": "%command.renameFile%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.deleteFile",
+        "title": "%command.deleteFile%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.revealFile",
+        "title": "%command.revealFile%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.renameHeading",
+        "title": "%command.renameHeading%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.promoteHeading",
+        "title": "%command.promoteHeading%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.demoteHeading",
+        "title": "%command.demoteHeading%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.moveHeadingUp",
+        "title": "%command.moveHeadingUp%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.moveHeadingDown",
+        "title": "%command.moveHeadingDown%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.chooseTheme",
+        "title": "%command.chooseTheme%",
+        "category": "markda"
+      },
+      {
+        "command": "markda.applyPreset",
+        "title": "%command.applyPreset%",
+        "category": "markda"
+      },
+      {
         "command": "markda.openThemeFolder",
         "title": "%command.themeFolder%",
         "category": "markda"
@@ -393,6 +458,53 @@
           "group": "navigation@4"
         }
       ],
+      "view/item/context": [
+        {
+          "command": "markda.pinFile",
+          "when": "view == markda.files && viewItem =~ /markdaFile/",
+          "group": "inline@1"
+        },
+        {
+          "command": "markda.renameFile",
+          "when": "view == markda.files && viewItem =~ /markdaFile/",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "markda.deleteFile",
+          "when": "view == markda.files && viewItem =~ /markdaFile/",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "markda.revealFile",
+          "when": "view == markda.files && viewItem =~ /markdaFile/",
+          "group": "3_navigation@1"
+        },
+        {
+          "command": "markda.renameHeading",
+          "when": "view == markda.outline && viewItem =~ /markdaHeading/",
+          "group": "1_edit@1"
+        },
+        {
+          "command": "markda.promoteHeading",
+          "when": "view == markda.outline && viewItem =~ /markdaHeading/",
+          "group": "1_edit@2"
+        },
+        {
+          "command": "markda.demoteHeading",
+          "when": "view == markda.outline && viewItem =~ /markdaHeading/",
+          "group": "1_edit@3"
+        },
+        {
+          "command": "markda.moveHeadingUp",
+          "when": "view == markda.outline && viewItem =~ /markdaHeading/",
+          "group": "2_move@1"
+        },
+        {
+          "command": "markda.moveHeadingDown",
+          "when": "view == markda.outline && viewItem =~ /markdaHeading/",
+          "group": "2_move@2"
+        }
+      ],
       "explorer/context": [
         {
           "command": "markda.open",
@@ -406,100 +518,106 @@
         "command": "markda.toggleSourceMode",
         "key": "ctrl+/",
         "mac": "cmd+/",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleFocusMode",
         "key": "f8",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleTypewriterMode",
         "key": "f9",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.insertTable",
         "key": "ctrl+t",
         "mac": "cmd+alt+t",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.insertMathBlock",
         "key": "ctrl+shift+m",
         "mac": "cmd+alt+b",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.copyAsMarkdown",
         "key": "ctrl+shift+c",
         "mac": "cmd+shift+c",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.pastePlainText",
         "key": "ctrl+shift+v",
         "mac": "cmd+shift+v",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleBold",
         "key": "ctrl+b",
         "mac": "cmd+b",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleItalic",
         "key": "ctrl+i",
         "mac": "cmd+i",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.insertLink",
         "key": "ctrl+k",
         "mac": "cmd+k",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleOrderedList",
         "key": "ctrl+shift+[",
         "mac": "cmd+alt+o",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleBulletList",
         "key": "ctrl+shift+]",
         "mac": "cmd+alt+u",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleBlockquote",
         "key": "ctrl+shift+q",
         "mac": "cmd+alt+q",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.insertCodeBlock",
         "key": "ctrl+shift+k",
         "mac": "cmd+alt+c",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.toggleStrikethrough",
         "key": "alt+shift+5",
         "mac": "ctrl+shift+`",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       },
       {
         "command": "markda.clearFormatting",
         "key": "ctrl+\\",
         "mac": "cmd+\\",
-        "when": "activeCustomEditorId == markda.editor"
+        "when": "activeCustomEditorId == markda.editor && config.markda.editor.enableDefaultKeybindings"
       }
     ],
     "configuration": {
       "title": "markda",
       "properties": {
+        "markda.editor.enableDefaultKeybindings": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "Enable Markda's contributed keyboard shortcuts while the Markda editor is active. Disabled by default so VS Code keybindings take precedence."
+        },
         "markda.editor.autoPairMarkdown": {
           "type": "boolean",
           "default": true,
@@ -550,6 +668,36 @@
           "maximum": 5000,
           "scope": "resource",
           "description": "%config.tableCells%"
+        },
+        "markda.editor.fontFamily": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Document font family. Leave empty to use the selected theme."
+        },
+        "markda.editor.fontSize": {
+          "type": "number",
+          "default": 16,
+          "minimum": 10,
+          "maximum": 48,
+          "scope": "resource",
+          "description": "Document font size in pixels."
+        },
+        "markda.editor.lineHeight": {
+          "type": "number",
+          "default": 1.6,
+          "minimum": 1,
+          "maximum": 3,
+          "scope": "resource",
+          "description": "Document line height."
+        },
+        "markda.editor.paragraphSpacing": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 3,
+          "scope": "resource",
+          "description": "Additional spacing between Markdown source lines, in em."
         },
         "markda.markdown.math": {
           "type": "boolean",
@@ -615,6 +763,42 @@
           "default": "",
           "scope": "machine",
           "description": "Path to Microsoft Edge, Google Chrome, or Chromium for PDF export. Markda detects common installation locations automatically."
+        },
+        "markda.export.pdfPaperSize": {
+          "type": "string",
+          "enum": [
+            "A4",
+            "A5",
+            "Letter",
+            "Legal"
+          ],
+          "default": "A4",
+          "scope": "resource",
+          "description": "Paper size for PDF export."
+        },
+        "markda.export.pdfMarginMm": {
+          "type": "number",
+          "default": 15,
+          "minimum": 0,
+          "maximum": 80,
+          "scope": "resource",
+          "description": "Page margin in millimeters for PDF export."
+        },
+        "markda.export.imageWidth": {
+          "type": "integer",
+          "default": 900,
+          "minimum": 480,
+          "maximum": 2400,
+          "scope": "resource",
+          "description": "Width in pixels for PNG image export."
+        },
+        "markda.export.imageFontSize": {
+          "type": "integer",
+          "default": 18,
+          "minimum": 12,
+          "maximum": 48,
+          "scope": "resource",
+          "description": "Font size in pixels for PNG image export."
         },
         "markda.export.targets": {
           "type": "array",
@@ -696,7 +880,7 @@
     "@vitest/browser": "^3.2.7",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.5",
-    "happy-dom": "^18.0.1",
+    "happy-dom": "^20.11.1",
     "playwright": "^1.61.1",
     "typescript": "^5.8.3",
     "vitest": "^3.2.3"

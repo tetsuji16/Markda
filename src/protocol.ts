@@ -9,7 +9,12 @@ export interface EditorSettings {
   typewriterKeepCentered: boolean;
   previewUpdateDelay: number;
   liveTableMaxCells: number;
+  fontFamily?: string;
+  fontSize?: number;
+  lineHeight?: number;
+  paragraphSpacing?: number;
   themeMode: 'auto' | 'light' | 'dark';
+  enableDefaultKeybindings?: boolean;
   markdown: {
     math: boolean;
     diagrams: boolean;
@@ -97,8 +102,10 @@ export type EditorToHostMessage =
   | { type: 'requestImage'; selection: SelectionAnchor }
   | { type: 'saveImages'; selection: SelectionAnchor; images: readonly { name: string; dataUrl: string }[] }
   | { type: 'manageImage'; source: string; from: number; action: 'move' | 'copy' | 'delete' }
+  | { type: 'requestCodeActions'; from: number; to: number }
   | { type: 'copyToClipboard'; text: string }
-  | { type: 'updateThemeMode'; mode: 'auto' | 'light' | 'dark' };
+  | { type: 'updateThemeMode'; mode: 'auto' | 'light' | 'dark' }
+  | { type: 'updateDefaultKeybindings'; enabled: boolean };
 
 export interface TextChange {
   from: number;
@@ -173,11 +180,19 @@ export function parseEditorToHostMessage(value: unknown): EditorToHostMessage | 
       if (typeof value.source !== 'string' || value.source.length < 1 || value.source.length > 8192 || !isNonNegativeInteger(value.from)
         || !['move', 'copy', 'delete'].includes(String(value.action))) return undefined;
       return { type: 'manageImage', source: value.source, from: value.from, action: value.action as 'move' | 'copy' | 'delete' };
+    case 'requestCodeActions':
+      return isNonNegativeInteger(value.from) && isNonNegativeInteger(value.to) && value.to >= value.from
+        ? { type: 'requestCodeActions', from: value.from, to: value.to }
+        : undefined;
     case 'copyToClipboard':
       return typeof value.text === 'string' ? { type: 'copyToClipboard', text: value.text } : undefined;
     case 'updateThemeMode':
       return value.mode === 'auto' || value.mode === 'light' || value.mode === 'dark'
         ? { type: 'updateThemeMode', mode: value.mode }
+        : undefined;
+    case 'updateDefaultKeybindings':
+      return typeof value.enabled === 'boolean'
+        ? { type: 'updateDefaultKeybindings', enabled: value.enabled }
         : undefined;
     default:
       return undefined;

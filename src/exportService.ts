@@ -60,12 +60,16 @@ export class ExportService {
     const markdown = document.getText();
     const renderer = this.rendererFor(document);
     const body = renderer.render(markdown);
+    const exportConfig = vscode.workspace.getConfiguration('markda', document.uri);
+    const paper = exportConfig.get<string>('export.pdfPaperSize', 'A4');
+    const safePaper = ['A4', 'A5', 'Letter', 'Legal'].includes(paper) ? paper : 'A4';
+    const margin = Math.max(0, Math.min(80, exportConfig.get<number>('export.pdfMarginMm', 15)));
     const baseHref = pathToFileURL(`${path.dirname(document.uri.fsPath)}${path.sep}`).href;
     const html = createHtmlDocument(
       extractTitle(markdown, path.basename(document.fileName)),
       body,
       vscode.env.language,
-      await this.loadKatexCss(),
+      `${await this.loadKatexCss()}\n@page{size:${safePaper};margin:${margin}mm}`,
       baseHref,
     );
     const temporaryFolder = await mkdtemp(path.join(os.tmpdir(), 'markda-pdf-'));
@@ -86,6 +90,50 @@ export class ExportService {
       } catch {
         throw new Error('The browser completed without creating the PDF file.');
       }
+      void vscode.window.showInformationMessage(vscode.l10n.t('markda: Exported {0}', path.basename(target.fsPath)));
+    } finally {
+      await rm(temporaryFolder, { recursive: true, force: true });
+    }
+  }
+
+  async exportImage(document: vscode.TextDocument, destination?: vscode.Uri): Promise<void> {
+    const target = destination ?? await vscode.window.showSaveDialog({
+      defaultUri: document.uri.with({ path: document.uri.path.replace(/\.[^/.]+$/u, '') + '.png' }),
+      filters: { PNG: ['png'] },
+      saveLabel: vscode.l10n.t('Export Image'),
+    });
+    if (!target) return;
+    const browser = await this.findPdfBrowser(document.uri);
+    if (!browser) {
+      void vscode.window.showErrorMessage(vscode.l10n.t('markda: Image export requires Microsoft Edge, Google Chrome, or Chromium.'));
+      return;
+    }
+    const config = vscode.workspace.getConfiguration('markda', document.uri);
+    const width = Math.max(480, Math.min(2400, config.get<number>('export.imageWidth', 900)));
+    const fontSize = Math.max(12, Math.min(48, config.get<number>('export.imageFontSize', 18)));
+    const markdown = document.getText();
+    const body = this.rendererFor(document).render(markdown);
+    const baseHref = pathToFileURL(`${path.dirname(document.uri.fsPath)}${path.sep}`).href;
+    const estimatedHeight = Math.max(720, Math.min(16_000,
+      Math.ceil((markdown.split(/\r\n|\r|\n/u).length * fontSize * 1.7) + 180)));
+    const html = createHtmlDocument(
+      extractTitle(markdown, path.basename(document.fileName)),
+      body,
+      vscode.env.language,
+      `${await this.loadKatexCss()}\nbody{font-size:${fontSize}px}.markda-export{max-width:${width - 80}px;padding:40px}`,
+      baseHref,
+    );
+    const temporaryFolder = await mkdtemp(path.join(os.tmpdir(), 'markda-image-'));
+    const temporaryHtml = path.join(temporaryFolder, 'document.html');
+    try {
+      await vscode.workspace.fs.writeFile(vscode.Uri.file(temporaryHtml), Buffer.from(html, 'utf8'));
+      await runProcess(browser, [
+        '--headless=new', '--disable-gpu', '--hide-scrollbars', '--allow-file-access-from-files',
+        `--window-size=${width},${estimatedHeight}`,
+        `--screenshot=${target.fsPath}`,
+        pathToFileURL(temporaryHtml).href,
+      ], path.dirname(document.uri.fsPath));
+      await vscode.workspace.fs.stat(target);
       void vscode.window.showInformationMessage(vscode.l10n.t('markda: Exported {0}', path.basename(target.fsPath)));
     } finally {
       await rm(temporaryFolder, { recursive: true, force: true });

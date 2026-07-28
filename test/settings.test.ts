@@ -41,4 +41,13 @@ describe('editor settings', () => {
 
     expect(getEditorSettings({} as never, 'dark').themeMode).toBe('dark');
   });
+
+  it('reports whether Markda keybindings have priority', () => {
+    getConfiguration.mockReturnValue({
+      get: vi.fn((key: string, fallback: unknown) => key === 'editor.enableDefaultKeybindings' ? true : fallback),
+      inspect: vi.fn(() => ({})),
+    });
+
+    expect(getEditorSettings({} as never).enableDefaultKeybindings).toBe(true);
+  });
 });

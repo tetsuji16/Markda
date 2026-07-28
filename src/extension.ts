@@ -58,10 +58,20 @@ export function activate(context: vscode.ExtensionContext): void {
     register('markda.showFiles', () => vscode.commands.executeCommand('markda.files.focus')),
     register('markda.filterOutline', async () => outline.setFilter(await vscode.window.showInputBox({ prompt: vscode.l10n.t('Filter headings'), placeHolder: vscode.l10n.t('Heading text') }) ?? '')),
     register('markda.clearOutlineFilter', () => outline.setFilter('')),
+    register('markda.renameHeading', (item: { heading?: Heading } | Heading) => editHeading(editor.getActiveDocument(), itemHeading(item), 'rename')),
+    register('markda.promoteHeading', (item: { heading?: Heading } | Heading) => editHeading(editor.getActiveDocument(), itemHeading(item), 'promote')),
+    register('markda.demoteHeading', (item: { heading?: Heading } | Heading) => editHeading(editor.getActiveDocument(), itemHeading(item), 'demote')),
+    register('markda.moveHeadingUp', (item: { heading?: Heading } | Heading) => moveHeadingSection(editor.getActiveDocument(), outline.getHeadings(), itemHeading(item), -1)),
+    register('markda.moveHeadingDown', (item: { heading?: Heading } | Heading) => moveHeadingSection(editor.getActiveDocument(), outline.getHeadings(), itemHeading(item), 1)),
     register('markda.searchWorkspace', () => vscode.commands.executeCommand('workbench.action.findInFiles')),
     register('markda.quickOpen', () => vscode.commands.executeCommand('workbench.action.quickOpen')),
     register('markda.filterFiles', async () => files.setFilter(await vscode.window.showInputBox({ prompt: vscode.l10n.t('Filter Markdown files'), placeHolder: vscode.l10n.t('File or folder name') }) ?? '')),
     register('markda.clearFileFilter', () => files.setFilter('')),
+    register('markda.auditImages', () => auditDocumentImages(editor.getActiveDocument())),
+    register('markda.pinFile', (item: vscode.Uri | { uri?: vscode.Uri; resourceUri?: vscode.Uri }) => { const uri = itemUri(item); if (uri) files.togglePin(uri); }),
+    register('markda.renameFile', (item: vscode.Uri | { uri?: vscode.Uri; resourceUri?: vscode.Uri }) => renameMarkdownFile(itemUri(item))),
+    register('markda.deleteFile', (item: vscode.Uri | { uri?: vscode.Uri; resourceUri?: vscode.Uri }) => deleteMarkdownFile(itemUri(item))),
+    register('markda.revealFile', (item: vscode.Uri | { uri?: vscode.Uri; resourceUri?: vscode.Uri }) => { const uri = itemUri(item); if (uri) void vscode.commands.executeCommand('revealFileInOS', uri); }),
     register('markda.showSearch', () => editor.sendCommand('showSearch')),
     register('markda.copyAsMarkdown', () => editor.sendCommand('copyAsMarkdown')),
     register('markda.pastePlainText', async () => editor.sendCommand('insertText', { text: await vscode.env.clipboard.readText() })),
@@ -87,6 +97,10 @@ export function activate(context: vscode.ExtensionContext): void {
       const document = editor.getActiveDocument();
       if (document) await (await getExporter()).exportPdf(document);
     }),
+    register('markda.exportImage', async () => {
+      const document = editor.getActiveDocument();
+      if (document) await (await getExporter()).exportImage(document);
+    }),
     register('markda.exportExternal', async () => {
       const document = editor.getActiveDocument();
       if (document) await (await getExporter()).exportExternal(document);
@@ -96,6 +110,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (document) await (await getExporter()).exportPrevious(document);
     }),
     register('markda.openThemeFolder', () => openThemeFolder(context)),
+    register('markda.chooseTheme', () => chooseTheme(context)),
+    register('markda.applyPreset', () => applyWritingPreset(editor.getActiveDocument()?.uri)),
   );
 }
 
@@ -237,6 +253,172 @@ async function duplicateDocument(document?: vscode.TextDocument): Promise<void> 
   if (!target) return;
   await vscode.workspace.fs.writeFile(target, Buffer.from(document.getText(), 'utf8'));
   await openWithMarkda(target);
+}
+
+function itemUri(item: vscode.Uri | { uri?: vscode.Uri; resourceUri?: vscode.Uri } | undefined): vscode.Uri | undefined {
+  if (!item) return undefined;
+  if (item instanceof vscode.Uri) return item;
+  return item.uri ?? item.resourceUri;
+}
+
+function itemHeading(item: { heading?: Heading } | Heading | undefined): Heading | undefined {
+  if (!item) return undefined;
+  return 'level' in item ? item as Heading : item.heading;
+}
+
+async function renameMarkdownFile(uri?: vscode.Uri): Promise<void> {
+  if (!uri) return;
+  const nextName = await vscode.window.showInputBox({
+    prompt: vscode.l10n.t('Rename Markdown file'),
+    value: path.basename(uri.fsPath),
+    valueSelection: [0, path.basename(uri.fsPath, path.extname(uri.fsPath)).length],
+  });
+  if (!nextName || nextName === path.basename(uri.fsPath) || /[\\/:*?"<>|]/u.test(nextName)) return;
+  await vscode.workspace.fs.rename(uri, vscode.Uri.file(path.join(path.dirname(uri.fsPath), nextName)), { overwrite: false });
+}
+
+async function deleteMarkdownFile(uri?: vscode.Uri): Promise<void> {
+  if (!uri) return;
+  const remove = vscode.l10n.t('Move to Trash');
+  const picked = await vscode.window.showWarningMessage(
+    vscode.l10n.t('Move {0} to trash?', path.basename(uri.fsPath)), { modal: true }, remove,
+  );
+  if (picked === remove) await vscode.workspace.fs.delete(uri, { useTrash: true });
+}
+
+async function auditDocumentImages(document?: vscode.TextDocument): Promise<void> {
+  if (!document) return;
+  const folder = path.dirname(document.uri.fsPath);
+  const localSources = [...document.getText().matchAll(/!\[[^\]]*\]\((?:<)?([^)\s>]+)(?:>)?(?:\s+["'][^"']*["'])?\)/gu)]
+    .map((match) => match[1]!)
+    .filter((source) => !/^(?:https?:|data:|#)/iu.test(source))
+    .map((source) => {
+      try { return decodeURIComponent(source.replace(/\\([() ])/gu, '$1')); } catch { return source; }
+    });
+  const missing: string[] = [];
+  for (const source of localSources) {
+    try { await vscode.workspace.fs.stat(vscode.Uri.file(path.resolve(folder, source))); }
+    catch { missing.push(source); }
+  }
+  const config = vscode.workspace.getConfiguration('markda', document.uri);
+  const assetSetting = config.get<string>('image.folder', '${currentFileNameWithoutExt}.assets')
+    .replaceAll('${currentFileNameWithoutExt}', path.parse(document.uri.fsPath).name);
+  const assetFolder = path.resolve(folder, assetSetting || '.');
+  let unused: vscode.Uri[] = [];
+  try {
+    const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(assetFolder));
+    const used = new Set(localSources.map((source) => path.resolve(folder, source).toLocaleLowerCase()));
+    unused = entries
+      .filter(([name, type]) => type === vscode.FileType.File && /\.(?:png|jpe?g|gif|svg|webp)$/iu.test(name))
+      .map(([name]) => vscode.Uri.file(path.join(assetFolder, name)))
+      .filter((uri) => !used.has(uri.fsPath.toLocaleLowerCase()));
+  } catch { /* An asset folder is optional. */ }
+  const summary = vscode.l10n.t('{0} missing image references · {1} unused asset files', missing.length, unused.length);
+  const review = unused.length ? vscode.l10n.t('Review Unused') : undefined;
+  const selected = await vscode.window.showInformationMessage(summary, ...(review ? [review] : []));
+  if (selected !== review || !review) return;
+  const picked = await vscode.window.showQuickPick(unused.map((uri) => ({
+    label: path.basename(uri.fsPath), description: path.dirname(uri.fsPath), uri, picked: true,
+  })), { canPickMany: true, placeHolder: vscode.l10n.t('Select unused image files to move to trash') });
+  if (!picked?.length) return;
+  for (const item of picked) await vscode.workspace.fs.delete(item.uri, { useTrash: true });
+}
+
+async function editHeading(
+  document: vscode.TextDocument | undefined,
+  heading: Heading | undefined,
+  operation: 'rename' | 'promote' | 'demote',
+): Promise<void> {
+  if (!document || !heading) return;
+  const line = document.lineAt(document.positionAt(heading.from).line);
+  const atx = line.text.match(/^(\s{0,3})(#{1,6})(\s+)(.*?)(\s+#*\s*)$/u);
+  const level = atx?.[2]?.length ?? heading.level;
+  let replacement = line.text;
+  if (operation === 'rename') {
+    const value = await vscode.window.showInputBox({ prompt: vscode.l10n.t('Rename heading'), value: heading.text });
+    if (value === undefined || !value.trim()) return;
+    replacement = atx
+      ? `${atx[1]}${atx[2]}${atx[3]}${value.trim()}${atx[5]}`
+      : value.trim();
+  } else {
+    const next = operation === 'promote' ? Math.max(1, level - 1) : Math.min(6, level + 1);
+    if (next === level) return;
+    replacement = atx
+      ? `${atx[1]}${'#'.repeat(next)}${atx[3]}${atx[4]}${atx[5]}`
+      : `${'#'.repeat(next)} ${line.text}`;
+  }
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(document.uri, line.range, replacement);
+  await vscode.workspace.applyEdit(edit);
+}
+
+async function moveHeadingSection(
+  document: vscode.TextDocument | undefined,
+  headings: readonly Heading[],
+  heading: Heading | undefined,
+  direction: -1 | 1,
+): Promise<void> {
+  if (!document || !heading) return;
+  const index = headings.findIndex((candidate) => candidate.from === heading.from);
+  if (index < 0) return;
+  const endIndex = headings.findIndex((candidate, candidateIndex) => candidateIndex > index && candidate.level <= heading.level);
+  const sectionTo = endIndex < 0 ? document.getText().length : headings[endIndex]!.from;
+  if (direction < 0) {
+    let sibling = index - 1;
+    while (sibling >= 0 && headings[sibling]!.level > heading.level) sibling--;
+    if (sibling < 0 || headings[sibling]!.level !== heading.level) return;
+    const previous = headings[sibling]!;
+    const previousFrom = previous.from;
+    const previousText = document.getText().slice(previousFrom, heading.from);
+    const currentText = document.getText().slice(heading.from, sectionTo);
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, new vscode.Range(document.positionAt(previousFrom), document.positionAt(sectionTo)), currentText + previousText);
+    await vscode.workspace.applyEdit(edit);
+    return;
+  }
+  const nextIndex = endIndex;
+  if (nextIndex < 0 || !headings[nextIndex] || headings[nextIndex]!.level !== heading.level) return;
+  const followingEndIndex = headings.findIndex((candidate, candidateIndex) => candidateIndex > nextIndex && candidate.level <= heading.level);
+  const followingTo = followingEndIndex < 0 ? document.getText().length : headings[followingEndIndex]!.from;
+  const currentText = document.getText().slice(heading.from, sectionTo);
+  const nextText = document.getText().slice(sectionTo, followingTo);
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(document.uri, new vscode.Range(document.positionAt(heading.from), document.positionAt(followingTo)), nextText + currentText);
+  await vscode.workspace.applyEdit(edit);
+}
+
+async function chooseTheme(context: vscode.ExtensionContext): Promise<void> {
+  const folder = vscode.Uri.joinPath(context.globalStorageUri, 'themes');
+  await vscode.workspace.fs.createDirectory(folder);
+  const custom = (await vscode.workspace.fs.readDirectory(folder))
+    .filter(([name, type]) => type === vscode.FileType.File && name.endsWith('.css'))
+    .map(([name]) => name.slice(0, -4));
+  const selected = await vscode.window.showQuickPick([...new Set(['paper', 'midnight', ...custom])], {
+    placeHolder: vscode.l10n.t('Choose a markda theme'),
+  });
+  if (!selected) return;
+  const mode = await vscode.window.showQuickPick([
+    { label: vscode.l10n.t('Light'), key: 'theme.light' },
+    { label: vscode.l10n.t('Dark'), key: 'theme.dark' },
+  ], { placeHolder: vscode.l10n.t('Use theme for') });
+  if (mode) await vscode.workspace.getConfiguration('markda').update(mode.key, selected, vscode.ConfigurationTarget.Global);
+}
+
+async function applyWritingPreset(uri?: vscode.Uri): Promise<void> {
+  const preset = await vscode.window.showQuickPick([
+    { label: vscode.l10n.t('Typora-like'), description: vscode.l10n.t('Centered writing, automatic theme, full live features'), width: 860, focus: false, typewriter: false },
+    { label: vscode.l10n.t('Distraction-free writing'), description: vscode.l10n.t('Narrow measure with typewriter behavior'), width: 720, focus: true, typewriter: true },
+    { label: vscode.l10n.t('Technical document'), description: vscode.l10n.t('Wide measure for tables, code, math, and diagrams'), width: 1100, focus: false, typewriter: false },
+    { label: vscode.l10n.t('Fill VS Code editor'), description: vscode.l10n.t('Use all available editor width'), width: 0, focus: false, typewriter: false },
+  ], { placeHolder: vscode.l10n.t('Choose a writing preset') });
+  if (!preset) return;
+  const configuration = vscode.workspace.getConfiguration('markda', uri);
+  await Promise.all([
+    configuration.update('editor.contentWidth', preset.width, vscode.ConfigurationTarget.Workspace),
+    configuration.update('editor.typewriterKeepCentered', preset.typewriter, vscode.ConfigurationTarget.Workspace),
+    configuration.update('markdown.math', true, vscode.ConfigurationTarget.Workspace),
+    configuration.update('markdown.diagrams', true, vscode.ConfigurationTarget.Workspace),
+  ]);
 }
 
 async function showStatistics(document?: vscode.TextDocument): Promise<void> {

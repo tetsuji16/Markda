@@ -43,6 +43,8 @@ describe('Markda theme colors in Chromium', () => {
     const blockKeyword = blockCode.querySelector<HTMLElement>('.markda-syntax-keyword')!;
     const blockString = blockCode.querySelector<HTMLElement>('.markda-syntax-string')!;
     const blockPre = blockCode.closest<HTMLElement>('pre')!;
+    const blockFrame = blockPre.closest<HTMLElement>('.markda-fenced-code')!;
+    const blockToolbar = blockFrame.querySelector<HTMLElement>('.markda-code-toolbar')!;
     const activeLine = document.querySelector<HTMLElement>('.cm-activeLine')!;
     const tableCode = document.querySelector<HTMLElement>('.markda-live-table-wrap code')!;
     const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
@@ -55,6 +57,10 @@ describe('Markda theme colors in Chromium', () => {
     expect(getComputedStyle(inlineCode).backgroundColor).toBe('rgb(243, 244, 244)');
     expect(getComputedStyle(blockCode).color).toBe('rgb(51, 51, 51)');
     expect(getComputedStyle(blockPre).backgroundColor).toBe('rgb(248, 248, 248)');
+    expect(getComputedStyle(blockFrame).borderRadius).toBe('4px');
+    expect(getComputedStyle(blockFrame).borderTopWidth).toBe('1px');
+    expect(getComputedStyle(blockToolbar).borderBottomWidth).toBe('1px');
+    expect(getComputedStyle(blockPre).borderTopWidth).toBe('0px');
     expect(getComputedStyle(blockKeyword).color).toBe('rgb(207, 34, 46)');
     expect(getComputedStyle(blockString).color).toBe('rgb(10, 48, 105)');
     expect(tableCode.textContent).toBe('Ctrl+/');

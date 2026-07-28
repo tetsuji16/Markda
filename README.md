@@ -29,6 +29,10 @@ The VS Code text document remains the single source of truth. Markda applies foc
 - Keep split editors synchronized through the underlying VS Code text document.
 - Keep the selected editor theme synchronized across open Markdown tabs.
 - Stay responsive in long documents with optimized statistics, outline tracking, and live-view cursor updates.
+- Format from a responsive toolbar, selection controls, link dialog, or `/`
+  quick insert without leaving the rendered document.
+- See save synchronization, current section, document statistics, and
+  actionable diagnostics in the editor status bar.
 
 ## Getting started
 
@@ -40,6 +44,11 @@ The VS Code text document remains the single source of truth. Markda applies foc
 The Markda activity-bar view provides document outline and Markdown file navigation.
 
 ## Useful commands and shortcuts
+
+Markda's contributed shortcuts are disabled by default so they do not override
+VS Code keybindings. Enable **Markda › Editor: Enable Default Keybindings** to
+use the bindings below, switch the shortcut priority from the Markda editor
+toolbar, or assign individual `Markda:` commands in **Keyboard Shortcuts**.
 
 | Action | Windows/Linux | macOS |
 | --- | --- | --- |

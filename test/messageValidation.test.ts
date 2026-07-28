@@ -56,11 +56,24 @@ describe('webview message validation', () => {
     expect(parseEditorToHostMessage({ type: 'manageImage', source: 'assets/photo.png', from: -1, action: 'erase' })).toBeUndefined();
   });
 
+  it('validates diagnostic quick-fix requests', () => {
+    expect(parseEditorToHostMessage({ type: 'requestCodeActions', from: 4, to: 9 }))
+      .toEqual({ type: 'requestCodeActions', from: 4, to: 9 });
+    expect(parseEditorToHostMessage({ type: 'requestCodeActions', from: 9, to: 4 })).toBeUndefined();
+  });
+
   it('accepts only supported theme modes', () => {
     expect(parseEditorToHostMessage({ type: 'updateThemeMode', mode: 'light' }))
       .toEqual({ type: 'updateThemeMode', mode: 'light' });
     expect(parseEditorToHostMessage({ type: 'updateThemeMode', mode: 'system' })).toBeUndefined();
     expect(parseEditorToHostMessage({ type: 'updateThemeMode' })).toBeUndefined();
+  });
+
+  it('accepts only boolean shortcut-priority updates', () => {
+    expect(parseEditorToHostMessage({ type: 'updateDefaultKeybindings', enabled: true }))
+      .toEqual({ type: 'updateDefaultKeybindings', enabled: true });
+    expect(parseEditorToHostMessage({ type: 'updateDefaultKeybindings', enabled: 'yes' })).toBeUndefined();
+    expect(parseEditorToHostMessage({ type: 'updateDefaultKeybindings' })).toBeUndefined();
   });
 
   it('rejects overlapping, duplicate and out-of-bounds edit ranges', () => {
