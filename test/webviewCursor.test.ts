@@ -77,6 +77,8 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     const view = __getEditorView();
     const widget = view.dom.querySelector('.markda-live-code');
     expect(widget).not.toBeNull();
+    expect(widget?.classList.contains('markda-fenced-code')).toBe(true);
+    expect(widget?.querySelector('.markda-code-toolbar + pre code[contenteditable="true"]')).not.toBeNull();
     expect(widget?.querySelector('.markda-syntax-keyword')?.textContent).toBe('const');
     expect(widget?.querySelector('.markda-syntax-constant')?.textContent).toBe('1');
     // The source fence syntax must be hidden behind the widget.
