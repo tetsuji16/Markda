@@ -92,7 +92,9 @@ if (watch) {
   // parsers or renderers back into the startup bundle. This budget catches the
   // exact regression where markdown() added the full HTML/CSS/JS stack.
   const webviewBytes = (await stat(new URL('./dist/webview.js', import.meta.url))).size;
-  const startupBundleBudget = 700 * 1024;
+  // The document-style controls, status surface, and accessible quick-insert
+  // UI are part of first paint; optional parsers and renderers remain split.
+  const startupBundleBudget = 720 * 1024;
   if (webviewBytes > startupBundleBudget) {
     throw new Error(`Webview startup bundle is ${webviewBytes} bytes; budget is ${startupBundleBudget} bytes.`);
   }

@@ -4,6 +4,17 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+- Added responsive document formatting controls, an H1–H6 style picker, a
+  selection toolbar, link editor, slash insertion, and contextual block menu.
+- Added visible synchronization state, in-editor statistics/current-section
+  status, diagnostic quick fixes, and empty-document onboarding.
+- Added file pin/rename/trash/reveal actions plus outline rename, level, and
+  section-movement controls.
+- Added image resizing and asset auditing, code language/copy controls, and
+  block move/duplicate shortcuts.
+- Added PNG export, PDF paper and margin settings, theme selection, typography
+  controls, and writing presets.
+
 ## 0.1.19 - 2026-07-27
 
 - Unified source and live-code syntax colors behind the same light/dark CSS palette so every programming-code surface follows theme changes and custom themes consistently.

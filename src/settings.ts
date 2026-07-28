@@ -17,6 +17,10 @@ export function getEditorSettings(uri?: vscode.Uri, themeMode = getThemeMode(uri
     typewriterKeepCentered: config.get('editor.typewriterKeepCentered', true),
     previewUpdateDelay: config.get('editor.previewUpdateDelay', 500),
     liveTableMaxCells: config.get('editor.liveTableMaxCells', 600),
+    fontFamily: config.get('editor.fontFamily', ''),
+    fontSize: config.get('editor.fontSize', 16),
+    lineHeight: config.get('editor.lineHeight', 1.6),
+    paragraphSpacing: config.get('editor.paragraphSpacing', 0),
     themeMode,
     markdown: {
       math: config.get('markdown.math', true),

@@ -76,4 +76,75 @@ describe('live document features', () => {
     const diagnostic = __getEditorView().dom.querySelector<HTMLElement>('.markda-diagnostic-warning');
     expect(diagnostic?.title).toContain('spell: Possible typo');
   });
+
+  it('keeps secondary controls discoverable, keyboard-operable, and safely cancellable', async () => {
+    vi.resetModules();
+    setupEditor('&copy;\n\n![Diagram](diagram.png)');
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await settle();
+    const view = __getEditorView();
+
+    const entity = view.dom.querySelector<HTMLElement>('.markda-entity')!;
+    expect(entity.getAttribute('role')).toBe('button');
+    entity.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    expect(view.state.selection.main.head).toBe(1);
+
+    const imageEditor = view.dom.querySelector<HTMLElement>('.markda-image-editor')!;
+    const editImage = Array.from(view.dom.querySelectorAll<HTMLButtonElement>('.markda-image-controls button'))
+      .find((button) => button.textContent === 'Edit here')!;
+    expect(editImage).toBeDefined();
+    editImage.click();
+    expect(imageEditor.hidden).toBe(false);
+
+    const theme = document.querySelector<HTMLButtonElement>('#theme-toggle')!;
+    const toolbar = document.querySelector<HTMLElement>('#editor-toolbar')!;
+    const toolbarToggle = document.querySelector<HTMLButtonElement>('#toolbar-toggle')!;
+    expect(toolbar.classList.contains('expanded')).toBe(true);
+    toolbarToggle.click();
+    expect(toolbar.classList.contains('expanded')).toBe(false);
+    expect(toolbarToggle.getAttribute('aria-expanded')).toBe('false');
+    toolbarToggle.click();
+    expect(theme.hasAttribute('aria-pressed')).toBe(false);
+    expect(theme.getAttribute('aria-label')).toContain('Current theme: Auto');
+    theme.click();
+    expect(theme.dataset.mode).toBe('light');
+    expect(theme.textContent).toContain('Theme: Light');
+
+    expect(document.querySelector<HTMLButtonElement>('button[value=cancel]')?.formNoValidate).toBe(true);
+  });
+
+  it('offers document-style formatting, link editing, status, and quick fixes without source-mode detours', async () => {
+    vi.resetModules();
+    const postMessage = setupEditor('A paragraph');
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await settle();
+    const view = __getEditorView();
+
+    const style = document.querySelector<HTMLSelectElement>('#paragraph-style')!;
+    style.value = '2';
+    style.dispatchEvent(new Event('change'));
+    expect(view.state.doc.toString()).toBe('## A paragraph');
+
+    view.dispatch({ selection: { anchor: 3, head: view.state.doc.length } });
+    document.querySelector<HTMLButtonElement>('[data-command=insertLink]')!.click();
+    await settle();
+    const dialog = document.querySelector<HTMLDialogElement>('#link-dialog')!;
+    expect(dialog.open).toBe(true);
+    document.querySelector<HTMLInputElement>('#link-url')!.value = 'https://example.com';
+    dialog.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', {
+      submitter: document.querySelector('#link-insert-confirm')!,
+    }));
+    expect(view.state.doc.toString()).toContain('[A paragraph](https://example.com)');
+
+    window.dispatchEvent(new MessageEvent('message', {
+      data: {
+        type: 'diagnosticsChanged',
+        diagnostics: [{ from: 3, to: 4, severity: 'warning', message: 'Fix me', source: 'test' }],
+      },
+    }));
+    document.querySelector<HTMLButtonElement>('#document-problems-status')!.click();
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'requestCodeActions' }));
+    expect(document.querySelector('#document-statistics-status')?.textContent).toContain('words');
+    expect(document.querySelectorAll('#quick-insert-items')).toHaveLength(1);
+  });
 });

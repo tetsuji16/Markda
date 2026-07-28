@@ -25,6 +25,8 @@ export class OutlineProvider implements vscode.TreeDataProvider<HeadingItem> {
     this.rebuild();
   }
 
+  getHeadings(): readonly Heading[] { return this.headings; }
+
   getTreeItem(element: HeadingItem): vscode.TreeItem { return element; }
   getChildren(element?: HeadingItem): HeadingItem[] { return element?.children ?? this.roots; }
 

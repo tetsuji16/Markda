@@ -234,5 +234,48 @@ describe('live Markdown pointer geometry in Chromium', () => {
     await settle();
     expect(view.state.selection.main.from).toBe(visiblePosition);
     expect(view.state.selection.main.to).toBe(dragHead);
+
+    // Re-select two list rows after selecting a different pair. Revealing the
+    // selected rows' Markdown markers changes their geometry; the drawn
+    // selection must not retain rectangles from the previous pair.
+    const listDocument = [
+      '- Interactive commit graph across all local refs',
+      '- GitLens-style Graph Workbench with working changes and commit details',
+      '- Stage, unstage, commit, safely discard, and copy changes as patches',
+      '- Prefixed commit, message, author, hash, ref, file, and changed-content search',
+    ].join('\n');
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: listDocument },
+      selection: { anchor: 0 },
+    });
+    await settle();
+
+    const selectByPointer = async (anchor: number, head: number): Promise<void> => {
+      const anchorRect = documentCharacterRect(view, anchor);
+      const headRect = documentCharacterRect(view, head);
+      renderedLineAt(view, anchor).dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true, cancelable: true, button: 0, buttons: 1, detail: 1,
+        clientX: anchorRect.left + 1, clientY: (anchorRect.top + anchorRect.bottom) / 2,
+      }));
+      window.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true, cancelable: true, button: 0, buttons: 1,
+        clientX: headRect.left + 1, clientY: (headRect.top + headRect.bottom) / 2,
+      }));
+      window.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true, cancelable: true, button: 0,
+        clientX: headRect.left + 1, clientY: (headRect.top + headRect.bottom) / 2,
+      }));
+      await settle();
+    };
+
+    await selectByPointer(view.state.doc.line(3).from + 2, view.state.doc.line(4).from + 20);
+    await selectByPointer(view.state.doc.line(1).from + 2, view.state.doc.line(2).from + 20);
+    const selectedLineNumbers = Array.from(view.dom.querySelectorAll<HTMLElement>('.cm-selectionBackground'))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const position = view.posAtCoords({ x: rect.left + 1, y: rect.top + rect.height / 2 });
+        return position === null ? 0 : view.state.doc.lineAt(position).number;
+      });
+    expect(new Set(selectedLineNumbers)).toEqual(new Set([1, 2]));
   });
 });

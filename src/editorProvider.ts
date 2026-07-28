@@ -144,6 +144,9 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       case 'manageImage':
         await this.manageImage(view, message.source, message.from, message.action);
         return;
+      case 'requestCodeActions':
+        await this.showCodeActions(view, message.from, message.to);
+        return;
       case 'copyToClipboard':
         await vscode.env.clipboard.writeText(message.text);
         return;
@@ -398,6 +401,29 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       const opened = [...this.views].find((view) => view.document.uri.fsPath === target.fsPath);
       if (opened) this.post(opened, { type: 'command', command: 'focusAnchor', payload: { fragment } });
     }
+  }
+
+  private async showCodeActions(view: EditorView, from: number, to: number): Promise<void> {
+    const range = new vscode.Range(view.document.positionAt(from), view.document.positionAt(to));
+    const actions = await vscode.commands.executeCommand<(vscode.CodeAction | vscode.Command)[]>(
+      'vscode.executeCodeActionProvider', view.document.uri, range,
+    ) ?? [];
+    if (!actions.length) {
+      void vscode.window.showInformationMessage(vscode.l10n.t('markda: No fixes are available for this problem.'));
+      return;
+    }
+    const picked = await vscode.window.showQuickPick<(vscode.QuickPickItem & { action: vscode.CodeAction | vscode.Command })>(actions.map((action) => ({
+      label: action.title,
+      ...('kind' in action && action.kind ? { description: action.kind.value } : {}),
+      action,
+    })), { placeHolder: vscode.l10n.t('Choose a fix') });
+    if (!picked) return;
+    const action = picked.action;
+    if ('edit' in action && action.edit) await vscode.workspace.applyEdit(action.edit);
+    const command: vscode.Command | undefined = typeof action.command === 'string'
+      ? action as vscode.Command
+      : (action as vscode.CodeAction).command;
+    if (command) await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
   }
 
   private postDiagnostics(view: EditorView): void {
