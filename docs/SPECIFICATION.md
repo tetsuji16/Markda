@@ -20,13 +20,17 @@ Markda does not collect telemetry. External URLs and remote resources follow the
 
 Live view and source view operate on the same CodeMirror 6 document. Live view hides inactive syntax markers and directly renders headings, quotes, lists, emphasis, links (inline, reference, shortcut, automatic, bare URL, and heading-anchor forms), images (block, inline, and reference forms), character entities, escapes, emoji shortcodes, tasks, footnotes, reference definitions, YAML Front Matter, `[toc]`, fenced and indented code blocks, permitted HTML, math, Mermaid diagrams, thematic breaks, and tables in the editing surface. Activating a rendered inline object exposes only its Markdown source; editable block objects synchronize their changes back to the original source range.
 
-In ordinary live-view paragraphs, Enter creates a paragraph and Shift+Enter creates a Markdown hard break. Lists, quotes, headings, fenced code blocks, and source view retain structural Markdown behavior. Rich clipboard HTML is converted to Markdown for headings, paragraphs, formatting, links, images, lists, quotes, tables, and code. HTML blocks are directly editable only when both Markdown HTML and unsafe HTML are explicitly enabled; edited HTML is sanitized before it is written back.
+In ordinary live-view paragraphs, Enter creates a paragraph and Shift+Enter creates a Markdown hard break. Lists, quotes, headings, fenced code blocks, and source view retain structural Markdown behavior. Rich clipboard HTML is converted to Markdown for headings, paragraphs, formatting, links, images, lists, quotes, tables, and code.
+
+When `markda.markdown.html` is enabled, inline and block HTML is rendered in the live view and optional preview whether or not unsafe HTML editing is enabled. Every rendered fragment is sanitized: scripts, embedded browsing contexts, forms, active controls, event handlers, inline styles, secondary image sources, and other executable attributes are removed. Links are routed through the extension instead of navigating the webview, local image paths resolve relative to the Markdown document, and remote images follow the configured remote-resource policy. HTML blocks are read-only rendered content by default. Setting `markda.security.allowUnsafeHtml` enables direct block editing, but both the initial fragment and edited source are sanitized; it does not bypass sanitization.
 
 Live tables support direct cell editing, IME-safe synchronization, Tab navigation, inline formatting shortcuts, row and column operations, drag reordering, column resizing, and alignment. Tables above the configured cell limit use a lightweight source editor. Code blocks support direct content editing and IME input.
 
+Selection highlighting follows the persistent Markdown source range. Ordinary text and exposed inline Markdown are highlighted at character precision, including line breaks in the conventional text-editor shape. An empty caret does not create a highlight. A rendered block object such as a table, code block, display equation, image, callout, or Front Matter has no character-to-pixel mapping; when a non-empty source selection overlaps it, its complete rendered footprint is highlighted. Selecting only the layout line break after a rendered block does not highlight that block.
+
 Focus Mode dims lines outside the current line. Typewriter Mode keeps the caret centered after selection changes. These view settings are stored per editor, while document content remains synchronized across split views.
 
-The optional rendered preview supports Markdown, tables, tasks, footnotes, subscript, superscript, highlighting, KaTeX, and Mermaid. Generated HTML is sanitized with DOMPurify. Raw HTML is parsed only when `allowUnsafeHtml` is enabled and is still sanitized afterward.
+The optional rendered preview supports Markdown, tables, tasks, footnotes, subscript, superscript, highlighting, sanitized HTML, KaTeX, and Mermaid. Generated HTML is sanitized with DOMPurify. Raw HTML is parsed when `markda.markdown.html` is enabled; `allowUnsafeHtml` controls direct editing rather than parsing.
 
 KaTeX, Mermaid, the full emoji catalog, and the YAML parser load only when matching content first appears. Labeled display equations receive stable document-order numbers; `\ref` and `\eqref` resolve against those labels without rewriting Markdown source. The split preview is disabled by default and refreshes only after editing becomes idle.
 
@@ -38,7 +42,7 @@ Document statistics show words, characters, non-space characters, lines, and est
 
 ## Security
 
-The webview Content Security Policy uses `default-src 'none'`. Scripts are limited to bundled extension assets with a per-request nonce. Links are sent to the extension host instead of navigating inside the webview. HTTP and HTTPS resources follow the `never`, `prompt`, or `always` policy. HTML export disables raw HTML by default and escapes the document title.
+The webview Content Security Policy uses `default-src 'none'`. Scripts are limited to bundled extension assets with a per-request nonce. Rendered HTML is sanitized independently of the Content Security Policy. Links are sent to the extension host instead of navigating inside the webview. HTTP and HTTPS resources follow the `never`, `prompt`, or `always` policy. HTML export disables raw HTML by default and escapes the document title.
 
 ## Export scope
 
