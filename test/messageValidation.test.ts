@@ -69,6 +69,13 @@ describe('webview message validation', () => {
     expect(parseEditorToHostMessage({ type: 'updateThemeMode' })).toBeUndefined();
   });
 
+  it('accepts only boolean shortcut-priority updates', () => {
+    expect(parseEditorToHostMessage({ type: 'updateDefaultKeybindings', enabled: true }))
+      .toEqual({ type: 'updateDefaultKeybindings', enabled: true });
+    expect(parseEditorToHostMessage({ type: 'updateDefaultKeybindings', enabled: 'yes' })).toBeUndefined();
+    expect(parseEditorToHostMessage({ type: 'updateDefaultKeybindings' })).toBeUndefined();
+  });
+
   it('rejects overlapping, duplicate and out-of-bounds edit ranges', () => {
     expect(areValidTextChanges([{ from: 1, to: 3, insert: '' }, { from: 2, to: 4, insert: '' }], 10)).toBe(false);
     expect(areValidTextChanges([{ from: 1, to: 1, insert: 'a' }, { from: 1, to: 1, insert: 'b' }], 10)).toBe(false);

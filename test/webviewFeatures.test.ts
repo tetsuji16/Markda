@@ -79,7 +79,7 @@ describe('live document features', () => {
 
   it('keeps secondary controls discoverable, keyboard-operable, and safely cancellable', async () => {
     vi.resetModules();
-    setupEditor('&copy;\n\n![Diagram](diagram.png)');
+    const postMessage = setupEditor('&copy;\n\n![Diagram](diagram.png)');
     const { __getEditorView } = await import('../src/webview/main.js');
     await settle();
     const view = __getEditorView();
@@ -109,6 +109,15 @@ describe('live document features', () => {
     theme.click();
     expect(theme.dataset.mode).toBe('light');
     expect(theme.textContent).toContain('Theme: Light');
+
+    const shortcutPriority = document.querySelector<HTMLButtonElement>('#shortcut-priority-toggle')!;
+    expect(shortcutPriority.textContent).toContain('Shortcuts: VS Code');
+    expect(shortcutPriority.getAttribute('aria-pressed')).toBe('false');
+    postMessage.mockClear();
+    shortcutPriority.click();
+    expect(shortcutPriority.textContent).toContain('Shortcuts: Markda');
+    expect(shortcutPriority.getAttribute('aria-pressed')).toBe('true');
+    expect(postMessage).toHaveBeenCalledWith({ type: 'updateDefaultKeybindings', enabled: true });
 
     expect(document.querySelector<HTMLButtonElement>('button[value=cancel]')?.formNoValidate).toBe(true);
   });
@@ -146,5 +155,25 @@ describe('live document features', () => {
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'requestCodeActions' }));
     expect(document.querySelector('#document-statistics-status')?.textContent).toContain('words');
     expect(document.querySelectorAll('#quick-insert-items')).toHaveLength(1);
+  });
+
+  it('runs Markda formatting shortcuts only when Markda has priority', async () => {
+    vi.resetModules();
+    setupEditor('word');
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await settle();
+    const view = __getEditorView();
+    view.dispatch({ selection: { anchor: 0, head: 4 } });
+
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'b', ctrlKey: true, bubbles: true, cancelable: true,
+    }));
+    expect(view.state.doc.toString()).toBe('word');
+
+    document.querySelector<HTMLButtonElement>('#shortcut-priority-toggle')!.click();
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'b', ctrlKey: true, bubbles: true, cancelable: true,
+    }));
+    expect(view.state.doc.toString()).toBe('**word**');
   });
 });

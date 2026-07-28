@@ -159,6 +159,13 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
         this.broadcastSettings();
         await vscode.workspace.getConfiguration('markda').update('editor.themeMode', message.mode, vscode.ConfigurationTarget.Global);
         return;
+      case 'updateDefaultKeybindings':
+        await vscode.workspace.getConfiguration('markda').update(
+          'editor.enableDefaultKeybindings',
+          message.enabled,
+          vscode.ConfigurationTarget.Global,
+        );
+        return;
       case 'state':
         await vscode.commands.executeCommand('setContext', 'markda.sourceMode', message.sourceMode);
         if (message.cursor !== undefined && view === this.getActiveView()) this.outline.setCursor(message.cursor);

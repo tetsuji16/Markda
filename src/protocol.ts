@@ -14,6 +14,7 @@ export interface EditorSettings {
   lineHeight?: number;
   paragraphSpacing?: number;
   themeMode: 'auto' | 'light' | 'dark';
+  enableDefaultKeybindings?: boolean;
   markdown: {
     math: boolean;
     diagrams: boolean;
@@ -103,7 +104,8 @@ export type EditorToHostMessage =
   | { type: 'manageImage'; source: string; from: number; action: 'move' | 'copy' | 'delete' }
   | { type: 'requestCodeActions'; from: number; to: number }
   | { type: 'copyToClipboard'; text: string }
-  | { type: 'updateThemeMode'; mode: 'auto' | 'light' | 'dark' };
+  | { type: 'updateThemeMode'; mode: 'auto' | 'light' | 'dark' }
+  | { type: 'updateDefaultKeybindings'; enabled: boolean };
 
 export interface TextChange {
   from: number;
@@ -187,6 +189,10 @@ export function parseEditorToHostMessage(value: unknown): EditorToHostMessage | 
     case 'updateThemeMode':
       return value.mode === 'auto' || value.mode === 'light' || value.mode === 'dark'
         ? { type: 'updateThemeMode', mode: value.mode }
+        : undefined;
+    case 'updateDefaultKeybindings':
+      return typeof value.enabled === 'boolean'
+        ? { type: 'updateDefaultKeybindings', enabled: value.enabled }
         : undefined;
     default:
       return undefined;

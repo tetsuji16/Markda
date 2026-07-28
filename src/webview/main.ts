@@ -182,6 +182,7 @@ document.body.innerHTML = `<style>${getStyles()}</style>
     <button data-command="insertImage" title="${t('insertImages')}" aria-label="${t('insertImages')}"><i class="codicon codicon-file-media" aria-hidden="true"></i></button>
     <button data-command="insertMathBlock" title="${t('insertMath')}" aria-label="${t('insertMath')}"><span class="math-icon" aria-hidden="true">∑</span></button>
     <span class="toolbar-spacer"></span>
+    <button id="shortcut-priority-toggle" title="${t('preferMarkdaShortcuts')}" aria-label="${t('preferMarkdaShortcuts')}" aria-pressed="false"><i class="codicon codicon-keyboard" aria-hidden="true"></i><span>${t('shortcuts')}</span></button>
     <button id="theme-toggle" title="${t('toggleTheme')}" aria-label="${t('toggleTheme')}"><i class="codicon codicon-color-mode" aria-hidden="true"></i><span>${t('theme')}</span></button>
   </header>
   <div id="table-toolbar" class="table-toolbar" aria-label="${t('tableControls')}">
@@ -387,6 +388,28 @@ document.querySelectorAll<HTMLButtonElement>('[data-table-command]').forEach((bu
   button.addEventListener('click', () => runTableCommand(button.dataset.tableCommand ?? ''));
 });
 const themeToggleButton = document.querySelector<HTMLButtonElement>('#theme-toggle');
+const shortcutPriorityButton = document.querySelector<HTMLButtonElement>('#shortcut-priority-toggle');
+function updateShortcutPriorityLabel(): void {
+  if (!shortcutPriorityButton) return;
+  const markdaFirst = settings.enableDefaultKeybindings === true;
+  const priority = t(markdaFirst ? 'shortcutsMarkda' : 'shortcutsVscode');
+  const action = t(markdaFirst ? 'preferVscodeShortcuts' : 'preferMarkdaShortcuts');
+  shortcutPriorityButton.querySelector('span')?.replaceChildren(
+    document.createTextNode(`${t('shortcuts')}: ${priority}`),
+  );
+  shortcutPriorityButton.classList.toggle('active', markdaFirst);
+  shortcutPriorityButton.setAttribute('aria-pressed', String(markdaFirst));
+  shortcutPriorityButton.setAttribute('aria-label', `${t('shortcutsCurrent', priority)}. ${action}`);
+  shortcutPriorityButton.title = `${t('shortcutsCurrent', priority)}. ${action}`;
+}
+shortcutPriorityButton?.addEventListener('click', () => {
+  const enabled = settings.enableDefaultKeybindings !== true;
+  settings.enableDefaultKeybindings = enabled;
+  updateShortcutPriorityLabel();
+  vscode.postMessage({ type: 'updateDefaultKeybindings', enabled });
+});
+updateShortcutPriorityLabel();
+
 function updateThemeToggleLabel(): void {
   if (!themeToggleButton) return;
   const labels: Record<typeof settings.themeMode, string> = {
@@ -520,6 +543,8 @@ function onHostMessage(message: HostToEditorMessage): void {
       settings = message.settings;
       clientRenderer = undefined;
       applySettings(true);
+      updateShortcutPriorityLabel();
+      updateThemeToggleLabel();
       renderPreview();
       return;
     case 'diagnosticsChanged':
@@ -1427,6 +1452,9 @@ function moveCursorVertically(editor: EditorView, dir: 1 | -1, extend: boolean):
 }
 
 function createMarkdaKeymap() {
+  const whenMarkdaShortcutsHavePriority = (
+    run: (editor: EditorView) => boolean,
+  ) => (editor: EditorView): boolean => settings.enableDefaultKeybindings === true && run(editor);
   return [
     { key: 'Mod-f', run: openMarkdaSearchPanel },
     { key: 'Enter', run: (editor: EditorView) => insertLiveLineBreak(editor, false) },
@@ -1442,14 +1470,14 @@ function createMarkdaKeymap() {
     { key: 'ArrowDown', run: (editor: EditorView) => moveCursorVertically(editor, 1, false) },
     { key: 'Shift-ArrowUp', run: (editor: EditorView) => moveCursorVertically(editor, -1, true) },
     { key: 'Shift-ArrowDown', run: (editor: EditorView) => moveCursorVertically(editor, 1, true) },
-    { key: 'Alt-ArrowUp', run: (editor: EditorView) => moveCurrentBlock(editor, -1) },
-    { key: 'Alt-ArrowDown', run: (editor: EditorView) => moveCurrentBlock(editor, 1) },
-    { key: 'Mod-Shift-d', run: duplicateCurrentBlock },
+    { key: 'Alt-ArrowUp', run: whenMarkdaShortcutsHavePriority((editor) => moveCurrentBlock(editor, -1)) },
+    { key: 'Alt-ArrowDown', run: whenMarkdaShortcutsHavePriority((editor) => moveCurrentBlock(editor, 1)) },
+    { key: 'Mod-Shift-d', run: whenMarkdaShortcutsHavePriority(duplicateCurrentBlock) },
     { key: 'Tab', run: (editor: EditorView) => navigateTableCell(editor, false) },
     { key: 'Shift-Tab', run: (editor: EditorView) => navigateTableCell(editor, true) },
-    { key: 'Mod-b', run: (editor: EditorView) => wrapSelection(editor, '**', '**') },
-    { key: 'Mod-i', run: (editor: EditorView) => wrapSelection(editor, '*', '*') },
-    { key: 'Mod-k', run: () => { void openLinkDialog(); return true; } },
+    { key: 'Mod-b', run: whenMarkdaShortcutsHavePriority((editor) => wrapSelection(editor, '**', '**')) },
+    { key: 'Mod-i', run: whenMarkdaShortcutsHavePriority((editor) => wrapSelection(editor, '*', '*')) },
+    { key: 'Mod-k', run: whenMarkdaShortcutsHavePriority(() => { void openLinkDialog(); return true; }) },
     { key: '/', run: (editor: EditorView) => {
       const selection = editor.state.selection.main;
       if (!selection.empty || editor.state.field(modeField).sourceMode) return false;
@@ -1459,17 +1487,17 @@ function createMarkdaKeymap() {
       openQuickInsert(coords?.left, coords?.bottom);
       return true;
     } },
-    { key: 'Mod-Shift-`', run: (editor: EditorView) => wrapSelection(editor, '`', '`') },
-    { key: 'Mod-Shift-[', run: () => { toggleOrderedList(); return true; } },
-    { key: 'Mod-Shift-]', run: () => { toggleLinePrefix('- '); return true; } },
-    { key: 'Mod-Shift-q', run: () => { toggleBlockquote(); return true; } },
-    { key: 'Mod-Shift-k', run: (editor: EditorView) => wrapCodeBlock(editor) },
-    { key: 'Alt-Shift-5', run: (editor: EditorView) => wrapSelection(editor, '~~', '~~') },
+    { key: 'Mod-Shift-`', run: whenMarkdaShortcutsHavePriority((editor) => wrapSelection(editor, '`', '`')) },
+    { key: 'Mod-Shift-[', run: whenMarkdaShortcutsHavePriority(() => { toggleOrderedList(); return true; }) },
+    { key: 'Mod-Shift-]', run: whenMarkdaShortcutsHavePriority(() => { toggleLinePrefix('- '); return true; }) },
+    { key: 'Mod-Shift-q', run: whenMarkdaShortcutsHavePriority(() => { toggleBlockquote(); return true; }) },
+    { key: 'Mod-Shift-k', run: whenMarkdaShortcutsHavePriority((editor) => wrapCodeBlock(editor)) },
+    { key: 'Alt-Shift-5', run: whenMarkdaShortcutsHavePriority((editor) => wrapSelection(editor, '~~', '~~')) },
     ...Array.from({ length: 6 }, (_, index) => ({
       key: `Mod-${index + 1}`,
-      run: (editor: EditorView) => setHeading(editor, index + 1),
+      run: whenMarkdaShortcutsHavePriority((editor) => setHeading(editor, index + 1)),
     })),
-    { key: 'Mod-0', run: (editor: EditorView) => setHeading(editor, 0) },
+    { key: 'Mod-0', run: whenMarkdaShortcutsHavePriority((editor) => setHeading(editor, 0)) },
   ];
 }
 

@@ -22,6 +22,7 @@ export function getEditorSettings(uri?: vscode.Uri, themeMode = getThemeMode(uri
     lineHeight: config.get('editor.lineHeight', 1.6),
     paragraphSpacing: config.get('editor.paragraphSpacing', 0),
     themeMode,
+    enableDefaultKeybindings: config.get('editor.enableDefaultKeybindings', false),
     markdown: {
       math: config.get('markdown.math', true),
       diagrams: config.get('markdown.diagrams', true),

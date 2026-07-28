@@ -12,6 +12,7 @@ function setupEditor(text: string): ReturnType<typeof vi.fn> {
     settings: {
       contentWidth: 860, autoPairMarkdown: true, typewriterKeepCentered: true,
       previewUpdateDelay: 500, liveTableMaxCells: 600,
+      enableDefaultKeybindings: true,
       markdown: { math: false, diagrams: false, html: false, breaks: false },
       theme: { light: 'paper', dark: 'midnight' },
       security: { allowRemoteResources: 'never', allowUnsafeHtml: false },
