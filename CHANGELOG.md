@@ -4,6 +4,8 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.20 - 2026-07-28
+
 - Disabled contributed Markda keybindings by default to avoid overriding VS
   Code shortcuts. They can be restored with the
   `markda.editor.enableDefaultKeybindings` setting, switched directly from the
@@ -18,6 +20,9 @@ All notable changes to Markda are documented in this file.
   block move/duplicate shortcuts.
 - Added PNG export, PDF paper and margin settings, theme selection, typography
   controls, and writing presets.
+- Removed full-document statistics and heading scans from cursor movement and
+  cached status-bar elements and derived document state for faster editing in
+  large documents.
 
 ## 0.1.19 - 2026-07-27
 

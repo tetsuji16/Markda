@@ -100,7 +100,10 @@ let yamlPromise: Promise<typeof import('yaml')> | undefined;
 let emojiPromise: Promise<void> | undefined;
 let emojiPlugin = lightEmojiPlugin;
 let emojiNames: Readonly<Record<string, string>> = lightEmojiNames;
-let cachedDocumentText = '';
+const initialDerivedState = analyzeDocument(initialDocument?.text ?? '');
+let cachedDocumentText = initialDocument?.text ?? '';
+let cachedDocumentStatistics = initialDerivedState.statistics;
+let cachedDocumentHeadings = initialDerivedState.headings;
 let cachedTable: MarkdownTable | undefined;
 let activeTableFrom: number | undefined;
 let activeLiveTableCursor: { from: number; row: number; column: number } | undefined;
@@ -234,6 +237,13 @@ document.body.innerHTML = `<style>${getStyles()}</style>
 
 const appRoot = document.querySelector<HTMLElement>('.markda-shell')!;
 const preview = document.querySelector<HTMLElement>('#preview')!;
+const selectionToolbar = document.querySelector<HTMLElement>('#selection-toolbar')!;
+const syncStatus = document.querySelector<HTMLElement>('#document-sync-status')!;
+const documentModeStatus = document.querySelector<HTMLButtonElement>('#document-mode-status')!;
+const documentSectionStatus = document.querySelector<HTMLButtonElement>('#document-section-status')!;
+const documentProblemsStatus = document.querySelector<HTMLButtonElement>('#document-problems-status')!;
+const documentStatisticsStatus = document.querySelector<HTMLElement>('#document-statistics-status')!;
+const welcome = document.querySelector<HTMLElement>('#markda-welcome')!;
 
 const tableDialog = document.querySelector<HTMLDialogElement>('#table-dialog')!;
 const linkDialog = document.querySelector<HTMLDialogElement>('#link-dialog')!;
@@ -1287,6 +1297,8 @@ function updateDocumentDerivedState(): void {
   cachedDocumentText = source;
   cachedTable = undefined;
   const { headings, statistics: stat } = analyzeDocument(source);
+  cachedDocumentHeadings = headings;
+  cachedDocumentStatistics = stat;
   vscode.postMessage({ type: 'outline', headings });
   vscode.postMessage({ type: 'statistics', statistics: stat });
   const mode = view.state.field(modeField);
@@ -1310,78 +1322,92 @@ function calculateStatistics(): DocumentStatistics {
 }
 
 function setSyncState(state: 'saved' | 'saving' | 'pending' | 'conflict'): void {
-  const element = document.querySelector<HTMLElement>('#document-sync-status');
-  if (!element) return;
-  element.dataset.state = state;
-  element.textContent = t(state === 'saved' ? 'syncSaved'
+  syncStatus.dataset.state = state;
+  syncStatus.textContent = t(state === 'saved' ? 'syncSaved'
     : state === 'saving' ? 'syncSaving'
       : state === 'pending' ? 'syncPending' : 'syncConflict');
 }
 
 function updateSelectionToolbar(): void {
-  const toolbar = document.querySelector<HTMLElement>('#selection-toolbar');
-  if (!toolbar || !view.dom.isConnected) return;
+  if (!view.dom.isConnected) return;
   const selection = view.state.selection.main;
   if (selection.empty || view.state.field(modeField).sourceMode || !view.hasFocus) {
-    toolbar.hidden = true;
+    selectionToolbar.hidden = true;
     return;
   }
   const start = view.coordsAtPos(selection.from);
   const end = view.coordsAtPos(selection.to);
   if (!start || !end) {
-    toolbar.hidden = true;
+    selectionToolbar.hidden = true;
     return;
   }
-  toolbar.hidden = false;
-  toolbar.style.left = `${Math.max(8, Math.min((start.left + end.right) / 2 - 100, window.innerWidth - 220))}px`;
-  toolbar.style.top = `${Math.max(8, Math.min(start.top - 38, window.innerHeight - 44))}px`;
+  selectionToolbar.hidden = false;
+  selectionToolbar.style.left = `${Math.max(8, Math.min((start.left + end.right) / 2 - 100, window.innerWidth - 220))}px`;
+  selectionToolbar.style.top = `${Math.max(8, Math.min(start.top - 38, window.innerHeight - 44))}px`;
 }
 
-function updateDocumentStatus(statistics = calculateStatistics()): void {
+function updateDocumentStatus(
+  statistics = cachedDocumentStatistics,
+  headings = cachedDocumentHeadings,
+): void {
   if (!view.dom.isConnected) return;
   const mode = view.state.field(modeField);
-  const modeButton = document.querySelector<HTMLButtonElement>('#document-mode-status');
-  if (!modeButton) return;
-  modeButton.textContent = mode.sourceMode ? t('sourceShort') : t('liveShort');
-  modeButton.title = t('toggleSourceMode');
-  const statisticsElement = document.querySelector<HTMLElement>('#document-statistics-status');
-  if (!statisticsElement) return;
-  statisticsElement.textContent = `${t('wordsShort', statistics.words)} · ${t('charactersShort', statistics.characters)}`;
-  const headings = headingAnchors(view.state.doc.toString());
+  const modeText = mode.sourceMode ? t('sourceShort') : t('liveShort');
+  if (documentModeStatus.textContent !== modeText) documentModeStatus.textContent = modeText;
+  if (!documentModeStatus.title) documentModeStatus.title = t('toggleSourceMode');
+  const statisticsText = `${t('wordsShort', statistics.words)} · ${t('charactersShort', statistics.characters)}`;
+  if (documentStatisticsStatus.textContent !== statisticsText) documentStatisticsStatus.textContent = statisticsText;
   const cursor = view.state.selection.main.head;
-  const active = [...headings].reverse().find((heading) => heading.from <= cursor);
-  const sectionButton = document.querySelector<HTMLButtonElement>('#document-section-status');
-  if (!sectionButton) return;
-  sectionButton.textContent = active ? `H${active.level} ${active.text}` : '';
-  sectionButton.dataset.from = active ? String(active.from) : '';
-  sectionButton.hidden = !active;
-  const problemsButton = document.querySelector<HTMLButtonElement>('#document-problems-status');
-  if (!problemsButton) return;
-  problemsButton.textContent = currentDiagnostics.length ? `${t('diagnostics')}: ${currentDiagnostics.length}` : '';
-  problemsButton.hidden = !currentDiagnostics.length;
-  const welcome = document.querySelector<HTMLElement>('#markda-welcome');
-  if (!welcome) return;
-  welcome.hidden = view.state.doc.length !== 0;
+  const active = activeHeadingAt(headings, cursor);
+  const sectionText = active ? `H${active.level} ${active.text}` : '';
+  const sectionFrom = active ? String(active.from) : '';
+  if (documentSectionStatus.textContent !== sectionText) documentSectionStatus.textContent = sectionText;
+  if (documentSectionStatus.dataset.from !== sectionFrom) documentSectionStatus.dataset.from = sectionFrom;
+  if (documentSectionStatus.hidden === Boolean(active)) documentSectionStatus.hidden = !active;
+  const problemsText = currentDiagnostics.length ? `${t('diagnostics')}: ${currentDiagnostics.length}` : '';
+  if (documentProblemsStatus.textContent !== problemsText) documentProblemsStatus.textContent = problemsText;
+  if (documentProblemsStatus.hidden === Boolean(currentDiagnostics.length)) {
+    documentProblemsStatus.hidden = !currentDiagnostics.length;
+  }
+  const welcomeHidden = view.state.doc.length !== 0;
+  if (welcome.hidden !== welcomeHidden) welcome.hidden = welcomeHidden;
   const line = view.state.doc.lineAt(cursor);
   const level = line.text.match(/^#{1,6}(?=\s)/u)?.[0].length ?? 0;
   if (paragraphStyle.value !== String(level)) paragraphStyle.value = String(level);
 }
 
-document.querySelector<HTMLButtonElement>('#document-mode-status')!.addEventListener('click', () => runCommand('toggleSourceMode'));
-document.querySelector<HTMLButtonElement>('#document-section-status')!.addEventListener('click', (event) => {
+function activeHeadingAt(headings: readonly Heading[], position: number): Heading | undefined {
+  let low = 0;
+  let high = headings.length - 1;
+  let active: Heading | undefined;
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    const heading = headings[middle]!;
+    if (heading.from <= position) {
+      active = heading;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return active;
+}
+
+documentModeStatus.addEventListener('click', () => runCommand('toggleSourceMode'));
+documentSectionStatus.addEventListener('click', (event) => {
   const from = Number((event.currentTarget as HTMLButtonElement).dataset.from);
   if (!Number.isInteger(from)) return;
   view.dispatch({ selection: EditorSelection.cursor(from), effects: EditorView.scrollIntoView(from, { y: 'center' }) });
   view.focus();
 });
-document.querySelector<HTMLButtonElement>('#document-problems-status')!.addEventListener('click', () => {
+documentProblemsStatus.addEventListener('click', () => {
   const cursor = view.state.selection.main.head;
   const diagnostic = currentDiagnostics.find((item) => cursor >= item.from && cursor <= item.to) ?? currentDiagnostics[0];
   if (!diagnostic) return;
   view.dispatch({ selection: EditorSelection.range(diagnostic.from, diagnostic.to), effects: EditorView.scrollIntoView(diagnostic.from, { y: 'center' }) });
   vscode.postMessage({ type: 'requestCodeActions', from: diagnostic.from, to: diagnostic.to });
 });
-document.querySelector<HTMLElement>('#markda-welcome')!.addEventListener('click', () => view.focus());
+welcome.addEventListener('click', () => view.focus());
 
 function extractHeadings(text: string): Heading[] {
   return analyzeDocument(text).headings;
