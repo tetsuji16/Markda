@@ -4,6 +4,9 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+- Disabled contributed Markda keybindings by default to avoid overriding VS
+  Code shortcuts. They can be restored with the
+  `markda.editor.enableDefaultKeybindings` setting or assigned individually.
 - Added responsive document formatting controls, an H1–H6 style picker, a
   selection toolbar, link editor, slash insertion, and contextual block menu.
 - Added visible synchronization state, in-editor statistics/current-section

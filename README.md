@@ -45,6 +45,11 @@ The Markda activity-bar view provides document outline and Markdown file navigat
 
 ## Useful commands and shortcuts
 
+Markda's contributed shortcuts are disabled by default so they do not override
+VS Code keybindings. Enable **Markda › Editor: Enable Default Keybindings** to
+use the bindings below, or assign individual `Markda:` commands in **Keyboard
+Shortcuts**.
+
 | Action | Windows/Linux | macOS |
 | --- | --- | --- |
 | Toggle source mode | `Ctrl+/` | `Cmd+/` |
