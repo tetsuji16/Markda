@@ -25,7 +25,9 @@ describe('complete supported Markdown live editing in Chromium', () => {
       '',
       '    const answer = 41;',
       '',
-      '<div><strong>HTML block</strong></div>',
+      '<p align="center">',
+      '  <strong>HTML block</strong>',
+      '</p>',
       '',
       '[docs]: https://example.com/docs "Docs"',
       '',
@@ -57,6 +59,7 @@ describe('complete supported Markdown live editing in Chromium', () => {
     expect(view.dom.querySelector('.markda-inline-html kbd')?.textContent).toBe('Ctrl');
     expect(view.dom.querySelector('.markda-indented-code code')?.textContent).toBe('const answer = 41;');
     expect(view.dom.querySelector('.markda-html-block strong')?.textContent).toBe('HTML block');
+    expect(view.dom.querySelector('.markda-html-block p')?.getAttribute('align')).toBe('center');
     expect(view.dom.querySelector('.markda-reference-definition')).not.toBeNull();
 
     const footnote = view.dom.querySelector<HTMLElement>('.markda-footnote-definition-content')!;
@@ -66,12 +69,15 @@ describe('complete supported Markdown live editing in Chromium', () => {
     await settle(120);
     expect(view.state.doc.toString()).toContain('[^one]: Edited footnote');
 
-    const html = view.dom.querySelector<HTMLElement>('.markda-html-block')!;
+    const html = view.dom.querySelector<HTMLElement>('.markda-html-block-content')!;
+    expect(html.getAttribute('contenteditable')).toBe('true');
     html.focus();
-    html.innerHTML = '<em onclick="alert(1)">Edited HTML</em>';
+    html.innerHTML = '<em onclick="alert(1)" style="color:red">Edited HTML</em><iframe src="https://example.com"></iframe>';
     html.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
     await settle(140);
     expect(view.state.doc.toString()).toContain('<em>Edited HTML</em>');
     expect(view.state.doc.toString()).not.toContain('onclick');
+    expect(view.state.doc.toString()).not.toContain('style=');
+    expect(view.state.doc.toString()).not.toContain('iframe');
   });
 });

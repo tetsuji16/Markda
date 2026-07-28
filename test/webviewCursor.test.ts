@@ -83,6 +83,33 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     expect(view.dom.textContent).not.toContain('```js');
   });
 
+  it('highlights a rendered block only when a non-empty source selection overlaps it', async () => {
+    vi.resetModules();
+    const text = ['Before.', '```js', 'const answer = 42;', '```', 'After.'].join('\n');
+    setupEditor(text);
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    const codeFrom = text.indexOf('```js');
+    const codeTo = text.indexOf('```', codeFrom + 3) + 3;
+
+    view.dispatch({ selection: { anchor: codeFrom + 2 } });
+    expect(view.dom.querySelector('.markda-block-selection')).toBeNull();
+
+    view.dispatch({ selection: { anchor: codeFrom + 2, head: codeFrom + 3 } });
+    const selectedBlock = view.dom.querySelector<HTMLElement>('.markda-block-selection');
+    expect(selectedBlock).not.toBeNull();
+    expect(selectedBlock?.classList.contains('markda-live-code')).toBe(true);
+
+    // The replacement owns the following newline only for layout.
+    view.dispatch({ selection: { anchor: codeTo, head: codeTo + 1 } });
+    expect(view.dom.querySelector('.markda-block-selection')).toBeNull();
+
+    view.dispatch({ selection: { anchor: 2, head: text.indexOf('After') + 2 } });
+    expect(view.dom.querySelectorAll('.markda-block-selection')).toHaveLength(1);
+  });
+
   it('sends the latest editor snapshot before handling Ctrl+S', async () => {
     vi.resetModules();
     const postMessage = setupEditor('before');
@@ -501,7 +528,7 @@ describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }
     await tick();
 
     const view = __getEditorView();
-    const html = view.dom.querySelector<HTMLElement>('.markda-html-block');
+    const html = view.dom.querySelector<HTMLElement>('.markda-html-block-content');
     expect(html?.querySelector('strong')?.textContent).toBe('Hello');
     html!.innerHTML = '<div onclick="alert(1)"><em>Updated</em></div>';
     html!.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));

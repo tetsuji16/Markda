@@ -271,6 +271,7 @@ const view = new EditorView({
       highlightActiveLine(),
       createLivePreviewPlugin(),
       blockDecorationsField,
+      createBlockSelectionHighlightPlugin(),
       softBreakDecorationsField,
       diagnosticDecorationsField,
       EditorView.updateListener.of(onEditorUpdate),
@@ -1360,13 +1361,11 @@ function renderPreview(): void {
   preview.innerHTML = DOMPurify.sanitize(rendered, {
     USE_PROFILES: { html: true, svg: true },
     ADD_ATTR: ['target', 'data-href', 'aria-label'],
+    FORBID_TAGS: ['style', 'form', 'iframe', 'object', 'embed', 'button', 'textarea', 'select', 'option', 'base', 'link', 'meta'],
+    FORBID_ATTR: ['style', 'srcset', 'formaction', 'srcdoc', 'autofocus'],
   });
-  preview.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
-    link.dataset.href = link.getAttribute('href') ?? '';
-    link.removeAttribute('href');
-    link.tabIndex = 0;
-  });
-  preview.querySelectorAll<HTMLImageElement>('img[src]').forEach((image) => secureImage(image));
+  removeUnsafeHtmlNodes(preview, true);
+  secureRenderedHtml(preview);
   wirePreviewTasks();
   wirePreviewNavigation();
   void renderMathPlaceholders(renderVersion);
@@ -1432,6 +1431,10 @@ function secureImage(image: HTMLImageElement): void {
     return;
   }
   if (/^(?:data:|vscode-webview:|#)/iu.test(source)) return;
+  if (/^[a-z][a-z0-9+.-]*:/iu.test(source)) {
+    image.replaceWith(document.createTextNode(image.alt || source));
+    return;
+  }
   try {
     image.src = new URL(source, resourceBaseUri).toString();
   } catch {
@@ -1439,8 +1442,62 @@ function secureImage(image: HTMLImageElement): void {
   }
 }
 
+function sanitizeHtmlFragment(source: string): string {
+  return DOMPurify.sanitize(source, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: [
+      'style', 'form', 'input', 'button', 'textarea', 'select', 'option',
+      'iframe', 'object', 'embed', 'base', 'link', 'meta',
+    ],
+    FORBID_ATTR: ['style', 'srcset', 'formaction', 'srcdoc', 'autofocus'],
+  });
+}
+
+function removeUnsafeHtmlNodes(container: ParentNode, preserveTaskInputs = false): void {
+  container.querySelectorAll(
+    'script,style,form,input,button,textarea,select,option,iframe,object,embed,base,link,meta',
+  ).forEach((element) => {
+    if (preserveTaskInputs && element.matches('input.task-list-item-checkbox')) return;
+    element.remove();
+  });
+  container.querySelectorAll<HTMLElement>('*').forEach((element) => {
+    for (const attribute of Array.from(element.attributes)) {
+      if (/^on/iu.test(attribute.name)
+        || ['style', 'srcset', 'formaction', 'srcdoc', 'autofocus'].includes(attribute.name.toLowerCase())) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+  });
+}
+
+function sanitizeEditableHtmlSource(source: string): string {
+  const container = document.createElement('div');
+  container.innerHTML = sanitizeHtmlFragment(source);
+  removeUnsafeHtmlNodes(container);
+  return container.innerHTML.replace(/\r\n?/gu, '\n');
+}
+
+function secureRenderedHtml(container: ParentNode): void {
+  container.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((link) => {
+    const href = link.getAttribute('href') ?? '';
+    if (/^(?:javascript|vbscript|data):/iu.test(href.trim())) {
+      link.removeAttribute('href');
+      link.removeAttribute('data-href');
+      return;
+    }
+    link.dataset.href = href;
+    link.removeAttribute('href');
+    link.tabIndex = 0;
+  });
+  container.querySelectorAll<HTMLImageElement>('img[src]').forEach((image) => secureImage(image));
+  container.querySelectorAll<HTMLInputElement>('input:not(.task-list-item-checkbox)').forEach((input) => {
+    input.disabled = true;
+    input.removeAttribute('name');
+  });
+}
+
 function createClientRenderer(): MarkdownIt {
-  const renderer = new MarkdownIt({ breaks: settings.markdown.breaks, html: settings.markdown.html && settings.security.allowUnsafeHtml, linkify: true });
+  const renderer = new MarkdownIt({ breaks: settings.markdown.breaks, html: settings.markdown.html, linkify: true });
   renderer.use(footnote).use(mark).use(sub).use(sup).use(taskLists, { enabled: true, label: true }).use(emojiPlugin);
   installDocumentFeatures(renderer);
   if (settings.markdown.math) installMath(renderer);
@@ -1991,7 +2048,9 @@ class InlineHtmlWidget extends WidgetType {
     container.setAttribute('role', 'button');
     container.setAttribute('aria-label', t('inlineHtmlEdit'));
     container.title = 'Click to edit HTML source';
-    container.innerHTML = DOMPurify.sanitize(this.source, { USE_PROFILES: { html: true } });
+    container.innerHTML = sanitizeHtmlFragment(this.source);
+    removeUnsafeHtmlNodes(container);
+    secureRenderedHtml(container);
     const edit = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
@@ -2139,49 +2198,60 @@ class ReferenceDefinitionWidget extends WidgetType {
 }
 
 class HtmlBlockWidget extends WidgetType {
-  constructor(private readonly editor: EditorView, private readonly from: number, private readonly source: string) { super(); }
+  constructor(
+    private readonly editor: EditorView,
+    private readonly from: number,
+    private readonly source: string,
+    private readonly editable: boolean,
+  ) { super(); }
 
   toDOM(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'markda-html-block';
-    container.contentEditable = 'true';
-    container.spellcheck = true;
     container.setAttribute('aria-label', t('htmlBlock'));
-    container.innerHTML = DOMPurify.sanitize(this.source, { USE_PROFILES: { html: true } });
-    if (!container.childNodes.length) {
+    const content = document.createElement('div');
+    content.className = 'markda-html-block-content';
+    content.contentEditable = String(this.editable);
+    content.spellcheck = this.editable;
+    content.innerHTML = sanitizeHtmlFragment(this.source);
+    removeUnsafeHtmlNodes(content);
+    secureRenderedHtml(content);
+    if (!content.childNodes.length) {
       const placeholder = document.createElement('span');
       placeholder.className = 'markda-html-empty';
       placeholder.textContent = t('emptyHtmlBlock');
-      container.append(placeholder);
+      content.append(placeholder);
     }
+    container.append(content);
+    if (!this.editable) return container;
     const gate = new CompositionCommitGate();
     let timer: number | undefined;
     let dirty = false;
-    const commit = () => commitHtmlBlock(this.editor, this.from, container.innerHTML);
+    const commit = () => commitHtmlBlock(this.editor, this.from, content.innerHTML);
     const commitIfDirty = () => {
       if (!dirty) return;
       dirty = false;
       commit();
     };
-    nestedEditableFlushers.set(container, () => {
+    nestedEditableFlushers.set(content, () => {
       window.clearTimeout(timer);
       gate.flush(commitIfDirty);
     });
-    container.addEventListener('focus', () => { activeHtmlFrom = this.from; });
-    container.addEventListener('input', () => {
+    content.addEventListener('focus', () => { activeHtmlFrom = this.from; });
+    content.addEventListener('input', () => {
       dirty = true;
       window.clearTimeout(timer);
       timer = window.setTimeout(() => { timer = undefined; gate.request(commitIfDirty); }, 100);
     });
-    container.addEventListener('compositionstart', () => gate.start());
-    container.addEventListener('compositionend', () => gate.end(commitIfDirty));
-    container.addEventListener('keydown', (event) => {
+    content.addEventListener('compositionstart', () => gate.start());
+    content.addEventListener('compositionend', () => gate.end(commitIfDirty));
+    content.addEventListener('keydown', (event) => {
       runEditableHistoryShortcut(event, this.editor, () => {
         window.clearTimeout(timer);
         gate.flush(commitIfDirty);
       });
     });
-    container.addEventListener('blur', () => {
+    content.addEventListener('blur', () => {
       window.clearTimeout(timer);
       gate.flush(commitIfDirty);
       if (activeHtmlFrom === this.from) activeHtmlFrom = undefined;
@@ -2192,7 +2262,8 @@ class HtmlBlockWidget extends WidgetType {
 
   ignoreEvent(): boolean { return true; }
   eq(other: HtmlBlockWidget): boolean {
-    return other.from === this.from && (activeHtmlFrom === this.from || other.source === this.source);
+    return other.from === this.from && other.editable === this.editable
+      && (activeHtmlFrom === this.from || other.source === this.source);
   }
 }
 
@@ -3532,6 +3603,68 @@ function buildSoftBreakDecorations(
  * which CodeMirror only accepts from a state field (`blockDecorationsField`), not
  * from a view plugin's `decorations` property.
  */
+class SelectableBlockWidget extends WidgetType {
+  constructor(
+    private readonly inner: WidgetType,
+    private readonly sourceFrom: number,
+    private readonly sourceTo: number,
+  ) { super(); }
+
+  toDOM(editor: EditorView): HTMLElement {
+    const dom = this.inner.toDOM(editor);
+    dom.classList.add('markda-selectable-block');
+    dom.dataset.markdaSourceFrom = String(this.sourceFrom);
+    dom.dataset.markdaSourceTo = String(this.sourceTo);
+    updateBlockSelectionElement(dom, editor.state.selection.main);
+    return dom;
+  }
+
+  eq(other: SelectableBlockWidget): boolean {
+    return this.sourceFrom === other.sourceFrom && this.sourceTo === other.sourceTo
+      && this.inner.constructor === other.inner.constructor && this.inner.eq(other.inner);
+  }
+
+  get estimatedHeight(): number { return this.inner.estimatedHeight; }
+  get lineBreaks(): number { return this.inner.lineBreaks; }
+  ignoreEvent(event: Event): boolean { return this.inner.ignoreEvent(event); }
+  coordsAt(dom: HTMLElement, pos: number, side: number) { return this.inner.coordsAt(dom, pos, side); }
+  destroy(dom: HTMLElement): void { this.inner.destroy(dom); }
+}
+
+function createBlockSelectionHighlightPlugin() {
+  return ViewPlugin.fromClass(class {
+    constructor(editor: EditorView) {
+      updateBlockSelectionDOM(editor);
+    }
+
+    update(update: ViewUpdate): void {
+      if (update.selectionSet || update.docChanged || update.viewportChanged) {
+        updateBlockSelectionDOM(update.view);
+      }
+    }
+
+    docViewUpdate(editor: EditorView): void {
+      updateBlockSelectionDOM(editor);
+    }
+  });
+}
+
+function updateBlockSelectionDOM(editor: EditorView): void {
+  editor.dom.querySelectorAll<HTMLElement>('.markda-selectable-block').forEach((element) => {
+    updateBlockSelectionElement(element, editor.state.selection.main);
+  });
+}
+
+function updateBlockSelectionElement(element: HTMLElement, selection: EditorSelection['main']): void {
+  const from = Number(element.dataset.markdaSourceFrom);
+  const to = Number(element.dataset.markdaSourceTo);
+  element.classList.toggle(
+    'markda-block-selection',
+    !selection.empty && Number.isInteger(from) && Number.isInteger(to)
+      && from < selection.to && to > selection.from,
+  );
+}
+
 function buildBlockDecorations(editor: EditorView): DecorationSet {
   const decorations: { from: number; to?: number; decoration: Decoration }[] = [];
   const collapsedBlankLineStarts = new Set<number>();
@@ -3583,8 +3716,8 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
         });
         continue;
       }
-      const htmlBlock = settings.markdown.html && settings.security.allowUnsafeHtml && /^\s*</u.test(text)
-        ? findSyntaxAncestor(editor.state, Math.min(line.from + text.search(/\S/u), line.to), 'HTMLBlock')
+      const htmlBlock = settings.markdown.html && /^\s*</u.test(text)
+        ? findHtmlBlock(editor.state, lineNumber)
         : undefined;
       if (htmlBlock && editor.state.doc.lineAt(htmlBlock.from).number === lineNumber) {
         const endLine = editor.state.doc.lineAt(Math.max(htmlBlock.from, htmlBlock.to - 1));
@@ -3592,7 +3725,12 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
           from: htmlBlock.from,
           to: blockDecorationTo(editor.state, endLine.to),
           decoration: Decoration.replace({
-            widget: new HtmlBlockWidget(editor, htmlBlock.from, editor.state.sliceDoc(htmlBlock.from, htmlBlock.to)),
+            widget: new HtmlBlockWidget(
+              editor,
+              htmlBlock.from,
+              editor.state.sliceDoc(htmlBlock.from, htmlBlock.to),
+              settings.security.allowUnsafeHtml,
+            ),
             block: true,
           }),
         });
@@ -3775,7 +3913,26 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
     });
   }
   if (decorations.length === 0) return Decoration.none;
-  return Decoration.set(decorations.map((item) => item.decoration.range(item.from, item.to ?? item.from)), true);
+  return Decoration.set(decorations.map((item) => {
+    const to = item.to ?? item.from;
+    return selectableBlockDecoration(editor, item.from, to, item.decoration).range(item.from, to);
+  }), true);
+}
+
+function selectableBlockDecoration(
+  editor: EditorView,
+  from: number,
+  to: number,
+  decoration: Decoration,
+): Decoration {
+  if (!decoration.spec.block || !decoration.spec.widget || to <= from) return decoration;
+  // Block replacements include the following line break for layout. Selecting
+  // only that character does not select the rendered object.
+  const sourceTo = editor.state.sliceDoc(to - 1, to) === '\n' ? to - 1 : to;
+  return Decoration.replace({
+    ...decoration.spec,
+    widget: new SelectableBlockWidget(decoration.spec.widget as WidgetType, from, sourceTo),
+  });
 }
 
 function isBlockDecorationCandidate(line: string): boolean {
@@ -3828,6 +3985,24 @@ function findSyntaxAncestor(
   }
 }
 
+function findHtmlBlock(state: EditorState, openingLineNumber: number): { from: number; to: number } | undefined {
+  const openingLine = state.doc.line(openingLineNumber);
+  const openingTag = openingLine.text.match(/^\s*<([A-Za-z][\w-]*)\b[^>]*>/u)?.[1];
+  if (openingTag
+    && /^(?:address|article|aside|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)$/iu.test(openingTag)
+    && !/\/>\s*$/u.test(openingLine.text)
+    && !/^(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/iu.test(openingTag)) {
+    const closingTag = new RegExp(`</${openingTag}\\s*>`, 'iu');
+    for (let lineNumber = openingLineNumber; lineNumber <= state.doc.lines; lineNumber++) {
+      const line = state.doc.line(lineNumber);
+      if (closingTag.test(line.text)) return { from: openingLine.from, to: line.to };
+      if (lineNumber > openingLineNumber && !line.text.trim()) break;
+    }
+  }
+  const position = Math.min(openingLine.from + openingLine.text.search(/\S/u), openingLine.to);
+  return findSyntaxAncestor(state, position, 'HTMLBlock');
+}
+
 function addSourceLinkDecorations(
   output: { from: number; to?: number; decoration: Decoration }[], lineFrom: number, text: string,
 ): void {
@@ -3858,7 +4033,7 @@ function addInlineDecorations(
   references: ReadonlyMap<string, MarkdownReferenceDefinition>,
 ): void {
   const linkRanges: { start: number; end: number }[] = [];
-  if (settings.markdown.html && settings.security.allowUnsafeHtml) {
+  if (settings.markdown.html) {
     for (const match of text.matchAll(/<([A-Za-z][\w-]*)(?:\s[^<>]*?)?>[\s\S]*?<\/\1>/gu)) {
       const start = lineFrom + (match.index ?? 0);
       const end = start + match[0].length;
@@ -4184,7 +4359,7 @@ function decodeHtmlEntity(source: string): string {
 function commitHtmlBlock(editor: EditorView, from: number, html: string): void {
   const block = findSyntaxAncestor(editor.state, Math.min(from, editor.state.doc.length), 'HTMLBlock');
   if (!block) return;
-  const safeHtml = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } }).replace(/\r\n?/gu, '\n');
+  const safeHtml = sanitizeEditableHtmlSource(html);
   if (editor.state.sliceDoc(block.from, block.to) !== safeHtml) {
     editor.dispatch({ changes: { from: block.from, to: block.to, insert: safeHtml } });
   }
@@ -4317,6 +4492,7 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .table-toolbar{grid-area:2/1;align-self:start;z-index:300;display:none;width:100%;min-height:34px;padding:3px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{grid-area:2/1;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
 .cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:16px;color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:30px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:1.6}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:1.6}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
+.cm-editor .markda-block-selection{position:relative}.cm-editor .markda-block-selection::after{content:"";position:absolute;inset:0;z-index:20;pointer-events:none;border:2px solid var(--markda-selection);border-radius:4px;background:color-mix(in srgb,var(--markda-selection) 48%,transparent)}
 .cm-editor .cm-panels-top:has(.cm-search){position:absolute;top:0;right:14px;left:auto;z-index:400;color:var(--markda-fg);background:transparent;border:0}
 .cm-editor .cm-panel.cm-search{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) repeat(6,24px);grid-template-rows:24px 24px;gap:3px;width:min(454px,calc(100vw - 32px));padding:4px 28px;color:var(--markda-fg);background:var(--markda-find-widget);border:1px solid var(--markda-border);border-top:0;box-shadow:0 2px 8px var(--markda-widget-shadow);font:13px/1 var(--markda-font-body)}
 .cm-editor .cm-panel.cm-search.markda-replace-collapsed{grid-template-rows:24px}.cm-search.markda-replace-collapsed input[name=replace],.cm-search.markda-replace-collapsed button[name=replace],.cm-search.markda-replace-collapsed button[name=replaceAll]{display:none!important}
@@ -4341,7 +4517,7 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .markda-image-controls{display:flex;justify-content:center;gap:4px;margin-top:4px}.markda-image-controls button{font-size:12px;min-height:24px}.markda-image-editor{display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-top:6px}.markda-image-editor[hidden]{display:none}
 .markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-math-wrap{display:flow-root}.markda-block-source-editor{display:block;width:100%;min-height:0;overflow-y:hidden;resize:none;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
 .markda-footnote-definition{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;margin:.45em 0;padding:6px 9px;color:var(--markda-muted);background:var(--markda-surface);border-radius:4px}.markda-footnote-definition-content{min-height:1.5em;white-space:pre-wrap;outline:none}.markda-reference-definition{display:grid;grid-template-columns:minmax(7em,.5fr) auto minmax(10em,1fr) minmax(8em,.7fr);gap:6px;align-items:center;margin:.45em 0;padding:6px 9px;background:var(--markda-surface);border-radius:4px}.markda-reference-definition input{min-width:0;padding:4px 6px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}
-.markda-html-block{margin:.6em 0;padding:8px;outline:none;border:1px solid transparent;border-radius:4px}.markda-html-block:focus{border-color:var(--markda-border)}.markda-html-empty{color:var(--markda-muted);font-style:italic}
+.markda-html-block{margin:.6em 0;padding:8px;outline:none;border:1px solid transparent;border-radius:4px}.markda-html-block:focus-within{border-color:var(--markda-border)}.markda-html-block-content{outline:none}.markda-html-empty{color:var(--markda-muted);font-style:italic}
 .markda-live-code{margin:15px 0;max-width:100%;overflow:auto;font-family:var(--markda-font-mono);font-size:.9em}.markda-live-code pre{margin:0;padding:8px 4px 6px;border:1px solid var(--markda-border);border-radius:3px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-syntax-comment{color:var(--markda-syntax-comment)}.markda-syntax-constant{color:var(--markda-syntax-constant)}.markda-syntax-entity{color:var(--markda-syntax-entity)}.markda-syntax-keyword{color:var(--markda-syntax-keyword)}.markda-syntax-string{color:var(--markda-syntax-string)}.markda-syntax-variable{color:var(--markda-syntax-variable)}.markda-code-rendered{padding:10px}
 .markda-trailing-paragraph{min-height:1.7em;margin-top:2px;border-radius:3px;cursor:text}.markda-trailing-paragraph:hover,.markda-trailing-paragraph:focus{background:var(--markda-line-highlight);outline:none}.markda-trailing-paragraph:focus::before{content:"";display:inline-block;height:1.35em;border-left:2px solid var(--markda-cursor-color);box-shadow:none;vertical-align:middle}
 .markda-live-table-wrap{overflow:auto;margin:.8em 0;color:var(--markda-fg)}.markda-live-table-wrap table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap tbody tr:nth-child(2n){background:var(--markda-surface)}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:6px 13px;min-width:70px;resize:horizontal;overflow:auto;color:var(--markda-fg);background:transparent}.markda-live-table-wrap th{font-weight:700;background:var(--markda-surface)}.markda-live-table-wrap th:focus-visible,.markda-live-table-wrap td:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--markda-focus)}.markda-live-table-wrap code{padding:0 2px;color:var(--markda-fg);background:var(--markda-inline-code);border:1px solid var(--markda-border);border-radius:3px;font-family:var(--markda-font-mono);font-size:.9em}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
