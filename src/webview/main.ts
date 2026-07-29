@@ -33,7 +33,7 @@ import {
   findMarkdownTable, serializeMarkdownTable, tableCursor, type MarkdownTable, type TableAlignment,
 } from '../table.js';
 import {
-  CompositionCommitGate, documentLineSeparator, editablePlainText, historyShortcut, htmlFragmentToMarkdown, liveEnterEdit,
+  CompositionCommitGate, containsEmojiShortcode, documentLineSeparator, editablePlainText, historyShortcut, htmlFragmentToMarkdown, liveEnterEdit,
   markdownPairDeletion, markdownPairEdit, normalizeDocumentText, serializedDocumentOffset, serializeDocumentText,
   type DocumentLineSeparator, type TextEdit,
 } from './editorLogic.js';
@@ -103,10 +103,17 @@ let yamlPromise: Promise<typeof import('yaml')> | undefined;
 let emojiPromise: Promise<void> | undefined;
 let emojiPlugin = lightEmojiPlugin;
 let emojiNames: Readonly<Record<string, string>> = lightEmojiNames;
-const initialDerivedState = analyzeDocument(initialDocument?.text ?? '');
 let cachedDocumentText = initialDocument?.text ?? '';
-let cachedDocumentStatistics = initialDerivedState.statistics;
-let cachedDocumentHeadings = initialDerivedState.headings;
+let cachedDocumentStatistics: DocumentStatistics = {
+  words: 0,
+  characters: 0,
+  charactersWithoutSpaces: 0,
+  lines: initialDocument?.text ? 1 : 0,
+  readingMinutes: 0,
+  selectionWords: 0,
+  selectionCharacters: 0,
+};
+let cachedDocumentHeadings: Heading[] = [];
 let cachedTable: MarkdownTable | undefined;
 let activeTableFrom: number | undefined;
 let activeLiveTableCursor: { from: number; row: number; column: number } | undefined;
@@ -170,6 +177,12 @@ document.body.innerHTML = `<style>${getStyles()}</style>
     <button data-toolbar-item data-command="toggleBold" title="${t('bold')} (Ctrl+B)" aria-label="${t('bold')}"><i class="codicon codicon-bold" aria-hidden="true"></i></button>
     <button data-toolbar-item data-command="toggleItalic" title="${t('italic')} (Ctrl+I)" aria-label="${t('italic')}"><i class="codicon codicon-italic" aria-hidden="true"></i></button>
     <button data-toolbar-item data-command="insertLink" title="${t('insertLink')} (Ctrl+K)" aria-label="${t('insertLink')}"><i class="codicon codicon-link" aria-hidden="true"></i></button>
+    <button class="markda-toolbar-wide" data-toolbar-item data-command="toggleBulletList" title="${t('bulletedList')}" aria-label="${t('bulletedList')}"><i class="codicon codicon-list-unordered" aria-hidden="true"></i></button>
+    <button class="markda-toolbar-wide" data-toolbar-item data-command="toggleOrderedList" title="${t('orderedList')}" aria-label="${t('orderedList')}"><i class="codicon codicon-list-ordered" aria-hidden="true"></i></button>
+    <button class="markda-toolbar-wide" data-toolbar-item data-command="toggleBlockquote" title="${t('blockquote')}" aria-label="${t('blockquote')}"><i class="codicon codicon-quote" aria-hidden="true"></i></button>
+    <button class="markda-toolbar-wide" data-toolbar-item data-command="insertCodeBlock" title="${t('codeBlock')}" aria-label="${t('codeBlock')}"><i class="codicon codicon-symbol-method" aria-hidden="true"></i></button>
+    <button class="markda-toolbar-wide" data-toolbar-item data-command="insertTable" title="${t('insertTable')}" aria-label="${t('insertTable')}"><i class="codicon codicon-table" aria-hidden="true"></i></button>
+    <button class="markda-toolbar-wide" data-toolbar-item data-command="insertImage" title="${t('insertImages')}" aria-label="${t('insertImages')}"><i class="codicon codicon-file-media" aria-hidden="true"></i></button>
     <details class="markda-toolbar-menu">
       <summary data-toolbar-item aria-label="${t('moreFormatting')}" title="${t('moreFormatting')}"><i class="codicon codicon-ellipsis" aria-hidden="true"></i><span>${t('moreFormatting')}</span></summary>
       <div class="markda-toolbar-popover" role="group" aria-label="${t('moreFormatting')}">
@@ -699,7 +712,10 @@ function onEditorUpdate(update: ViewUpdate): void {
     updateTableToolbar();
     scheduleDerivedStateUpdate();
     if (update.state.field(modeField).previewVisible) schedulePreviewRender();
-    if (!emojiPromise && update.state.sliceDoc(Math.max(0, update.state.selection.main.head - 64), Math.min(update.state.doc.length, update.state.selection.main.head + 64)).includes(':')) {
+    if (!emojiPromise && containsEmojiShortcode(update.state.sliceDoc(
+      Math.max(0, update.state.selection.main.head - 64),
+      Math.min(update.state.doc.length, update.state.selection.main.head + 64),
+    ))) {
       void loadFullEmoji();
     }
   }
@@ -1379,6 +1395,8 @@ function syncScroll(source: HTMLElement, target: HTMLElement): void {
 }
 
 function updateDocumentDerivedState(): void {
+  derivedStateTimer = undefined;
+  if (typeof document === 'undefined' || !view.dom.isConnected) return;
   const source = view.state.doc.toString();
   cachedDocumentText = source;
   cachedTable = undefined;
@@ -5128,7 +5146,7 @@ html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--markda-fg);
 .markda-meta{font-size:0!important;line-height:0!important;letter-spacing:0!important;color:transparent!important}.markda-meta.markda-meta-expanded{font-size:inherit!important;line-height:inherit!important;letter-spacing:inherit!important;color:var(--markda-muted)!important}
 .markda-list-bullet-source{font-size:0;color:var(--markda-muted)}.markda-list-bullet-source::after{content:'•';display:inline-block;min-width:.8em;font-size:var(--vscode-editor-font-size);font-weight:700;text-align:center}.markda-list-bullet-source.markda-meta-expanded{font-size:inherit;color:inherit}.markda-list-bullet-source.markda-meta-expanded::after{content:none}
 button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--markda-hover)}button.active{background:var(--markda-active)}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--markda-focus);outline-offset:2px}
-.markda-shell{position:relative;height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr) 24px}.markda-toolbar{position:relative;grid-column:1;grid-row:1;z-index:500;min-height:48px;padding:4px 8px;display:flex;flex-wrap:nowrap;align-items:center;gap:2px;overflow:visible;background:color-mix(in srgb,var(--markda-elevated) 92%,transparent);border:0;border-bottom:1px solid color-mix(in srgb,var(--markda-border) 78%,transparent);border-radius:0;box-shadow:none;backdrop-filter:blur(12px)}.markda-toolbar>button,.markda-toolbar-menu>summary{display:flex;gap:5px;align-items:center;justify-content:center;flex:0 0 auto;min-width:40px;min-height:40px;padding:4px 8px;border-radius:6px;cursor:pointer}.markda-toolbar>button.active,.markda-toolbar-popover button.active{color:var(--markda-accent);background:color-mix(in srgb,var(--markda-active) 72%,transparent)}.markda-style-picker{flex:0 1 auto;min-width:0}.markda-style-picker select{height:40px;max-width:9em;padding:0 8px;color:var(--markda-fg);background:transparent;border:1px solid transparent;border-radius:6px}.markda-style-picker select:hover{background:var(--markda-hover)}.markda-style-picker select:focus-visible{outline:2px solid var(--markda-focus);outline-offset:-2px}.markda-toolbar-menu{position:relative;flex:0 0 auto}.markda-toolbar-menu>summary{list-style:none}.markda-toolbar-menu>summary::-webkit-details-marker{display:none}.markda-toolbar-menu[open]>summary{color:var(--markda-accent);background:var(--markda-active)}.markda-toolbar-popover{position:absolute;top:calc(100% + 5px);right:0;z-index:700;display:grid;gap:2px;width:max-content;min-width:220px;max-width:calc(100vw - 16px);padding:6px;color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px var(--markda-widget-shadow)}.markda-toolbar-popover button{display:flex;align-items:center;gap:9px;width:100%;min-height:40px;padding:6px 10px;text-align:left;border-radius:5px}.markda-toolbar-popover button i,.markda-toolbar-popover button>.math-icon,.markda-toolbar-popover button>span:first-child{display:inline-grid;place-items:center;width:20px;flex:0 0 20px}.toolbar-separator{height:16px;border-left:1px solid color-mix(in srgb,var(--markda-border) 72%,transparent);margin:0 6px}.toolbar-spacer{flex:1 1 12px;min-width:0}.math-icon{font:bold 17px serif}
+.markda-shell{position:relative;height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr) 24px}.markda-toolbar{position:relative;grid-column:1;grid-row:1;z-index:500;min-height:48px;padding:4px 8px;display:flex;flex-wrap:nowrap;align-items:center;gap:2px;overflow:visible;background:color-mix(in srgb,var(--markda-elevated) 92%,transparent);border:0;border-bottom:1px solid color-mix(in srgb,var(--markda-border) 78%,transparent);border-radius:0;box-shadow:none;backdrop-filter:blur(12px)}.markda-toolbar>button,.markda-toolbar-menu>summary{display:flex;gap:5px;align-items:center;justify-content:center;flex:0 0 auto;min-width:40px;min-height:40px;padding:4px 8px;border-radius:6px;cursor:pointer}.markda-toolbar>button.active,.markda-toolbar-popover button.active{color:var(--markda-accent);background:color-mix(in srgb,var(--markda-active) 72%,transparent)}.markda-toolbar-wide{display:none!important}.markda-style-picker{flex:0 1 auto;min-width:0}.markda-style-picker select{height:40px;max-width:9em;padding:0 8px;color:var(--markda-fg);background:transparent;border:1px solid transparent;border-radius:6px}.markda-style-picker select:hover{background:var(--markda-hover)}.markda-style-picker select:focus-visible{outline:2px solid var(--markda-focus);outline-offset:-2px}.markda-toolbar-menu{position:relative;flex:0 0 auto}.markda-toolbar-menu>summary{list-style:none}.markda-toolbar-menu>summary::-webkit-details-marker{display:none}.markda-toolbar-menu[open]>summary{color:var(--markda-accent);background:var(--markda-active)}.markda-toolbar-popover{position:absolute;top:calc(100% + 5px);right:0;z-index:700;display:grid;gap:2px;width:max-content;min-width:220px;max-width:calc(100vw - 16px);padding:6px;color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px var(--markda-widget-shadow)}.markda-toolbar-popover button{display:flex;align-items:center;gap:9px;width:100%;min-height:40px;padding:6px 10px;text-align:left;border-radius:5px}.markda-toolbar-popover button i,.markda-toolbar-popover button>.math-icon,.markda-toolbar-popover button>span:first-child{display:inline-grid;place-items:center;width:20px;flex:0 0 20px}.toolbar-separator{height:16px;border-left:1px solid color-mix(in srgb,var(--markda-border) 72%,transparent);margin:0 6px}.toolbar-spacer{flex:1 1 12px;min-width:0}.math-icon{font:bold 17px serif}
 .table-toolbar{grid-column:1;grid-row:2;z-index:300;display:none;width:100%;min-height:42px;padding:7px 52px 7px 10px;flex-wrap:wrap;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow:hidden}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{grid-column:1;grid-row:3;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:8px 30px 30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
 .cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:var(--markda-font-size,16px);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:8px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{width:100%;min-width:0;max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-line+.cm-line{margin-top:var(--markda-paragraph-spacing,0)}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionLayer{display:none}.cm-selectionBackground{background:var(--markda-selection)!important}.markda-selected-line-break{width:.5em}
@@ -5174,7 +5192,7 @@ dialog{color:var(--markda-fg);background:var(--markda-elevated);border:1px solid
 body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
 #preview{color:var(--markda-fg);background:var(--markda-bg)}#preview h1,#preview h2,#preview h3,#preview h4,#preview h5,#preview h6{position:relative;margin:1rem 0;color:var(--markda-fg);font-weight:700;line-height:1.4}#preview h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}#preview h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}#preview h3{font-size:1.5em;line-height:1.43}#preview h4{font-size:1.25em}#preview h5{font-size:1em}#preview h6{font-size:1em;color:var(--markda-muted)}#preview p,#preview blockquote,#preview ul,#preview ol,#preview dl,#preview table{margin:.8em 0}#preview ul,#preview ol{padding-left:30px}#preview li>ul,#preview li>ol{margin:0}#preview hr{box-sizing:content-box;height:2px;margin:16px 0;padding:0;overflow:hidden;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}#preview pre{overflow:auto;margin:15px 0;padding:8px 4px 6px;color:var(--markda-code-fg);background:var(--markda-code-bg);border:1px solid var(--markda-border);border-radius:3px}#preview code{font-family:var(--markda-font-mono);font-size:.9em;color:var(--markda-code-fg)}#preview :not(pre)>code{padding:0 2px;background:var(--markda-code-inline-bg);border:1px solid var(--markda-border);border-radius:3px}#preview pre code{padding:0;color:var(--markda-code-fg);background:transparent;border:0}#preview blockquote{padding:0 15px;color:var(--markda-muted);background:transparent;border-left:4px solid var(--markda-border)}#preview blockquote p{color:inherit}#preview table{border-collapse:collapse;width:100%;padding:0;color:var(--markda-fg);background:var(--markda-bg);word-break:initial}#preview tr:nth-child(2n),#preview thead{background:var(--markda-surface)}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 13px;color:var(--markda-fg);background:transparent}#preview th{font-weight:700}#preview input{accent-color:var(--markda-accent)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
 #preview .markda-toc{margin:1em 0;padding:12px 16px;border:1px solid var(--markda-border);border-radius:6px;background:var(--markda-surface)}#preview .markda-toc ul{list-style:none;margin:0;padding:0}#preview .markda-toc-level-1{margin-left:18px}#preview .markda-toc-level-2{margin-left:36px}#preview .markda-toc-level-3{margin-left:54px}#preview .markda-toc-level-4,#preview .markda-toc-level-5{margin-left:72px}
-@media(max-width:760px){.markda-toolbar{gap:0;padding-inline:4px}.markda-toolbar-menu>summary span{display:none}.markda-style-picker select{max-width:84px;padding-inline:5px}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}#document-section-status{display:none}}@media(max-width:340px){.markda-style-picker select{max-width:68px}}
+@media(min-width:1100px){.markda-toolbar-wide{display:flex!important}}@media(max-width:760px){.markda-toolbar{gap:0;padding-inline:4px}.markda-toolbar-menu>summary span{display:none}.markda-style-picker select{max-width:84px;padding-inline:5px}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}#document-section-status{display:none}}@media(max-width:340px){.markda-style-picker select{max-width:68px}}
   @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 `; }
 
@@ -5186,6 +5204,6 @@ applyViewState(initialViewState);
 if (initialDocument) {
   applySettings(true);
   scheduleDerivedStateUpdate();
-  if (initialDocument.text.includes(':')) void loadFullEmoji();
+  if (containsEmojiShortcode(initialDocument.text)) void loadFullEmoji();
 }
 vscode.postMessage({ type: 'ready' });

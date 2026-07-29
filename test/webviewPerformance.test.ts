@@ -45,7 +45,7 @@ describe('large-document startup performance', { timeout: 10_000 }, () => {
     expect(__getEditorView().state.doc.lines).toBe(20_000);
     // Vitest runs files in parallel, so leave headroom for CPU contention while
     // retaining a firm guard against synchronous large-document startup stalls.
-    expect(elapsed).toBeLessThan(7_500);
+    expect(elapsed).toBeLessThan(7_000);
   });
 
   it('keeps cursor movement in a 20,000-line document off the full-document analysis path', async () => {
@@ -80,6 +80,10 @@ describe('large-document startup performance', { timeout: 10_000 }, () => {
 
     const { __getEditorView } = await import('../src/webview/main.js');
     const editor = __getEditorView();
+    await vi.waitFor(
+      () => expect(document.querySelector('#document-section-status')?.textContent).toContain('Section'),
+      { timeout: 2_000 },
+    );
     const started = performance.now();
     for (let index = 1; index <= 100; index++) {
       editor.dispatch({ selection: { anchor: Math.floor(editor.state.doc.length * index / 101) } });

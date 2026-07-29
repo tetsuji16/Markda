@@ -50,6 +50,10 @@ export function normalizeDocumentText(text: string): string {
   return text.replace(/\r\n|\r/gu, '\n');
 }
 
+export function containsEmojiShortcode(text: string): boolean {
+  return /(?:^|[\s([]):[a-z0-9][a-z0-9_+-]*:(?=$|[\s)\].,!?:;])/iu.test(text);
+}
+
 export function serializeDocumentText(text: string, separator: DocumentLineSeparator): string {
   return separator === '\n' ? text : text.replace(/\n/gu, separator);
 }

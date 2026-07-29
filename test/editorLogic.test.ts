@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  CompositionCommitGate, documentLineSeparator, domFragmentToMarkdown, historyShortcut, liveEnterEdit,
+  CompositionCommitGate, containsEmojiShortcode, documentLineSeparator, domFragmentToMarkdown, historyShortcut, liveEnterEdit,
   markdownPairDeletion, markdownPairEdit, normalizeDocumentText, serializedDocumentOffset, serializeDocumentText,
 } from '../src/webview/editorLogic.js';
+
+describe('containsEmojiShortcode', () => {
+  it('distinguishes emoji shortcodes from ordinary colons', () => {
+    expect(containsEmojiShortcode('Launch :rocket: now')).toBe(true);
+    expect(containsEmojiShortcode('https://example.com:8080/path')).toBe(false);
+    expect(containsEmojiShortcode('Time: 12:30')).toBe(false);
+  });
+});
 
 describe('document line endings', () => {
   it('round-trips LF, CRLF, and legacy CR documents through the normalized editor model', () => {
