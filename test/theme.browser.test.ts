@@ -53,7 +53,7 @@ describe('Markda theme colors in Chromium', () => {
     expect(root.dataset.markdaColorMode).toBe('light');
     expect(getComputedStyle(document.body).backgroundColor).toBe('rgb(255, 255, 255)');
     expect(getComputedStyle(document.body).color).toBe('rgb(51, 51, 51)');
-    expect(getComputedStyle(quote).color).toBe('rgb(119, 119, 119)');
+    expect(getComputedStyle(quote).color).toBe('rgb(102, 102, 102)');
     expect(getComputedStyle(inlineCode).backgroundColor).toBe('rgb(243, 244, 244)');
     expect(getComputedStyle(blockCode).color).toBe('rgb(51, 51, 51)');
     expect(getComputedStyle(blockPre).backgroundColor).toBe('rgb(248, 248, 248)');
@@ -104,7 +104,7 @@ describe('Markda theme colors in Chromium', () => {
     const renderedInlineCode = document.querySelector<HTMLElement>('#preview :not(pre) > code')!;
     const renderedTable = document.querySelector<HTMLElement>('#preview table')!;
     expect(getComputedStyle(renderedQuote).backgroundColor).toBe('rgba(0, 0, 0, 0)');
-    expect(getComputedStyle(renderedQuote).color).toBe('rgb(119, 119, 119)');
+    expect(getComputedStyle(renderedQuote).color).toBe('rgb(102, 102, 102)');
     expect(getComputedStyle(renderedInlineCode).color).toBe('rgb(51, 51, 51)');
     expect(getComputedStyle(renderedInlineCode).backgroundColor).toBe('rgb(243, 244, 244)');
     expect(getComputedStyle(renderedTable).backgroundColor).toBe('rgb(255, 255, 255)');

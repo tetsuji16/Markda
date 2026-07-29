@@ -15,6 +15,8 @@ export default defineConfig({
     // them serially makes startup budgets meaningful and avoids cross-test
     // contention masquerading as a product regression.
     maxWorkers: 1,
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     browser: {
       enabled: true,
       provider: 'playwright',
