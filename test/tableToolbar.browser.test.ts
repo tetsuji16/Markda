@@ -38,6 +38,12 @@ describe('live table toolbar in Chromium', () => {
     await import('../src/webview/main.js');
     await settle();
 
+    const editorToolbar = document.querySelector<HTMLElement>('#editor-toolbar')!;
+    expect(document.querySelector('#toolbar-toggle')).toBeNull();
+    expect(getComputedStyle(editorToolbar).flexWrap).toBe('wrap');
+    expect(getComputedStyle(editorToolbar).overflowX).toBe('hidden');
+    expect(editorToolbar.scrollWidth).toBeLessThanOrEqual(editorToolbar.clientWidth);
+
     const toolbar = document.querySelector<HTMLElement>('#table-toolbar')!;
     expect(getComputedStyle(toolbar).display).toBe('none');
     expect(document.querySelector('.markda-inline-table-controls')).toBeNull();
@@ -47,6 +53,9 @@ describe('live table toolbar in Chromium', () => {
     document.querySelector<HTMLElement>('[data-table-row="0"][data-table-column="0"]')!.focus();
     await settle();
     expect(getComputedStyle(toolbar).display).toBe('flex');
+    expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
+    expect(getComputedStyle(toolbar).overflowX).toBe('hidden');
+    expect(toolbar.scrollWidth).toBeLessThanOrEqual(toolbar.clientWidth);
     expect(followingHeading.getBoundingClientRect().top).toBeCloseTo(followingHeadingTop, 0);
 
     const rowAfter = document.querySelector<HTMLButtonElement>('[data-table-command="row-after"]')!;

@@ -98,12 +98,8 @@ describe('live document features', () => {
 
     const theme = document.querySelector<HTMLButtonElement>('#theme-toggle')!;
     const toolbar = document.querySelector<HTMLElement>('#editor-toolbar')!;
-    const toolbarToggle = document.querySelector<HTMLButtonElement>('#toolbar-toggle')!;
-    expect(toolbar.classList.contains('expanded')).toBe(true);
-    toolbarToggle.click();
-    expect(toolbar.classList.contains('expanded')).toBe(false);
-    expect(toolbarToggle.getAttribute('aria-expanded')).toBe('false');
-    toolbarToggle.click();
+    expect(document.querySelector('#toolbar-toggle')).toBeNull();
+    expect(toolbar.querySelectorAll<HTMLButtonElement>('button[data-command]').length).toBeGreaterThan(0);
     expect(theme.hasAttribute('aria-pressed')).toBe(false);
     expect(theme.getAttribute('aria-label')).toContain('Current theme: Auto');
     theme.click();
