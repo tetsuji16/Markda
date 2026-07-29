@@ -109,6 +109,20 @@ describe('Markda theme colors in Chromium', () => {
     expect(getComputedStyle(renderedInlineCode).backgroundColor).toBe('rgb(243, 244, 244)');
     expect(getComputedStyle(renderedTable).backgroundColor).toBe('rgb(255, 255, 255)');
 
+    // Code colors have their own theme contract. Component-level changes to
+    // the generic foreground/surface palette must not make code stale or
+    // illegible, which was the root cause of the recurring regression.
+    root.style.setProperty('--markda-fg', '#123456');
+    root.style.setProperty('--markda-surface', '#654321');
+    root.style.setProperty('--markda-inline-code', '#abcdef');
+    expect(getComputedStyle(blockCode).color).toBe('rgb(51, 51, 51)');
+    expect(getComputedStyle(blockPre).backgroundColor).toBe('rgb(248, 248, 248)');
+    expect(getComputedStyle(inlineCode).backgroundColor).toBe('rgb(243, 244, 244)');
+    expect(getComputedStyle(renderedInlineCode).backgroundColor).toBe('rgb(243, 244, 244)');
+    root.style.removeProperty('--markda-fg');
+    root.style.removeProperty('--markda-surface');
+    root.style.removeProperty('--markda-inline-code');
+
     document.querySelector<HTMLButtonElement>('#theme-toggle')!.click();
     await settle();
 
