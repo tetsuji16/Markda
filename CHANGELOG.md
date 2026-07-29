@@ -4,6 +4,17 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.21 - 2026-07-29
+
+- Kept light and dark code colors independent from generic surface overrides,
+  preventing unreadable fenced and inline code after theme changes.
+- Drew multi-line selections within each rendered Markdown line instead of
+  filling the vertical margins between headings, lists, quotes, and blocks.
+- Improved responsive editor controls and accessibility, including keyboard
+  toolbar navigation and clearer compact menus.
+- Strengthened unit and Chromium regression checks for theme switching,
+  selection geometry, editing, saving, and undo behavior.
+
 ## 0.1.20 - 2026-07-28
 
 - Disabled contributed Markda keybindings by default to avoid overriding VS

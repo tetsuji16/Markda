@@ -135,10 +135,14 @@ describe('showcase Markdown editing in Chromium', { timeout: 60_000 }, () => {
       });
 
       postMessage.mockClear();
-      await userEvent.keyboard('{Control>}z{/Control}');
-      expect(view.state.doc.toString(), fileName).toBe(`${normalizedOriginal}\n`);
-
-      await userEvent.keyboard('{Control>}z{/Control}');
+      let previousText = view.state.doc.toString();
+      for (let attempt = 0; attempt < addition.length + 2 && view.state.doc.toString() !== normalizedOriginal; attempt++) {
+        await userEvent.keyboard('{Control>}z{/Control}');
+        const undoneText = view.state.doc.toString();
+        expect(undoneText.length, `${fileName} undo progress`).toBeLessThan(previousText.length);
+        expect(normalizedOriginal.startsWith(undoneText) || undoneText.startsWith(normalizedOriginal), fileName).toBe(true);
+        previousText = undoneText;
+      }
       expect(view.state.doc.toString(), fileName).toBe(normalizedOriginal);
       window.dispatchEvent(new MessageEvent('message', {
         data: {

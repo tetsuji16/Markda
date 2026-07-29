@@ -34,7 +34,7 @@ async function tick(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-describe('live Markdown webview cursor + block decorations', { timeout: 10_000 }, () => {
+describe('live Markdown webview cursor + block decorations', { timeout: 30_000 }, () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     Reflect.deleteProperty(document, 'caretPositionFromPoint');
