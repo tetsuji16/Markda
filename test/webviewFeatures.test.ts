@@ -99,6 +99,15 @@ describe('live document features', () => {
     const theme = document.querySelector<HTMLButtonElement>('#theme-toggle')!;
     const toolbar = document.querySelector<HTMLElement>('#editor-toolbar')!;
     expect(document.querySelector('#toolbar-toggle')).toBeNull();
+    expect(toolbar.getAttribute('role')).toBe('toolbar');
+    const toolbarItems = Array.from(toolbar.querySelectorAll<HTMLElement>('[data-toolbar-item]'));
+    expect(toolbarItems.filter((item) => item.tabIndex === 0)).toHaveLength(1);
+    expect(toolbarItems.filter((item) => item.tabIndex === -1)).toHaveLength(toolbarItems.length - 1);
+    toolbarItems[0]!.focus();
+    toolbarItems[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(toolbarItems[1]);
+    expect(__getEditorView().contentDOM.getAttribute('aria-label')).toBe('markda Markdown editor');
+    expect(document.querySelector('.markda-status')?.getAttribute('aria-label')).not.toContain('{0}');
     expect(toolbar.querySelectorAll<HTMLButtonElement>('button[data-command]').length).toBeGreaterThan(0);
     expect(theme.hasAttribute('aria-pressed')).toBe(false);
     expect(theme.getAttribute('aria-label')).toContain('Current theme: Auto');
