@@ -4,7 +4,10 @@ import { markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language';
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
 import { Annotation, ChangeSet, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from '@codemirror/state';
-import { Decoration, drawSelection, EditorView, highlightActiveLine, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import {
+  Decoration, drawSelection, EditorView, highlightActiveLine, keymap, layer, RectangleMarker, ViewPlugin, WidgetType,
+  type DecorationSet, type ViewUpdate,
+} from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import DOMPurify from 'dompurify';
 import { decodeHTML } from 'entities';
@@ -160,33 +163,45 @@ function createSyntaxHighlightStyle(): HighlightStyle {
 
 document.body.innerHTML = `<style>${getStyles()}</style>
 <div class="markda-shell">
-  <header id="editor-toolbar" class="markda-toolbar" aria-label="${t('editorControls')}">
-    <button id="toolbar-toggle" title="${t('showControls')}" aria-label="${t('showControls')}" aria-controls="editor-toolbar" aria-expanded="false"><i class="codicon codicon-more" aria-hidden="true"></i></button>
-    <button data-command="toggleSourceMode" title="${t('sourceMode')}" aria-label="${t('toggleSourceMode')}" aria-pressed="false"><i class="codicon codicon-code" aria-hidden="true"></i><span>${t('source')}</span></button>
-    <button data-command="toggleFocusMode" title="${t('focusMode')}" aria-label="${t('toggleFocusMode')}" aria-pressed="false"><i class="codicon codicon-target" aria-hidden="true"></i><span>${t('focus')}</span></button>
-    <button data-command="toggleTypewriterMode" title="${t('typewriterMode')}" aria-label="${t('toggleTypewriterMode')}" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i><span>${t('typewriter')}</span></button>
-    <span class="toolbar-separator"></span>
-    <label class="markda-style-picker"><span class="visually-hidden">${t('paragraphStyle')}</span><select id="paragraph-style" title="${t('paragraphStyle')}" aria-label="${t('paragraphStyle')}">
+  <header id="editor-toolbar" class="markda-toolbar" role="toolbar" aria-label="${t('editorControls')}" aria-orientation="horizontal">
+    <label class="markda-style-picker"><span class="visually-hidden">${t('paragraphStyle')}</span><select id="paragraph-style" data-toolbar-item title="${t('paragraphStyle')}" aria-label="${t('paragraphStyle')}">
       <option value="0">${t('paragraph')}</option>${Array.from({ length: 6 }, (_value, index) => `<option value="${index + 1}">${t('heading', index + 1)}</option>`).join('')}
     </select></label>
-    <button data-command="toggleBold" title="${t('bold')} (Ctrl+B)" aria-label="${t('bold')}"><i class="codicon codicon-bold" aria-hidden="true"></i></button>
-    <button data-command="toggleItalic" title="${t('italic')} (Ctrl+I)" aria-label="${t('italic')}"><i class="codicon codicon-italic" aria-hidden="true"></i></button>
-    <button data-command="toggleInlineCode" title="${t('inlineCode')}" aria-label="${t('inlineCode')}"><i class="codicon codicon-code" aria-hidden="true"></i></button>
-    <button data-command="insertLink" title="${t('insertLink')} (Ctrl+K)" aria-label="${t('insertLink')}"><i class="codicon codicon-link" aria-hidden="true"></i></button>
-    <button data-command="toggleBulletList" title="${t('bulletedList')}" aria-label="${t('bulletedList')}"><i class="codicon codicon-list-unordered" aria-hidden="true"></i></button>
-    <button data-command="toggleOrderedList" title="${t('orderedList')}" aria-label="${t('orderedList')}"><i class="codicon codicon-list-ordered" aria-hidden="true"></i></button>
-    <button data-command="toggleTaskList" title="${t('taskList')}" aria-label="${t('taskList')}"><i class="codicon codicon-checklist" aria-hidden="true"></i></button>
-    <button data-command="toggleBlockquote" title="${t('blockquote')}" aria-label="${t('blockquote')}"><i class="codicon codicon-quote"></i></button>
-    <button data-command="toggleStrikethrough" title="${t('strikethrough')}" aria-label="${t('strikethrough')}"><span aria-hidden="true"><s>S</s></span></button>
-    <button data-command="insertCodeBlock" title="${t('codeBlock')}" aria-label="${t('codeBlock')}"><i class="codicon codicon-symbol-method"></i></button>
-    <button data-command="clearFormatting" title="${t('clearFormatting')}" aria-label="${t('clearFormatting')}"><i class="codicon codicon-clear-all"></i></button>
-    <span class="toolbar-separator"></span>
-    <button data-command="insertTable" title="${t('insertTable')}" aria-label="${t('insertTable')}"><i class="codicon codicon-table" aria-hidden="true"></i></button>
-    <button data-command="insertImage" title="${t('insertImages')}" aria-label="${t('insertImages')}"><i class="codicon codicon-file-media" aria-hidden="true"></i></button>
-    <button data-command="insertMathBlock" title="${t('insertMath')}" aria-label="${t('insertMath')}"><span class="math-icon" aria-hidden="true">∑</span></button>
+    <button data-toolbar-item data-command="toggleBold" title="${t('bold')} (Ctrl+B)" aria-label="${t('bold')}"><i class="codicon codicon-bold" aria-hidden="true"></i></button>
+    <button data-toolbar-item data-command="toggleItalic" title="${t('italic')} (Ctrl+I)" aria-label="${t('italic')}"><i class="codicon codicon-italic" aria-hidden="true"></i></button>
+    <button data-toolbar-item data-command="insertLink" title="${t('insertLink')} (Ctrl+K)" aria-label="${t('insertLink')}"><i class="codicon codicon-link" aria-hidden="true"></i></button>
+    <details class="markda-toolbar-menu">
+      <summary data-toolbar-item aria-label="${t('moreFormatting')}" title="${t('moreFormatting')}"><i class="codicon codicon-ellipsis" aria-hidden="true"></i><span>${t('moreFormatting')}</span></summary>
+      <div class="markda-toolbar-popover" role="group" aria-label="${t('moreFormatting')}">
+        <button data-command="toggleInlineCode" title="${t('inlineCode')}" aria-label="${t('inlineCode')}"><i class="codicon codicon-code" aria-hidden="true"></i><span>${t('inlineCode')}</span></button>
+        <button data-command="toggleBulletList" title="${t('bulletedList')}" aria-label="${t('bulletedList')}"><i class="codicon codicon-list-unordered" aria-hidden="true"></i><span>${t('bulletedList')}</span></button>
+        <button data-command="toggleOrderedList" title="${t('orderedList')}" aria-label="${t('orderedList')}"><i class="codicon codicon-list-ordered" aria-hidden="true"></i><span>${t('orderedList')}</span></button>
+        <button data-command="toggleTaskList" title="${t('taskList')}" aria-label="${t('taskList')}"><i class="codicon codicon-checklist" aria-hidden="true"></i><span>${t('taskList')}</span></button>
+        <button data-command="toggleBlockquote" title="${t('blockquote')}" aria-label="${t('blockquote')}"><i class="codicon codicon-quote" aria-hidden="true"></i><span>${t('blockquote')}</span></button>
+        <button data-command="toggleStrikethrough" title="${t('strikethrough')}" aria-label="${t('strikethrough')}"><span aria-hidden="true"><s>S</s></span><span>${t('strikethrough')}</span></button>
+        <button data-command="insertCodeBlock" title="${t('codeBlock')}" aria-label="${t('codeBlock')}"><i class="codicon codicon-symbol-method" aria-hidden="true"></i><span>${t('codeBlock')}</span></button>
+        <button data-command="clearFormatting" title="${t('clearFormatting')}" aria-label="${t('clearFormatting')}"><i class="codicon codicon-clear-all" aria-hidden="true"></i><span>${t('clearFormatting')}</span></button>
+      </div>
+    </details>
+    <details class="markda-toolbar-menu">
+      <summary data-toolbar-item aria-label="${t('moreBlocks')}" title="${t('moreBlocks')}"><i class="codicon codicon-add" aria-hidden="true"></i><span>${t('moreBlocks')}</span></summary>
+      <div class="markda-toolbar-popover" role="group" aria-label="${t('moreBlocks')}">
+        <button data-command="insertTable" title="${t('insertTable')}" aria-label="${t('insertTable')}"><i class="codicon codicon-table" aria-hidden="true"></i><span>${t('insertTable')}</span></button>
+        <button data-command="insertImage" title="${t('insertImages')}" aria-label="${t('insertImages')}"><i class="codicon codicon-file-media" aria-hidden="true"></i><span>${t('insertImages')}</span></button>
+        <button data-command="insertMathBlock" title="${t('insertMath')}" aria-label="${t('insertMath')}"><span class="math-icon" aria-hidden="true">∑</span><span>${t('insertMath')}</span></button>
+      </div>
+    </details>
     <span class="toolbar-spacer"></span>
-    <button id="shortcut-priority-toggle" title="${t('preferMarkdaShortcuts')}" aria-label="${t('preferMarkdaShortcuts')}" aria-pressed="false"><i class="codicon codicon-keyboard" aria-hidden="true"></i><span>${t('shortcuts')}</span></button>
-    <button id="theme-toggle" title="${t('toggleTheme')}" aria-label="${t('toggleTheme')}"><i class="codicon codicon-color-mode" aria-hidden="true"></i><span>${t('theme')}</span></button>
+    <details class="markda-toolbar-menu markda-toolbar-menu-end">
+      <summary data-toolbar-item aria-label="${t('viewOptions')}" title="${t('viewOptions')}"><i class="codicon codicon-settings-gear" aria-hidden="true"></i><span>${t('viewOptions')}</span></summary>
+      <div class="markda-toolbar-popover" role="group" aria-label="${t('viewOptions')}">
+        <button data-command="toggleSourceMode" title="${t('sourceMode')}" aria-label="${t('toggleSourceMode')}" aria-pressed="false"><i class="codicon codicon-code" aria-hidden="true"></i><span>${t('source')}</span></button>
+        <button data-command="toggleFocusMode" title="${t('focusMode')}" aria-label="${t('toggleFocusMode')}" aria-pressed="false"><i class="codicon codicon-target" aria-hidden="true"></i><span>${t('focus')}</span></button>
+        <button data-command="toggleTypewriterMode" title="${t('typewriterMode')}" aria-label="${t('toggleTypewriterMode')}" aria-pressed="false"><i class="codicon codicon-move" aria-hidden="true"></i><span>${t('typewriter')}</span></button>
+        <button id="shortcut-priority-toggle" title="${t('preferMarkdaShortcuts')}" aria-label="${t('preferMarkdaShortcuts')}" aria-pressed="false"><i class="codicon codicon-keyboard" aria-hidden="true"></i><span>${t('shortcuts')}</span></button>
+        <button id="theme-toggle" title="${t('toggleTheme')}" aria-label="${t('toggleTheme')}"><i class="codicon codicon-color-mode" aria-hidden="true"></i><span>${t('theme')}</span></button>
+      </div>
+    </details>
   </header>
   <div id="table-toolbar" class="table-toolbar" aria-label="${t('tableControls')}">
     <span>${t('table')}</span>
@@ -216,7 +231,7 @@ document.body.innerHTML = `<style>${getStyles()}</style>
     <button type="button" data-selection-command="insertLink" title="${t('insertLink')}"><i class="codicon codicon-link"></i></button>
     <button type="button" data-selection-command="clearFormatting" title="${t('clearFormatting')}"><i class="codicon codicon-clear-all"></i></button>
   </div>
-  <footer class="markda-status" aria-label="${t('statistics')}">
+  <footer class="markda-status" aria-label="${t('statistics', 0, 0, 0, 0)}">
     <button id="document-mode-status" type="button"></button>
     <button id="document-section-status" type="button"></button>
     <span class="toolbar-spacer"></span>
@@ -244,25 +259,11 @@ const documentSectionStatus = document.querySelector<HTMLButtonElement>('#docume
 const documentProblemsStatus = document.querySelector<HTMLButtonElement>('#document-problems-status')!;
 const documentStatisticsStatus = document.querySelector<HTMLElement>('#document-statistics-status')!;
 const welcome = document.querySelector<HTMLElement>('#markda-welcome')!;
+const documentStatus = document.querySelector<HTMLElement>('.markda-status')!;
 
 const tableDialog = document.querySelector<HTMLDialogElement>('#table-dialog')!;
 const linkDialog = document.querySelector<HTMLDialogElement>('#link-dialog')!;
 const editorToolbar = document.querySelector<HTMLElement>('#editor-toolbar')!;
-const toolbarToggle = document.querySelector<HTMLButtonElement>('#toolbar-toggle')!;
-function setToolbarExpanded(expanded: boolean): void {
-  editorToolbar.classList.toggle('expanded', expanded);
-  toolbarToggle.setAttribute('aria-expanded', String(expanded));
-  toolbarToggle.setAttribute('aria-label', t(expanded ? 'hideControls' : 'showControls'));
-  toolbarToggle.title = t(expanded ? 'hideControls' : 'showControls');
-}
-toolbarToggle.addEventListener('click', () => setToolbarExpanded(!editorToolbar.classList.contains('expanded')));
-setToolbarExpanded(true);
-editorToolbar.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape' || !editorToolbar.classList.contains('expanded')) return;
-  event.preventDefault();
-  setToolbarExpanded(false);
-  toolbarToggle.focus();
-});
 editorToolbar.addEventListener('focusin', () => {
   activeTableFrom = undefined;
   activeLiveTableCursor = undefined;
@@ -272,6 +273,41 @@ document.querySelectorAll<HTMLButtonElement>('button[title]').forEach((button) =
   if (!button.getAttribute('aria-label')) button.setAttribute('aria-label', button.title);
 });
 document.querySelectorAll<HTMLElement>('.toolbar-separator').forEach((separator) => separator.setAttribute('aria-hidden', 'true'));
+
+const toolbarItems = [...editorToolbar.querySelectorAll<HTMLElement>('[data-toolbar-item]')];
+function activateToolbarItem(item: HTMLElement): void {
+  toolbarItems.forEach((candidate) => { candidate.tabIndex = candidate === item ? 0 : -1; });
+}
+activateToolbarItem(toolbarItems[0]!);
+editorToolbar.addEventListener('focusin', (event) => {
+  if (event.target instanceof HTMLElement && toolbarItems.includes(event.target)) activateToolbarItem(event.target);
+});
+editorToolbar.addEventListener('keydown', (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || !toolbarItems.includes(target)) return;
+  const current = toolbarItems.indexOf(target);
+  const next = event.key === 'ArrowRight'
+    ? (current + 1) % toolbarItems.length
+    : event.key === 'ArrowLeft'
+      ? (current - 1 + toolbarItems.length) % toolbarItems.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? toolbarItems.length - 1 : -1;
+  if (next < 0) return;
+  event.preventDefault();
+  activateToolbarItem(toolbarItems[next]!);
+  toolbarItems[next]!.focus();
+});
+document.addEventListener('pointerdown', (event) => {
+  if (event.target instanceof Node && editorToolbar.contains(event.target)) return;
+  editorToolbar.querySelectorAll<HTMLDetailsElement>('details[open]').forEach((menu) => menu.removeAttribute('open'));
+});
+editorToolbar.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  const menu = event.target instanceof Element ? event.target.closest<HTMLDetailsElement>('details[open]') : null;
+  if (!menu) return;
+  event.preventDefault();
+  menu.removeAttribute('open');
+  menu.querySelector<HTMLElement>('summary')?.focus();
+});
 
 const setBlockDecorations = StateEffect.define<DecorationSet>();
 const setSoftBreakDecorations = StateEffect.define<DecorationSet>();
@@ -316,6 +352,52 @@ const diagnosticDecorationsField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
+/**
+ * Draw each selected document line independently. CodeMirror's standard
+ * selection layer intentionally fills all space between the first and last
+ * selected visual lines. That is useful in a plain code editor, but produces
+ * tall solid rectangles across the margins used by rendered Markdown
+ * headings and blocks.
+ */
+function createCompactSelectionDrawing() {
+  return [
+    drawSelection(),
+    layer({
+      above: false,
+      class: 'markda-compactSelectionLayer',
+      markers(editor) {
+        const markers: RectangleMarker[] = [];
+        for (const range of editor.state.selection.ranges) {
+          if (range.empty || range.to <= editor.viewport.from || range.from >= editor.viewport.to) continue;
+          for (const visible of editor.visibleRanges) {
+            const from = Math.max(range.from, visible.from);
+            const to = Math.min(range.to, visible.to);
+            if (from >= to) continue;
+            let line = editor.state.doc.lineAt(from);
+            while (line.from < to || (line.from === from && line.to === from && to > from)) {
+              const lineFrom = Math.max(from, line.from);
+              const lineTo = Math.min(to, line.to);
+              if (lineFrom < lineTo) {
+                markers.push(...RectangleMarker.forRange(
+                  editor, 'cm-selectionBackground', EditorSelection.range(lineFrom, lineTo),
+                ));
+              } else if (to > line.to) {
+                markers.push(...RectangleMarker.forRange(
+                  editor, 'cm-selectionBackground markda-selected-line-break', EditorSelection.cursor(line.to),
+                ));
+              }
+              if (line.number === editor.state.doc.lines || line.to + 1 >= to) break;
+              line = editor.state.doc.line(line.number + 1);
+            }
+          }
+        }
+        return markers;
+      },
+      update: (update) => update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged,
+    }),
+  ];
+}
+
 const view = new EditorView({
   parent: document.querySelector<HTMLElement>('#editor')!,
   state: EditorState.create({
@@ -341,7 +423,8 @@ const view = new EditorView({
       ]),
       createMarkdownPairing(),
       EditorView.lineWrapping,
-      drawSelection(),
+      EditorView.contentAttributes.of({ 'aria-label': t('markdownEditor') }),
+      createCompactSelectionDrawing(),
       highlightActiveLine(),
       createLivePreviewPlugin(),
       blockDecorationsField,
@@ -383,7 +466,10 @@ export function __getEditorView(): EditorView {
 }
 
 document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((button) => {
-  button.addEventListener('click', () => runCommand(button.dataset.command as EditorCommand));
+  button.addEventListener('click', () => {
+    button.closest<HTMLDetailsElement>('details')?.removeAttribute('open');
+    runCommand(button.dataset.command as EditorCommand);
+  });
 });
 document.querySelectorAll<HTMLButtonElement>('[data-selection-command]').forEach((button) => {
   button.addEventListener('mousedown', (event) => event.preventDefault());
@@ -1357,6 +1443,13 @@ function updateDocumentStatus(
   if (!documentModeStatus.title) documentModeStatus.title = t('toggleSourceMode');
   const statisticsText = `${t('wordsShort', statistics.words)} · ${t('charactersShort', statistics.characters)}`;
   if (documentStatisticsStatus.textContent !== statisticsText) documentStatisticsStatus.textContent = statisticsText;
+  documentStatus.setAttribute('aria-label', t(
+    'statistics',
+    statistics.words,
+    statistics.characters,
+    statistics.lines,
+    statistics.readingMinutes,
+  ));
   const cursor = view.state.selection.main.head;
   const active = activeHeadingAt(headings, cursor);
   const sectionText = active ? `H${active.level} ${active.text}` : '';
@@ -2161,6 +2254,12 @@ async function renderLiveMermaid(container: HTMLElement, source: string): Promis
     const result = await mermaid.render(`markda-live-${crypto.randomUUID()}`, source);
     if (container.isConnected && renderThemeRevision === colorThemeRevision) {
       container.innerHTML = validateMermaidSvg(result.svg);
+      const svg = container.querySelector<SVGSVGElement>('svg');
+      const naturalWidth = svg?.viewBox.baseVal.width;
+      if (svg && naturalWidth) {
+        svg.style.minWidth = `${Math.min(720, Math.max(360, Math.ceil(naturalWidth)))}px`;
+        svg.style.height = 'auto';
+      }
     } else if (container.isConnected) {
       void renderLiveMermaid(container, source);
     }
@@ -4987,9 +5086,10 @@ function getStyles(): string { return String.raw`
 :root{
   --markda-content-width:860px;--markda-font-body:"Open Sans","Clear Sans","Helvetica Neue",Helvetica,Arial,"Segoe UI","Yu Gothic UI","Hiragino Sans",sans-serif;
   --markda-font-mono:var(--vscode-editor-font-family,Consolas,"Liberation Mono",monospace);
-  --markda-bg:#fff;--markda-fg:#333;--markda-muted:#777;
+  --markda-bg:#fff;--markda-fg:#333;--markda-muted:#666;
   --markda-link:#4183c4;--markda-link-hover:#2f6f9f;--markda-border:#dfe2e5;
   --markda-surface:#f8f8f8;--markda-inline-code:#f3f4f4;--markda-surface-secondary:#eef2f2;--markda-elevated:#fff;
+  --markda-code-fg:#333;--markda-code-bg:#f8f8f8;--markda-code-inline-bg:#f3f4f4;
   --markda-hover:#eaeef2;--markda-active:#dbeafe;--markda-selection:#b5d6fc;
   --markda-active-line:transparent;--markda-line-highlight:#0969da14;--markda-find-highlight:#fff8c5;--markda-focus:#0969da;
   --markda-find-widget:#f3f3f3;--markda-find-input:#fff;--markda-find-match:#f6b94a70;--markda-find-match-selected:#f59b2399;
@@ -5006,6 +5106,7 @@ function getStyles(): string { return String.raw`
   --markda-bg:#1e1e1e;--markda-fg:#d4d4d4;--markda-muted:#a8a8a8;
   --markda-link:#75beff;--markda-link-hover:#a6d5ff;--markda-border:#4a4a4a;
   --markda-surface:#252526;--markda-inline-code:#252526;--markda-surface-secondary:#2d2d30;--markda-elevated:#252526;
+  --markda-code-fg:#d4d4d4;--markda-code-bg:#252526;--markda-code-inline-bg:#252526;
   --markda-hover:#2a2d2e;--markda-active:#37373d;--markda-selection:#4a89dc;
   --markda-active-line:transparent;--markda-line-highlight:#ffffff0f;--markda-find-highlight:#515c6a;--markda-focus:#007fd4;
   --markda-find-widget:#252526;--markda-find-input:#3c3c3c;--markda-find-match:#ea5c0055;--markda-find-match-selected:#ea5c0088;
@@ -5027,10 +5128,10 @@ html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--markda-fg);
 .markda-meta{font-size:0!important;line-height:0!important;letter-spacing:0!important;color:transparent!important}.markda-meta.markda-meta-expanded{font-size:inherit!important;line-height:inherit!important;letter-spacing:inherit!important;color:var(--markda-muted)!important}
 .markda-list-bullet-source{font-size:0;color:var(--markda-muted)}.markda-list-bullet-source::after{content:'•';display:inline-block;min-width:.8em;font-size:var(--vscode-editor-font-size);font-weight:700;text-align:center}.markda-list-bullet-source.markda-meta-expanded{font-size:inherit;color:inherit}.markda-list-bullet-source.markda-meta-expanded::after{content:none}
 button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--markda-hover)}button.active{background:var(--markda-active)}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--markda-focus);outline-offset:2px}
-.markda-shell{position:relative;height:100%;display:grid;grid-template-rows:minmax(0,1fr) 24px}.markda-toolbar{position:absolute;top:0;right:0;left:0;z-index:500;min-height:40px;padding:5px 10px;display:flex;align-items:center;gap:2px;overflow-x:auto;overflow-y:hidden;background:color-mix(in srgb,var(--markda-elevated) 92%,transparent);border:0;border-bottom:1px solid color-mix(in srgb,var(--markda-border) 78%,transparent);border-radius:0;box-shadow:none;backdrop-filter:blur(12px)}.markda-toolbar:not(.expanded)>:not(#toolbar-toggle){display:none}.markda-toolbar:not(.expanded){top:6px;right:8px;left:auto;min-height:32px;padding:2px;background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:8px;box-shadow:0 2px 8px color-mix(in srgb,var(--markda-widget-shadow) 55%,transparent)}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto;min-height:28px;border-radius:6px}.markda-toolbar button.active{color:var(--markda-accent);background:color-mix(in srgb,var(--markda-active) 72%,transparent)}.markda-style-picker select{height:28px;max-width:9em;padding:0 6px;color:var(--markda-fg);background:transparent;border:1px solid transparent;border-radius:6px}.markda-style-picker select:hover{background:var(--markda-hover)}.markda-style-picker select:focus-visible{outline:2px solid var(--markda-focus);outline-offset:-2px}.toolbar-separator{height:16px;border-left:1px solid color-mix(in srgb,var(--markda-border) 72%,transparent);margin:0 6px}.toolbar-spacer{flex:1}.math-icon{font:bold 17px serif}
-.table-toolbar{grid-area:1/1;align-self:start;z-index:300;display:none;width:100%;min-height:42px;padding:7px 52px 7px 10px;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow-x:auto}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
-.markda-workspace{grid-area:1/1;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:48px 30px 30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
-.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:var(--markda-font-size,16px);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:48px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-line+.cm-line{margin-top:var(--markda-paragraph-spacing,0)}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
+.markda-shell{position:relative;height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr) 24px}.markda-toolbar{position:relative;grid-column:1;grid-row:1;z-index:500;min-height:48px;padding:4px 8px;display:flex;flex-wrap:nowrap;align-items:center;gap:2px;overflow:visible;background:color-mix(in srgb,var(--markda-elevated) 92%,transparent);border:0;border-bottom:1px solid color-mix(in srgb,var(--markda-border) 78%,transparent);border-radius:0;box-shadow:none;backdrop-filter:blur(12px)}.markda-toolbar>button,.markda-toolbar-menu>summary{display:flex;gap:5px;align-items:center;justify-content:center;flex:0 0 auto;min-width:40px;min-height:40px;padding:4px 8px;border-radius:6px;cursor:pointer}.markda-toolbar>button.active,.markda-toolbar-popover button.active{color:var(--markda-accent);background:color-mix(in srgb,var(--markda-active) 72%,transparent)}.markda-style-picker{flex:0 1 auto;min-width:0}.markda-style-picker select{height:40px;max-width:9em;padding:0 8px;color:var(--markda-fg);background:transparent;border:1px solid transparent;border-radius:6px}.markda-style-picker select:hover{background:var(--markda-hover)}.markda-style-picker select:focus-visible{outline:2px solid var(--markda-focus);outline-offset:-2px}.markda-toolbar-menu{position:relative;flex:0 0 auto}.markda-toolbar-menu>summary{list-style:none}.markda-toolbar-menu>summary::-webkit-details-marker{display:none}.markda-toolbar-menu[open]>summary{color:var(--markda-accent);background:var(--markda-active)}.markda-toolbar-popover{position:absolute;top:calc(100% + 5px);right:0;z-index:700;display:grid;gap:2px;width:max-content;min-width:220px;max-width:calc(100vw - 16px);padding:6px;color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px var(--markda-widget-shadow)}.markda-toolbar-popover button{display:flex;align-items:center;gap:9px;width:100%;min-height:40px;padding:6px 10px;text-align:left;border-radius:5px}.markda-toolbar-popover button i,.markda-toolbar-popover button>.math-icon,.markda-toolbar-popover button>span:first-child{display:inline-grid;place-items:center;width:20px;flex:0 0 20px}.toolbar-separator{height:16px;border-left:1px solid color-mix(in srgb,var(--markda-border) 72%,transparent);margin:0 6px}.toolbar-spacer{flex:1 1 12px;min-width:0}.math-icon{font:bold 17px serif}
+.table-toolbar{grid-column:1;grid-row:2;z-index:300;display:none;width:100%;min-height:42px;padding:7px 52px 7px 10px;flex-wrap:wrap;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow:hidden}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
+.markda-workspace{grid-column:1;grid-row:3;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:8px 30px 30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
+.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:var(--markda-font-size,16px);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:8px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{width:100%;min-width:0;max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-line+.cm-line{margin-top:var(--markda-paragraph-spacing,0)}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionLayer{display:none}.cm-selectionBackground{background:var(--markda-selection)!important}.markda-selected-line-break{width:.5em}
 .cm-editor .markda-block-selection{position:relative}.cm-editor .markda-block-selection::after{content:"";position:absolute;inset:0;z-index:20;pointer-events:none;border:2px solid var(--markda-selection);border-radius:4px;background:color-mix(in srgb,var(--markda-selection) 48%,transparent)}
 .cm-editor .cm-panels-top:has(.cm-search){position:absolute;top:0;right:14px;left:auto;z-index:600;color:var(--markda-fg);background:transparent;border:0}
 .cm-editor .cm-panel.cm-search{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) repeat(6,24px);grid-template-rows:24px 24px;gap:3px;width:min(454px,calc(100vw - 32px));padding:4px 28px;color:var(--markda-fg);background:var(--markda-find-widget);border:1px solid var(--markda-border);border-top:0;box-shadow:0 2px 8px var(--markda-widget-shadow);font:13px/1 var(--markda-font-body)}
@@ -5048,7 +5149,7 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .cm-search button[name=close]{position:absolute!important;top:4px!important;right:3px!important;margin:0!important}.cm-search button[name=close]::before{content:"\ea76"}.cm-search button[name=close]{color:transparent!important}.cm-search button[name=close]::before{color:var(--markda-fg)}
 .cm-editor .cm-searchMatch{background:var(--markda-find-match)!important}.cm-editor .cm-searchMatch-selected{background:var(--markda-find-match-selected)!important;outline:1px solid var(--markda-accent)}
 .markda-h1,.markda-h2,.markda-h3,.markda-h4,.markda-h5,.markda-h6{font-weight:700;margin-top:1rem;margin-bottom:1rem}.markda-h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}.markda-h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}.markda-h3{font-size:1.5em;line-height:1.43}.markda-h4{font-size:1.25em}.markda-h5{font-size:1em}.markda-h6{font-size:1em;color:var(--markda-muted)}.markda-setext-marker{height:0;min-height:0;line-height:0;overflow:hidden}.markda-quote{border-left:4px solid var(--markda-border);padding-left:15px!important;color:var(--markda-muted)}.markda-list-marker{color:var(--markda-muted)}.markda-list-bullet{display:inline-block;min-width:.8em;color:var(--markda-fg);font-weight:700;text-align:center}
-.markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-subscript{font-size:.78em;vertical-align:sub}.markda-superscript{font-size:.78em;vertical-align:super}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--markda-font-mono);font-size:.9em;background:var(--markda-inline-code);padding:0 2px;border:1px solid color-mix(in srgb,var(--markda-border) 70%,transparent);border-radius:3px}.markda-soft-break{white-space:pre}.markda-inline-math{padding:0 2px}.markda-inline-html,.markda-entity{cursor:pointer}.markda-inline-image{display:inline-flex;align-items:center;max-width:min(18em,70vw);max-height:4em;margin:0 .2em;padding:2px;border:1px solid transparent;border-radius:4px;vertical-align:middle;cursor:pointer}.markda-inline-image:hover{border-color:var(--markda-border)}.markda-inline-image img{display:block;max-width:100%;max-height:3.5em}.markda-inline-image-blocked{padding:1px 5px;color:var(--markda-muted);background:var(--markda-surface)}.markda-image-alt,.markda-footnote-source{color:var(--markda-muted)}.markda-footnote-reference{display:inline-block;min-width:1em;padding:0 2px;color:var(--markda-link);font-size:.75em;line-height:1;vertical-align:super;cursor:pointer}.markda-thematic-break{width:100%;height:2px;margin:16px 0;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3,.source-mode .markda-h4,.source-mode .markda-h5,.source-mode .markda-h6{font-size:inherit;font-weight:inherit;line-height:inherit;color:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
+.markda-strong{font-weight:700}.markda-emphasis{font-style:italic}.markda-strike{text-decoration:line-through}.markda-subscript{font-size:.78em;vertical-align:sub}.markda-superscript{font-size:.78em;vertical-align:super}.markda-highlight{background:var(--markda-find-highlight);border-radius:2px}.markda-code{font-family:var(--markda-font-mono);font-size:.9em;color:var(--markda-code-fg);background:var(--markda-code-inline-bg);padding:0 2px;border:1px solid color-mix(in srgb,var(--markda-border) 70%,transparent);border-radius:3px}.markda-soft-break{white-space:pre}.markda-inline-math{padding:0 2px}.markda-inline-html,.markda-entity{cursor:pointer}.markda-inline-image{display:inline-flex;align-items:center;max-width:min(18em,70vw);max-height:4em;margin:0 .2em;padding:2px;border:1px solid transparent;border-radius:4px;vertical-align:middle;cursor:pointer}.markda-inline-image:hover{border-color:var(--markda-border)}.markda-inline-image img{display:block;max-width:100%;max-height:3.5em}.markda-inline-image-blocked{padding:1px 5px;color:var(--markda-muted);background:var(--markda-surface)}.markda-image-alt,.markda-footnote-source{color:var(--markda-muted)}.markda-footnote-reference{display:inline-block;min-width:1em;padding:0 2px;color:var(--markda-link);font-size:.75em;line-height:1;vertical-align:super;cursor:pointer}.markda-thematic-break{width:100%;height:2px;margin:16px 0;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}.markda-unfocused{opacity:.22}.source-mode .markda-h1,.source-mode .markda-h2,.source-mode .markda-h3,.source-mode .markda-h4,.source-mode .markda-h5,.source-mode .markda-h6{font-size:inherit;font-weight:inherit;line-height:inherit;color:inherit;border:0;margin:0}.source-mode .markda-unfocused{opacity:1}
 .markda-emoji{display:inline-block;min-width:1em;text-align:center}.markda-diagnostic{text-decoration-line:underline;text-decoration-style:wavy;text-underline-offset:3px}.markda-diagnostic-error{text-decoration-color:var(--markda-error)}.markda-diagnostic-warning{text-decoration-color:var(--markda-warning)}.markda-diagnostic-information{text-decoration-color:var(--markda-info)}.markda-diagnostic-hint{text-decoration-color:var(--markda-muted)}
 .markda-live-toc,.markda-front-matter{margin:12px 0;padding:14px 16px;border:1px solid var(--markda-border);border-radius:7px;background:var(--markda-surface)}.markda-live-toc ol{list-style:none;margin:8px 0 0;padding:0}.markda-live-toc li{margin-left:calc(var(--markda-toc-depth,0) * 18px)}.markda-live-toc button{min-height:24px;padding:2px 4px;color:var(--markda-link);text-align:left}.markda-toc-empty{display:block;margin-top:6px;color:var(--markda-muted);font-style:italic}
 .markda-front-matter-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.markda-front-matter-header button{min-height:24px;font-size:12px}.markda-front-matter-fields{display:grid;gap:6px}.markda-front-matter-fields label{display:grid;grid-template-columns:minmax(7em,.4fr) minmax(10em,1fr);gap:10px;align-items:center}.markda-front-matter-fields input{min-width:0;padding:5px 7px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}.markda-front-matter-fields code{overflow:hidden;color:var(--markda-muted);text-overflow:ellipsis;white-space:nowrap}.markda-front-matter-source{min-height:8em}.markda-front-matter-error{color:var(--markda-error)}
@@ -5057,24 +5158,23 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .markda-image-editor label{grid-column:1/-1;display:flex;align-items:center;gap:8px}.markda-image-editor label input{flex:1}.markda-image-editor input,.markda-block-source-editor,dialog input{color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);padding:6px}.markda-block-math-wrap{display:flow-root}.markda-block-source-editor{display:block;width:100%;min-height:0;overflow-y:hidden;resize:none;font-family:var(--vscode-editor-font-family);line-height:1.5}.markda-block-source-editor[hidden]{display:none}
 .markda-footnote-definition{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;margin:.45em 0;padding:6px 9px;color:var(--markda-muted);background:var(--markda-surface);border-radius:4px}.markda-footnote-definition-content{min-height:1.5em;white-space:pre-wrap;outline:none}.markda-reference-definition{display:grid;grid-template-columns:minmax(7em,.5fr) auto minmax(10em,1fr) minmax(8em,.7fr);gap:6px;align-items:center;margin:.45em 0;padding:6px 9px;background:var(--markda-surface);border-radius:4px}.markda-reference-definition input{min-width:0;padding:4px 6px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}
 .markda-html-block{margin:.6em 0;padding:8px;outline:none;border:1px solid transparent;border-radius:4px}.markda-html-block:focus-within{border-color:var(--markda-border)}.markda-html-block-content{outline:none}.markda-html-empty{color:var(--markda-muted);font-style:italic}
-.markda-live-code{margin:15px 0;max-width:100%;overflow:auto;font-family:var(--markda-font-mono);font-size:.9em}.markda-live-code pre{margin:0;padding:8px 4px 6px;border:1px solid var(--markda-border);border-radius:4px;background:var(--markda-surface)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-fg)}.markda-syntax-comment{color:var(--markda-syntax-comment)}.markda-syntax-constant{color:var(--markda-syntax-constant)}.markda-syntax-entity{color:var(--markda-syntax-entity)}.markda-syntax-keyword{color:var(--markda-syntax-keyword)}.markda-syntax-string{color:var(--markda-syntax-string)}.markda-syntax-variable{color:var(--markda-syntax-variable)}.markda-code-rendered{padding:10px}
-.markda-fenced-code{overflow:hidden;border:1px solid var(--markda-border);border-radius:4px;background:var(--markda-surface)}.markda-fenced-code pre{overflow:auto;border:0;border-radius:0}.markda-code-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:4px;min-height:26px;padding:2px 3px;background:var(--markda-surface);border-bottom:1px solid var(--markda-border)}.markda-code-toolbar input{width:10em;min-width:0;padding:2px 5px;color:var(--markda-muted);background:transparent;border:0;font:inherit;text-align:left}.markda-code-toolbar input:focus-visible{outline:1px solid var(--markda-focus);outline-offset:-1px;border-radius:2px}.markda-code-toolbar button{display:grid;place-items:center;width:24px;min-height:22px;padding:1px;color:var(--markda-fg);border-radius:2px}.markda-code-toolbar button:hover{background:var(--markda-hover)}
+.markda-live-code{margin:15px 0;max-width:100%;overflow:auto;font-family:var(--markda-font-mono);font-size:.9em;color:var(--markda-code-fg)}.markda-live-code pre{margin:0;padding:8px 4px 6px;border:1px solid var(--markda-border);border-radius:4px;background:var(--markda-code-bg)}.markda-live-code code[contenteditable]{display:block;min-height:1.5em;white-space:pre;outline:none;color:var(--markda-code-fg)}.markda-syntax-comment{color:var(--markda-syntax-comment)}.markda-syntax-constant{color:var(--markda-syntax-constant)}.markda-syntax-entity{color:var(--markda-syntax-entity)}.markda-syntax-keyword{color:var(--markda-syntax-keyword)}.markda-syntax-string{color:var(--markda-syntax-string)}.markda-syntax-variable{color:var(--markda-syntax-variable)}.markda-code-rendered{padding:10px}.markda-code-rendered[data-markda-renderer=mermaid]{width:100%;min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}.markda-code-rendered[data-markda-renderer=mermaid] svg{display:block;height:auto}
+.markda-fenced-code{overflow:hidden;border:1px solid var(--markda-border);border-radius:4px;background:var(--markda-code-bg)}.markda-fenced-code pre{overflow:auto;border:0;border-radius:0}.markda-code-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:4px;min-height:26px;padding:2px 3px;background:var(--markda-code-bg);border-bottom:1px solid var(--markda-border)}.markda-code-toolbar input{width:10em;min-width:0;padding:2px 5px;color:var(--markda-muted);background:transparent;border:0;font:inherit;text-align:left}.markda-code-toolbar input:focus-visible{outline:1px solid var(--markda-focus);outline-offset:-1px;border-radius:2px}.markda-code-toolbar button{display:grid;place-items:center;width:24px;min-height:22px;padding:1px;color:var(--markda-code-fg);border-radius:2px}.markda-code-toolbar button:hover{background:var(--markda-hover)}
 .markda-trailing-paragraph{min-height:1.7em;margin-top:2px;border-radius:3px;cursor:text}.markda-trailing-paragraph:hover,.markda-trailing-paragraph:focus{background:var(--markda-line-highlight);outline:none}.markda-trailing-paragraph:focus::before{content:"";display:inline-block;height:1.35em;border-left:2px solid var(--markda-cursor-color);box-shadow:none;vertical-align:middle}
-.markda-live-table-wrap{overflow:auto;margin:.8em 0;color:var(--markda-fg)}.markda-live-table-wrap table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap tbody tr:nth-child(2n){background:var(--markda-surface)}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:6px 13px;min-width:70px;resize:horizontal;overflow:auto;color:var(--markda-fg);background:transparent}.markda-live-table-wrap th{font-weight:700;background:var(--markda-surface)}.markda-live-table-wrap th:focus-visible,.markda-live-table-wrap td:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--markda-focus)}.markda-live-table-wrap code{padding:0 2px;color:var(--markda-fg);background:var(--markda-inline-code);border:1px solid var(--markda-border);border-radius:3px;font-family:var(--markda-font-mono);font-size:.9em}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
+.markda-live-table-wrap{overflow:auto;margin:.8em 0;color:var(--markda-fg)}.markda-live-table-wrap table{border-collapse:collapse;width:100%;color:var(--markda-fg);background:var(--markda-bg)}.markda-live-table-wrap tbody tr:nth-child(2n){background:var(--markda-surface)}.markda-live-table-wrap th,.markda-live-table-wrap td{border:1px solid var(--markda-border);padding:6px 13px;min-width:70px;resize:horizontal;overflow:auto;color:var(--markda-fg);background:transparent}.markda-live-table-wrap th{font-weight:700;background:var(--markda-surface)}.markda-live-table-wrap th:focus-visible,.markda-live-table-wrap td:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--markda-focus)}.markda-live-table-wrap code{padding:0 2px;color:var(--markda-code-fg);background:var(--markda-code-inline-bg);border:1px solid var(--markda-border);border-radius:3px;font-family:var(--markda-font-mono);font-size:.9em}.markda-large-table{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border:1px solid var(--markda-border);border-radius:5px;color:var(--markda-muted)}
 .markda-callout{margin:12px 0;padding:12px 16px;border-radius:6px;border-left:4px solid;background:var(--markda-surface)}.markda-callout-title{font-weight:600;margin-bottom:4px}.markda-callout-content{color:var(--markda-fg)}.markda-callout-edit{margin-top:8px;font-size:11px;padding:2px 8px;opacity:0}.markda-callout:hover .markda-callout-edit,.markda-callout-edit:focus-visible{opacity:1}
 .markda-callout-note{border-color:var(--markda-info);background:var(--markda-info-bg)}.markda-callout-note .markda-callout-title{color:var(--markda-info)}.markda-callout-tip{border-color:var(--markda-tip);background:var(--markda-tip-bg)}.markda-callout-tip .markda-callout-title{color:var(--markda-tip)}
 .markda-callout-important,.markda-callout-warning{border-color:var(--markda-warning);background:var(--markda-warning-bg)}.markda-callout-important .markda-callout-title,.markda-callout-warning .markda-callout-title{color:var(--markda-warning)}.markda-callout-caution{border-color:var(--markda-error);background:var(--markda-error-bg)}.markda-callout-caution .markda-callout-title{color:var(--markda-error)}
 dialog{color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px #0007}dialog::backdrop{background:#0007}dialog form{display:grid;gap:14px;min-width:300px}dialog h2{font-size:16px;margin:0}dialog label{display:flex;justify-content:space-between;gap:20px;align-items:center}dialog input{width:min(320px,55vw);padding:5px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border)}#table-dialog input{width:76px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
 .visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
-.markda-status{grid-row:2;display:flex;align-items:center;gap:2px;min-width:0;padding:0 8px;color:var(--markda-muted);background:var(--markda-surface);border-top:1px solid var(--markda-border);font-size:12px}.markda-status button,.markda-status span{min-height:20px;padding:1px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.markda-status button{color:inherit}.markda-status button:hover{color:var(--markda-fg)}#document-section-status{max-width:32vw}#document-sync-status[data-state=conflict]{color:var(--markda-error)}#document-sync-status[data-state=pending],#document-sync-status[data-state=saving]{color:var(--markda-accent)}
+.markda-status{grid-column:1;grid-row:4;display:flex;align-items:center;gap:2px;min-width:0;padding:0 8px;color:var(--markda-muted);background:var(--markda-surface);border-top:1px solid var(--markda-border);font-size:12px}.markda-status button,.markda-status span{min-height:20px;padding:1px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.markda-status button{color:inherit}.markda-status button:hover{color:var(--markda-fg)}#document-section-status{max-width:32vw}#document-sync-status[data-state=conflict]{color:var(--markda-error)}#document-sync-status[data-state=pending],#document-sync-status[data-state=saving]{color:var(--markda-accent)}
 .markda-quick-insert{position:fixed;z-index:900;width:300px;max-height:360px;padding:6px;color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px #0007}.markda-quick-insert[hidden]{display:none}.markda-quick-insert input{width:100%;padding:7px;color:var(--markda-fg);background:var(--markda-bg);border:1px solid var(--markda-border);border-radius:4px}.markda-quick-insert [role=listbox]{max-height:305px;margin-top:5px;overflow:auto}.markda-quick-insert [role=option]{display:flex;width:100%;align-items:center;gap:8px;text-align:left}.markda-quick-insert [role=option]:focus{background:var(--markda-active);outline:1px solid var(--markda-focus)}.markda-quick-insert-empty{display:block;padding:10px;color:var(--markda-muted)}
 .markda-selection-toolbar{position:fixed;z-index:850;display:flex;padding:2px;color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:5px;box-shadow:0 4px 16px #0005}.markda-selection-toolbar[hidden]{display:none}.markda-selection-toolbar button{min-height:26px;padding:2px 7px}
 .markda-welcome{position:absolute;top:38%;left:50%;z-index:2;display:grid;gap:8px;width:min(480px,80vw);padding:24px;transform:translate(-50%,-50%);color:var(--markda-muted);text-align:center;pointer-events:none}.markda-welcome strong{color:var(--markda-fg);font-size:1.3em}.markda-welcome[hidden]{display:none}
 body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
-#preview{color:var(--markda-fg);background:var(--markda-bg)}#preview h1,#preview h2,#preview h3,#preview h4,#preview h5,#preview h6{position:relative;margin:1rem 0;color:var(--markda-fg);font-weight:700;line-height:1.4}#preview h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}#preview h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}#preview h3{font-size:1.5em;line-height:1.43}#preview h4{font-size:1.25em}#preview h5{font-size:1em}#preview h6{font-size:1em;color:var(--markda-muted)}#preview p,#preview blockquote,#preview ul,#preview ol,#preview dl,#preview table{margin:.8em 0}#preview ul,#preview ol{padding-left:30px}#preview li>ul,#preview li>ol{margin:0}#preview hr{box-sizing:content-box;height:2px;margin:16px 0;padding:0;overflow:hidden;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}#preview pre{overflow:auto;margin:15px 0;padding:8px 4px 6px;color:var(--markda-fg);background:var(--markda-surface);border:1px solid var(--markda-border);border-radius:3px}#preview code{font-family:var(--markda-font-mono);font-size:.9em;color:var(--markda-fg)}#preview :not(pre)>code{padding:0 2px;background:var(--markda-inline-code);border:1px solid var(--markda-border);border-radius:3px}#preview pre code{padding:0;color:var(--markda-fg);background:transparent;border:0}#preview blockquote{padding:0 15px;color:var(--markda-muted);background:transparent;border-left:4px solid var(--markda-border)}#preview blockquote p{color:inherit}#preview table{border-collapse:collapse;width:100%;padding:0;color:var(--markda-fg);background:var(--markda-bg);word-break:initial}#preview tr:nth-child(2n),#preview thead{background:var(--markda-surface)}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 13px;color:var(--markda-fg);background:transparent}#preview th{font-weight:700}#preview input{accent-color:var(--markda-accent)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
+#preview{color:var(--markda-fg);background:var(--markda-bg)}#preview h1,#preview h2,#preview h3,#preview h4,#preview h5,#preview h6{position:relative;margin:1rem 0;color:var(--markda-fg);font-weight:700;line-height:1.4}#preview h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}#preview h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}#preview h3{font-size:1.5em;line-height:1.43}#preview h4{font-size:1.25em}#preview h5{font-size:1em}#preview h6{font-size:1em;color:var(--markda-muted)}#preview p,#preview blockquote,#preview ul,#preview ol,#preview dl,#preview table{margin:.8em 0}#preview ul,#preview ol{padding-left:30px}#preview li>ul,#preview li>ol{margin:0}#preview hr{box-sizing:content-box;height:2px;margin:16px 0;padding:0;overflow:hidden;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}#preview pre{overflow:auto;margin:15px 0;padding:8px 4px 6px;color:var(--markda-code-fg);background:var(--markda-code-bg);border:1px solid var(--markda-border);border-radius:3px}#preview code{font-family:var(--markda-font-mono);font-size:.9em;color:var(--markda-code-fg)}#preview :not(pre)>code{padding:0 2px;background:var(--markda-code-inline-bg);border:1px solid var(--markda-border);border-radius:3px}#preview pre code{padding:0;color:var(--markda-code-fg);background:transparent;border:0}#preview blockquote{padding:0 15px;color:var(--markda-muted);background:transparent;border-left:4px solid var(--markda-border)}#preview blockquote p{color:inherit}#preview table{border-collapse:collapse;width:100%;padding:0;color:var(--markda-fg);background:var(--markda-bg);word-break:initial}#preview tr:nth-child(2n),#preview thead{background:var(--markda-surface)}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 13px;color:var(--markda-fg);background:transparent}#preview th{font-weight:700}#preview input{accent-color:var(--markda-accent)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
 #preview .markda-toc{margin:1em 0;padding:12px 16px;border:1px solid var(--markda-border);border-radius:6px;background:var(--markda-surface)}#preview .markda-toc ul{list-style:none;margin:0;padding:0}#preview .markda-toc-level-1{margin-left:18px}#preview .markda-toc-level-2{margin-left:36px}#preview .markda-toc-level-3{margin-left:54px}#preview .markda-toc-level-4,#preview .markda-toc-level-5{margin-left:72px}
-@media(min-width:1100px){.markda-toolbar:not(.expanded)>:not(#toolbar-toggle){display:flex}.markda-toolbar:not(.expanded)>.markda-style-picker{display:block}.markda-toolbar:not(.expanded)>.toolbar-separator{display:block}.markda-toolbar:not(.expanded){top:0;right:0;left:0;min-height:40px;padding:5px 10px;background:color-mix(in srgb,var(--markda-elevated) 92%,transparent);border:0;border-bottom:1px solid color-mix(in srgb,var(--markda-border) 78%,transparent);border-radius:0;box-shadow:none}.markda-toolbar>#toolbar-toggle{display:none}}
-@media(max-width:760px){.markda-toolbar button span:not(.math-icon){display:none}.markda-style-picker{display:none!important}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}#document-section-status{display:none}}
+@media(max-width:760px){.markda-toolbar{gap:0;padding-inline:4px}.markda-toolbar-menu>summary span{display:none}.markda-style-picker select{max-width:84px;padding-inline:5px}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}#document-section-status{display:none}}@media(max-width:340px){.markda-style-picker select{max-width:68px}}
   @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 `; }
 

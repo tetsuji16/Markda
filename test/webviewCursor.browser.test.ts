@@ -270,7 +270,7 @@ describe('live Markdown pointer geometry in Chromium', () => {
 
     await selectByPointer(view.state.doc.line(3).from + 2, view.state.doc.line(4).from + 20);
     await selectByPointer(view.state.doc.line(1).from + 2, view.state.doc.line(2).from + 20);
-    const selectedLineNumbers = Array.from(view.dom.querySelectorAll<HTMLElement>('.cm-selectionBackground'))
+    const selectedLineNumbers = Array.from(view.dom.querySelectorAll<HTMLElement>('.markda-compactSelectionLayer .cm-selectionBackground'))
       .map((element) => {
         const rect = element.getBoundingClientRect();
         const position = view.posAtCoords({ x: rect.left + 1, y: rect.top + rect.height / 2 });

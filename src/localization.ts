@@ -11,7 +11,8 @@ const en = {
   linkText: 'Text', linkUrl: 'URL', linkTitle: 'Title (optional)', editLink: 'Edit link',
   orderedList: 'Numbered list', bulletedList: 'Bulleted list', taskList: 'Task list',
   blockquote: 'Block quote', strikethrough: 'Strikethrough', codeBlock: 'Code block',
-  clearFormatting: 'Clear formatting', moreBlocks: 'Insert block', insertTable: 'Insert table',
+  clearFormatting: 'Clear formatting', moreFormatting: 'More formatting', moreBlocks: 'Insert block',
+  viewOptions: 'View options', insertTable: 'Insert table',
   insertImages: 'Insert images', insertMath: 'Insert math block',
   toggleTheme: 'Change theme (auto → light → dark)', theme: 'Theme',
   themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark', themeCurrent: 'Current theme: {0}',
@@ -86,7 +87,7 @@ const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
     typewriterMode:'タイプライターモード (F9)',toggleTypewriterMode:'タイプライターモードを切り替え',typewriter:'タイプライター',
     bold:'太字',italic:'斜体',inlineCode:'インラインコード',insertLink:'リンクを挿入',paragraphStyle:'段落スタイル',paragraph:'本文',heading:'見出し {0}',
     linkText:'表示文字',linkUrl:'URL',linkTitle:'タイトル（任意）',editLink:'リンクを編集',orderedList:'番号付きリスト',bulletedList:'箇条書き',taskList:'タスクリスト',
-    blockquote:'引用',strikethrough:'取り消し線',codeBlock:'コードブロック',clearFormatting:'書式を解除',moreBlocks:'ブロックを挿入',
+    blockquote:'引用',strikethrough:'取り消し線',codeBlock:'コードブロック',clearFormatting:'書式を解除',moreFormatting:'その他の書式',moreBlocks:'ブロックを挿入',viewOptions:'表示オプション',
     insertTable:'表を挿入',insertImages:'画像を挿入',insertMath:'数式ブロックを挿入',toggleTheme:'テーマを変更（自動 → ライト → ダーク）',
     theme:'テーマ',themeAuto:'自動',themeLight:'ライト',themeDark:'ダーク',themeCurrent:'現在のテーマ: {0}',renderedPreview:'レンダリングプレビュー',togglePreview:'プレビューを切り替え',preview:'プレビュー',
     shortcuts:'ショートカット',shortcutsVscode:'VS Code',shortcutsMarkda:'Markda',preferMarkdaShortcuts:'Markdaのショートカットを優先',preferVscodeShortcuts:'VS Codeのショートカットを優先',shortcutsCurrent:'ショートカットの優先: {0}',
@@ -128,7 +129,7 @@ const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
     imageWidth:'画像の幅',
   },
   'zh-cn': {
-    editorControls:'编辑器控件',sourceMode:'源代码模式 (Ctrl+/)',toggleSourceMode:'切换源代码模式',source:'源码',focusMode:'专注模式 (F8)',toggleFocusMode:'切换专注模式',focus:'专注',
+    editorControls:'编辑器控件',moreFormatting:'更多格式',viewOptions:'视图选项',sourceMode:'源代码模式 (Ctrl+/)',toggleSourceMode:'切换源代码模式',source:'源码',focusMode:'专注模式 (F8)',toggleFocusMode:'切换专注模式',focus:'专注',
     typewriterMode:'打字机模式 (F9)',toggleTypewriterMode:'切换打字机模式',typewriter:'打字机',bold:'粗体',italic:'斜体',inlineCode:'行内代码',insertLink:'插入链接',
     bulletedList:'项目符号列表',taskList:'任务列表',insertTable:'插入表格',insertImages:'插入图片',insertMath:'插入数学块',toggleTheme:'切换主题（自动 → 浅色 → 深色）',
     theme:'主题',renderedPreview:'渲染预览',togglePreview:'切换渲染预览',preview:'预览',tableControls:'表格控件',table:'表格',row:'行',columnShort:'列',
@@ -139,7 +140,7 @@ const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
     exported:'markda: 已导出 {0}',noPreviousExport:'markda: 此文档没有上次导出。',current:'当前',recent:'最近',goToHeading:'转到标题',
   },
   'zh-tw': {
-    editorControls:'編輯器控制項',sourceMode:'原始碼模式 (Ctrl+/)',toggleSourceMode:'切換原始碼模式',source:'原始碼',focusMode:'專注模式 (F8)',toggleFocusMode:'切換專注模式',focus:'專注',
+    editorControls:'編輯器控制項',moreFormatting:'更多格式',viewOptions:'檢視選項',sourceMode:'原始碼模式 (Ctrl+/)',toggleSourceMode:'切換原始碼模式',source:'原始碼',focusMode:'專注模式 (F8)',toggleFocusMode:'切換專注模式',focus:'專注',
     typewriterMode:'打字機模式 (F9)',toggleTypewriterMode:'切換打字機模式',typewriter:'打字機',bold:'粗體',italic:'斜體',inlineCode:'行內程式碼',insertLink:'插入連結',
     bulletedList:'項目符號清單',taskList:'工作清單',insertTable:'插入表格',insertImages:'插入圖片',insertMath:'插入數學區塊',toggleTheme:'切換佈景主題（自動 → 淺色 → 深色）',
     theme:'佈景主題',renderedPreview:'轉譯預覽',togglePreview:'切換轉譯預覽',preview:'預覽',tableControls:'表格控制項',table:'表格',row:'列',columnShort:'欄',
@@ -150,7 +151,7 @@ const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
     exported:'markda: 已匯出 {0}',noPreviousExport:'markda: 此文件沒有上次匯出。',current:'目前',recent:'最近',goToHeading:'移至標題',
   },
   ko: {
-    editorControls:'편집기 컨트롤',sourceMode:'소스 코드 모드 (Ctrl+/)',toggleSourceMode:'소스 코드 모드 전환',source:'소스',focusMode:'집중 모드 (F8)',toggleFocusMode:'집중 모드 전환',focus:'집중',
+    editorControls:'편집기 컨트롤',moreFormatting:'서식 더 보기',viewOptions:'보기 옵션',sourceMode:'소스 코드 모드 (Ctrl+/)',toggleSourceMode:'소스 코드 모드 전환',source:'소스',focusMode:'집중 모드 (F8)',toggleFocusMode:'집중 모드 전환',focus:'집중',
     typewriterMode:'타자기 모드 (F9)',toggleTypewriterMode:'타자기 모드 전환',typewriter:'타자기',bold:'굵게',italic:'기울임꼴',inlineCode:'인라인 코드',insertLink:'링크 삽입',
     bulletedList:'글머리 기호 목록',taskList:'작업 목록',insertTable:'표 삽입',insertImages:'이미지 삽입',insertMath:'수식 블록 삽입',toggleTheme:'테마 전환(자동 → 밝게 → 어둡게)',
     theme:'테마',renderedPreview:'렌더링된 미리 보기',togglePreview:'미리 보기 전환',preview:'미리 보기',tableControls:'표 컨트롤',table:'표',row:'행',columnShort:'열',
@@ -161,7 +162,7 @@ const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
     exported:'markda: {0} 내보냄',noPreviousExport:'markda: 이 문서에는 이전 내보내기가 없습니다.',current:'현재',recent:'최근',goToHeading:'제목으로 이동',
   },
   es: {
-    editorControls:'Controles del editor',sourceMode:'Modo de código fuente (Ctrl+/)',toggleSourceMode:'Alternar modo de código fuente',source:'Fuente',focusMode:'Modo de concentración (F8)',toggleFocusMode:'Alternar modo de concentración',focus:'Concentración',
+    editorControls:'Controles del editor',moreFormatting:'Más formato',viewOptions:'Opciones de vista',sourceMode:'Modo de código fuente (Ctrl+/)',toggleSourceMode:'Alternar modo de código fuente',source:'Fuente',focusMode:'Modo de concentración (F8)',toggleFocusMode:'Alternar modo de concentración',focus:'Concentración',
     typewriterMode:'Modo máquina de escribir (F9)',toggleTypewriterMode:'Alternar modo máquina de escribir',typewriter:'Máquina de escribir',bold:'Negrita',italic:'Cursiva',inlineCode:'Código en línea',insertLink:'Insertar vínculo',
     bulletedList:'Lista con viñetas',taskList:'Lista de tareas',insertTable:'Insertar tabla',insertImages:'Insertar imágenes',insertMath:'Insertar bloque matemático',toggleTheme:'Cambiar tema (automático → claro → oscuro)',
     theme:'Tema',renderedPreview:'Vista previa renderizada',togglePreview:'Alternar vista previa',preview:'Vista previa',tableControls:'Controles de tabla',table:'Tabla',row:'Fila',columnShort:'Col.',
@@ -172,7 +173,7 @@ const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
     exported:'markda: Se exportó {0}',noPreviousExport:'markda: Este documento no tiene una exportación anterior.',current:'actual',recent:'Recientes',goToHeading:'Ir al encabezado',
   },
   fr: {
-    editorControls:'Commandes de l’éditeur',sourceMode:'Mode code source (Ctrl+/)',toggleSourceMode:'Activer/désactiver le mode source',source:'Source',focusMode:'Mode concentration (F8)',toggleFocusMode:'Activer/désactiver le mode concentration',focus:'Concentration',
+    editorControls:'Commandes de l’éditeur',moreFormatting:'Plus de mise en forme',viewOptions:'Options d’affichage',sourceMode:'Mode code source (Ctrl+/)',toggleSourceMode:'Activer/désactiver le mode source',source:'Source',focusMode:'Mode concentration (F8)',toggleFocusMode:'Activer/désactiver le mode concentration',focus:'Concentration',
     typewriterMode:'Mode machine à écrire (F9)',toggleTypewriterMode:'Activer/désactiver le mode machine à écrire',typewriter:'Machine à écrire',bold:'Gras',italic:'Italique',inlineCode:'Code en ligne',insertLink:'Insérer un lien',
     bulletedList:'Liste à puces',taskList:'Liste de tâches',insertTable:'Insérer un tableau',insertImages:'Insérer des images',insertMath:'Insérer un bloc mathématique',toggleTheme:'Changer de thème (auto → clair → sombre)',
     theme:'Thème',renderedPreview:'Aperçu rendu',togglePreview:'Activer/désactiver l’aperçu',preview:'Aperçu',tableControls:'Commandes du tableau',table:'Tableau',row:'Ligne',columnShort:'Col.',
@@ -183,7 +184,7 @@ const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
     exported:'markda : {0} exporté',noPreviousExport:'markda : Ce document n’a aucune exportation précédente.',current:'actuel',recent:'Récents',goToHeading:'Accéder au titre',
   },
   de: {
-    editorControls:'Editorsteuerelemente',sourceMode:'Quelltextmodus (Ctrl+/)',toggleSourceMode:'Quelltextmodus umschalten',source:'Quelle',focusMode:'Fokusmodus (F8)',toggleFocusMode:'Fokusmodus umschalten',focus:'Fokus',
+    editorControls:'Editorsteuerelemente',moreFormatting:'Weitere Formatierung',viewOptions:'Ansichtsoptionen',sourceMode:'Quelltextmodus (Ctrl+/)',toggleSourceMode:'Quelltextmodus umschalten',source:'Quelle',focusMode:'Fokusmodus (F8)',toggleFocusMode:'Fokusmodus umschalten',focus:'Fokus',
     typewriterMode:'Schreibmaschinenmodus (F9)',toggleTypewriterMode:'Schreibmaschinenmodus umschalten',typewriter:'Schreibmaschine',bold:'Fett',italic:'Kursiv',inlineCode:'Inlinecode',insertLink:'Link einfügen',
     bulletedList:'Aufzählung',taskList:'Aufgabenliste',insertTable:'Tabelle einfügen',insertImages:'Bilder einfügen',insertMath:'Mathematikblock einfügen',toggleTheme:'Design wechseln (automatisch → hell → dunkel)',
     theme:'Design',renderedPreview:'Gerenderte Vorschau',togglePreview:'Vorschau umschalten',preview:'Vorschau',tableControls:'Tabellensteuerelemente',table:'Tabelle',row:'Zeile',columnShort:'Sp.',
@@ -194,7 +195,7 @@ const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
     exported:'markda: {0} exportiert',noPreviousExport:'markda: Dieses Dokument hat keinen vorherigen Export.',current:'aktuell',recent:'Zuletzt verwendet',goToHeading:'Zur Überschrift',
   },
   'pt-br': {
-    editorControls:'Controles do editor',sourceMode:'Modo de código-fonte (Ctrl+/)',toggleSourceMode:'Alternar modo de código-fonte',source:'Fonte',focusMode:'Modo de foco (F8)',toggleFocusMode:'Alternar modo de foco',focus:'Foco',
+    editorControls:'Controles do editor',moreFormatting:'Mais formatação',viewOptions:'Opções de exibição',sourceMode:'Modo de código-fonte (Ctrl+/)',toggleSourceMode:'Alternar modo de código-fonte',source:'Fonte',focusMode:'Modo de foco (F8)',toggleFocusMode:'Alternar modo de foco',focus:'Foco',
     typewriterMode:'Modo máquina de escrever (F9)',toggleTypewriterMode:'Alternar modo máquina de escrever',typewriter:'Máquina de escrever',bold:'Negrito',italic:'Itálico',inlineCode:'Código embutido',insertLink:'Inserir link',
     bulletedList:'Lista com marcadores',taskList:'Lista de tarefas',insertTable:'Inserir tabela',insertImages:'Inserir imagens',insertMath:'Inserir bloco matemático',toggleTheme:'Alternar tema (automático → claro → escuro)',
     theme:'Tema',renderedPreview:'Visualização renderizada',togglePreview:'Alternar visualização',preview:'Visualização',tableControls:'Controles da tabela',table:'Tabela',row:'Linha',columnShort:'Col.',
@@ -205,7 +206,7 @@ const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
     exported:'markda: {0} exportado',noPreviousExport:'markda: Este documento não tem exportação anterior.',current:'atual',recent:'Recentes',goToHeading:'Ir para o título',
   },
   ru: {
-    editorControls:'Элементы управления редактором',sourceMode:'Режим исходного кода (Ctrl+/)',toggleSourceMode:'Переключить режим исходного кода',source:'Код',focusMode:'Режим фокусировки (F8)',toggleFocusMode:'Переключить режим фокусировки',focus:'Фокус',
+    editorControls:'Элементы управления редактором',moreFormatting:'Другие параметры форматирования',viewOptions:'Параметры просмотра',sourceMode:'Режим исходного кода (Ctrl+/)',toggleSourceMode:'Переключить режим исходного кода',source:'Код',focusMode:'Режим фокусировки (F8)',toggleFocusMode:'Переключить режим фокусировки',focus:'Фокус',
     typewriterMode:'Режим пишущей машинки (F9)',toggleTypewriterMode:'Переключить режим пишущей машинки',typewriter:'Машинка',bold:'Полужирный',italic:'Курсив',inlineCode:'Встроенный код',insertLink:'Вставить ссылку',
     bulletedList:'Маркированный список',taskList:'Список задач',insertTable:'Вставить таблицу',insertImages:'Вставить изображения',insertMath:'Вставить математический блок',toggleTheme:'Переключить тему (авто → светлая → тёмная)',
     theme:'Тема',renderedPreview:'Предпросмотр',togglePreview:'Переключить предпросмотр',preview:'Предпросмотр',tableControls:'Управление таблицей',table:'Таблица',row:'Строка',columnShort:'Стлб.',
@@ -216,7 +217,7 @@ const catalogs: Record<Exclude<SupportedLocale, 'en'>, Messages> = {
     exported:'markda: Экспортирован {0}',noPreviousExport:'markda: У этого документа нет предыдущего экспорта.',current:'текущий',recent:'Недавние',goToHeading:'Перейти к заголовку',
   },
   ar: {
-    editorControls:'عناصر تحكم المحرر',sourceMode:'وضع الشفرة المصدرية (Ctrl+/)',toggleSourceMode:'تبديل وضع الشفرة المصدرية',source:'المصدر',
+    editorControls:'عناصر تحكم المحرر',moreFormatting:'المزيد من التنسيق',viewOptions:'خيارات العرض',sourceMode:'وضع الشفرة المصدرية (Ctrl+/)',toggleSourceMode:'تبديل وضع الشفرة المصدرية',source:'المصدر',
     focusMode:'وضع التركيز (F8)',toggleFocusMode:'تبديل وضع التركيز',focus:'تركيز',typewriterMode:'وضع الآلة الكاتبة (F9)',toggleTypewriterMode:'تبديل وضع الآلة الكاتبة',typewriter:'آلة كاتبة',
     bold:'غامق',italic:'مائل',inlineCode:'شفرة مضمنة',insertLink:'إدراج رابط',bulletedList:'قائمة نقطية',taskList:'قائمة مهام',insertTable:'إدراج جدول',
     insertImages:'إدراج صور',insertMath:'إدراج كتلة رياضية',toggleTheme:'تبديل النسق (تلقائي ← فاتح ← داكن)',theme:'النسق',

@@ -38,6 +38,15 @@ describe('live table toolbar in Chromium', () => {
     await import('../src/webview/main.js');
     await settle();
 
+    const editorToolbar = document.querySelector<HTMLElement>('#editor-toolbar')!;
+    expect(document.querySelector('#toolbar-toggle')).toBeNull();
+    expect(getComputedStyle(editorToolbar).flexWrap).toBe('nowrap');
+    expect(getComputedStyle(editorToolbar).overflowX).toBe('visible');
+    expect(editorToolbar.scrollWidth).toBeLessThanOrEqual(editorToolbar.clientWidth);
+    const firstLine = document.querySelector<HTMLElement>('.cm-line')!;
+    expect(firstLine.getBoundingClientRect().top)
+      .toBeGreaterThanOrEqual(editorToolbar.getBoundingClientRect().bottom);
+
     const toolbar = document.querySelector<HTMLElement>('#table-toolbar')!;
     expect(getComputedStyle(toolbar).display).toBe('none');
     expect(document.querySelector('.markda-inline-table-controls')).toBeNull();
@@ -47,11 +56,25 @@ describe('live table toolbar in Chromium', () => {
     document.querySelector<HTMLElement>('[data-table-row="0"][data-table-column="0"]')!.focus();
     await settle();
     expect(getComputedStyle(toolbar).display).toBe('flex');
-    expect(followingHeading.getBoundingClientRect().top).toBeCloseTo(followingHeadingTop, 0);
+    expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
+    expect(getComputedStyle(toolbar).overflowX).toBe('hidden');
+    expect(toolbar.scrollWidth).toBeLessThanOrEqual(toolbar.clientWidth);
+    expect(followingHeading.getBoundingClientRect().top).toBeGreaterThan(followingHeadingTop);
+    expect(firstLine.getBoundingClientRect().top)
+      .toBeGreaterThanOrEqual(toolbar.getBoundingClientRect().bottom);
 
     const rowAfter = document.querySelector<HTMLButtonElement>('[data-table-command="row-after"]')!;
-    rowAfter.focus();
-    rowAfter.click();
+    const rowAfterRect = rowAfter.getBoundingClientRect();
+    const rowAfterTarget = document.elementFromPoint(
+      rowAfterRect.left + rowAfterRect.width / 2,
+      rowAfterRect.top + rowAfterRect.height / 2,
+    );
+    expect(rowAfterTarget?.closest('[data-table-command="row-after"]')).toBe(rowAfter);
+    rowAfter.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      clientX: rowAfterRect.left + rowAfterRect.width / 2,
+      clientY: rowAfterRect.top + rowAfterRect.height / 2,
+    }));
     await settle();
     expect(document.querySelectorAll('.markda-live-table-wrap tr')).toHaveLength(3);
     expect(document.activeElement?.matches('[data-table-row="1"][data-table-column="0"]')).toBe(true);
