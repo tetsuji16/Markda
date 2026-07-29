@@ -4,7 +4,10 @@ import { markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language';
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search';
 import { Annotation, ChangeSet, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from '@codemirror/state';
-import { Decoration, drawSelection, EditorView, highlightActiveLine, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import {
+  Decoration, drawSelection, EditorView, highlightActiveLine, keymap, layer, RectangleMarker, ViewPlugin, WidgetType,
+  type DecorationSet, type ViewUpdate,
+} from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import DOMPurify from 'dompurify';
 import { decodeHTML } from 'entities';
@@ -300,6 +303,52 @@ const diagnosticDecorationsField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
+/**
+ * Draw each selected document line independently. CodeMirror's standard
+ * selection layer intentionally fills all space between the first and last
+ * selected visual lines. That is useful in a plain code editor, but produces
+ * tall solid rectangles across the margins used by rendered Markdown
+ * headings and blocks.
+ */
+function createCompactSelectionDrawing() {
+  return [
+    drawSelection(),
+    layer({
+      above: false,
+      class: 'markda-compactSelectionLayer',
+      markers(editor) {
+        const markers: RectangleMarker[] = [];
+        for (const range of editor.state.selection.ranges) {
+          if (range.empty || range.to <= editor.viewport.from || range.from >= editor.viewport.to) continue;
+          for (const visible of editor.visibleRanges) {
+            const from = Math.max(range.from, visible.from);
+            const to = Math.min(range.to, visible.to);
+            if (from >= to) continue;
+            let line = editor.state.doc.lineAt(from);
+            while (line.from < to || (line.from === from && line.to === from && to > from)) {
+              const lineFrom = Math.max(from, line.from);
+              const lineTo = Math.min(to, line.to);
+              if (lineFrom < lineTo) {
+                markers.push(...RectangleMarker.forRange(
+                  editor, 'cm-selectionBackground', EditorSelection.range(lineFrom, lineTo),
+                ));
+              } else if (to > line.to) {
+                markers.push(...RectangleMarker.forRange(
+                  editor, 'cm-selectionBackground markda-selected-line-break', EditorSelection.cursor(line.to),
+                ));
+              }
+              if (line.number === editor.state.doc.lines || line.to + 1 >= to) break;
+              line = editor.state.doc.line(line.number + 1);
+            }
+          }
+        }
+        return markers;
+      },
+      update: (update) => update.docChanged || update.selectionSet || update.viewportChanged || update.geometryChanged,
+    }),
+  ];
+}
+
 const view = new EditorView({
   parent: document.querySelector<HTMLElement>('#editor')!,
   state: EditorState.create({
@@ -325,7 +374,7 @@ const view = new EditorView({
       ]),
       createMarkdownPairing(),
       EditorView.lineWrapping,
-      drawSelection(),
+      createCompactSelectionDrawing(),
       highlightActiveLine(),
       createLivePreviewPlugin(),
       blockDecorationsField,
@@ -5016,7 +5065,7 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .markda-shell{position:relative;height:100%;display:grid;grid-template-rows:minmax(0,1fr) 24px}.markda-toolbar{position:absolute;top:0;right:0;left:0;z-index:500;min-height:40px;padding:5px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:2px;overflow:hidden;background:color-mix(in srgb,var(--markda-elevated) 92%,transparent);border:0;border-bottom:1px solid color-mix(in srgb,var(--markda-border) 78%,transparent);border-radius:0;box-shadow:none;backdrop-filter:blur(12px)}.markda-toolbar button{display:flex;gap:5px;align-items:center;flex:0 0 auto;min-height:28px;border-radius:6px}.markda-toolbar button.active{color:var(--markda-accent);background:color-mix(in srgb,var(--markda-active) 72%,transparent)}.markda-style-picker select{height:28px;max-width:9em;padding:0 6px;color:var(--markda-fg);background:transparent;border:1px solid transparent;border-radius:6px}.markda-style-picker select:hover{background:var(--markda-hover)}.markda-style-picker select:focus-visible{outline:2px solid var(--markda-focus);outline-offset:-2px}.toolbar-separator{height:16px;border-left:1px solid color-mix(in srgb,var(--markda-border) 72%,transparent);margin:0 6px}.toolbar-spacer{flex:1 1 12px}.math-icon{font:bold 17px serif}
 .table-toolbar{grid-area:1/1;align-self:start;z-index:300;display:none;width:100%;min-height:42px;padding:7px 52px 7px 10px;flex-wrap:wrap;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow:hidden}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{grid-area:1/1;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:48px 30px 30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
-.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:var(--markda-font-size,16px);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:48px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-line+.cm-line{margin-top:var(--markda-paragraph-spacing,0)}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionBackground{background:var(--markda-selection)!important}
+.cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:var(--markda-font-size,16px);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:48px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-line+.cm-line{margin-top:var(--markda-paragraph-spacing,0)}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionLayer{display:none}.cm-selectionBackground{background:var(--markda-selection)!important}.markda-selected-line-break{width:.5em}
 .cm-editor .markda-block-selection{position:relative}.cm-editor .markda-block-selection::after{content:"";position:absolute;inset:0;z-index:20;pointer-events:none;border:2px solid var(--markda-selection);border-radius:4px;background:color-mix(in srgb,var(--markda-selection) 48%,transparent)}
 .cm-editor .cm-panels-top:has(.cm-search){position:absolute;top:0;right:14px;left:auto;z-index:600;color:var(--markda-fg);background:transparent;border:0}
 .cm-editor .cm-panel.cm-search{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) repeat(6,24px);grid-template-rows:24px 24px;gap:3px;width:min(454px,calc(100vw - 32px));padding:4px 28px;color:var(--markda-fg);background:var(--markda-find-widget);border:1px solid var(--markda-border);border-top:0;box-shadow:0 2px 8px var(--markda-widget-shadow);font:13px/1 var(--markda-font-body)}
