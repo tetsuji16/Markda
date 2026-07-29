@@ -1,6 +1,7 @@
 /// <reference types="@vitest/browser/providers/playwright" />
 
-import { describe, expect, it, vi } from 'vitest';
+import { page } from '@vitest/browser/context';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 async function settle(): Promise<void> {
   await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -8,7 +9,12 @@ async function settle(): Promise<void> {
 }
 
 describe('live table toolbar in Chromium', () => {
+  afterEach(async () => {
+    await page.viewport(900, 700);
+  });
+
   it('appears for the focused table and edits relative to the active cell', async () => {
+    await page.viewport(1400, 700);
     document.body.innerHTML = '<div id="app"></div>';
     (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial = {
       type: 'initialize',
@@ -42,6 +48,13 @@ describe('live table toolbar in Chromium', () => {
     expect(document.querySelector('#toolbar-toggle')).toBeNull();
     expect(getComputedStyle(editorToolbar).flexWrap).toBe('nowrap');
     expect(getComputedStyle(editorToolbar).overflowX).toBe('visible');
+    const wideActions = editorToolbar.querySelectorAll<HTMLElement>('.markda-toolbar-wide');
+    expect(wideActions).toHaveLength(6);
+    expect(Array.from(wideActions).every((action) => getComputedStyle(action).display === 'flex')).toBe(true);
+    expect(editorToolbar.scrollWidth).toBeLessThanOrEqual(editorToolbar.clientWidth);
+    await page.viewport(900, 700);
+    await settle();
+    expect(Array.from(wideActions).every((action) => getComputedStyle(action).display === 'none')).toBe(true);
     expect(editorToolbar.scrollWidth).toBeLessThanOrEqual(editorToolbar.clientWidth);
     const firstLine = document.querySelector<HTMLElement>('.cm-line')!;
     expect(firstLine.getBoundingClientRect().top)

@@ -58,6 +58,14 @@ function latestEdit(postMessage: ReturnType<typeof vi.fn>):
     .find((message) => message.type === 'edit');
 }
 
+function latestSave(postMessage: ReturnType<typeof vi.fn>):
+{ type: string; expectedText?: string; text?: string } | undefined {
+  return postMessage.mock.calls
+    .map(([message]) => message as { type: string; expectedText?: string; text?: string })
+    .reverse()
+    .find((message) => message.type === 'save');
+}
+
 describe('showcase Markdown editing in Chromium', { timeout: 60_000 }, () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -128,7 +136,7 @@ describe('showcase Markdown editing in Chromium', { timeout: 60_000 }, () => {
       }));
 
       await userEvent.keyboard('{Control>}s{/Control}');
-      expect(postMessage.mock.calls.at(-1)?.[0], fileName).toMatchObject({
+      expect(latestSave(postMessage), fileName).toMatchObject({
         type: 'save',
         expectedText: `${original}${serializedAddition}`,
         text: `${original}${serializedAddition}`,

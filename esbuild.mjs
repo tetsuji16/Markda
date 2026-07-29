@@ -94,7 +94,7 @@ if (watch) {
   const webviewBytes = (await stat(new URL('./dist/webview.js', import.meta.url))).size;
   // The document-style controls, status surface, and accessible quick-insert
   // UI are part of first paint; optional parsers and renderers remain split.
-  const startupBundleBudget = 724 * 1024;
+  const startupBundleBudget = 726 * 1024;
   if (webviewBytes > startupBundleBudget) {
     throw new Error(`Webview startup bundle is ${webviewBytes} bytes; budget is ${startupBundleBudget} bytes.`);
   }

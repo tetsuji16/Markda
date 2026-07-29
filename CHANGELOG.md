@@ -4,6 +4,15 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.22 - 2026-07-30
+
+- Restored direct access to common list, quote, code, table, and image actions
+  on wide editor windows while retaining compact menus at smaller widths.
+- Kept both wide and compact toolbar layouts free of horizontal overflow.
+- Moved document statistics and heading analysis off the initial paint path.
+- Avoided loading the full emoji catalog for ordinary colons in URLs, times,
+  and prose, reducing unnecessary startup work.
+
 ## 0.1.21 - 2026-07-29
 
 - Kept light and dark code colors independent from generic surface overrides,
