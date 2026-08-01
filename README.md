@@ -1,8 +1,10 @@
 # Markda
 
-Write Markdown in its rendered form. Keep the source exactly yours.
+![Markda — edit the rendered document while keeping clean, portable Markdown source](media/marketing/marketplace-hero.png)
 
-Markda is a calm, source-preserving Markdown editor for VS Code Desktop. Work directly in a formatted document—headings, tasks, links, tables, code, math, diagrams, and images—while the file on disk stays ordinary Markdown that works everywhere.
+**Edit the document you see. Keep the Markdown you own.**
+
+Markda is a source-preserving Markdown editor for VS Code Desktop. Write directly in the rendered document—headings, tasks, tables, code, math, diagrams, and images included—while the file on disk remains clean, portable Markdown.
 
 > Markda 0.1 is a preview release. Keep important work under version control and report reproducible editing issues.
 

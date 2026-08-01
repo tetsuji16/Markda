@@ -1,5 +1,5 @@
 {
-  "extension.description": "A source-preserving live Markdown editor for VS Code: edit formatted Markdown in place while keeping ordinary, portable Markdown files.",
+  "extension.description": "Edit rendered Markdown directly in VS Code while keeping clean, portable source—with tables, code, math, diagrams, images, and export.",
   "view.outline": "المخطط التفصيلي",
   "view.files": "الملفات",
   "command.open": "فتح باستخدام markda",

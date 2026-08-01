@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "%extension.description%",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "publisher": "tetsuji16",
   "license": "MIT",
   "l10n": "./l10n",
@@ -26,12 +26,17 @@
   ],
   "keywords": [
     "markdown",
+    "markdown-editor",
     "wysiwym",
-    "editor"
+    "editor",
+    "live-preview",
+    "source-preserving",
+    "math",
+    "mermaid"
   ],
-  "icon": "media/icon.png",
+  "icon": "media/icon-refined.png",
   "galleryBanner": {
-    "color": "#172033",
+    "color": "#111318",
     "theme": "dark"
   },
   "preview": true,
