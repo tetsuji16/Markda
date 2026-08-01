@@ -4,6 +4,11 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.23 - 2026-08-02
+
+- Refreshed the Markda icon, GitHub social preview, Marketplace hero, and
+  introductory copy around source-preserving rendered Markdown editing.
+
 ## 0.1.22 - 2026-07-30
 
 - Restored direct access to common list, quote, code, table, and image actions

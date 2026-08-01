@@ -9,6 +9,7 @@ diff_main.txt
 opencode.json
 dev/**
 output/**
+tmp/**
 docs/sample.md
 docs/sample.assets/**
 src/**

@@ -1,5 +1,5 @@
 {
-  "extension.description": "通常の可搬性のあるMarkdownファイルを維持しながら、書式付きMarkdownをその場で編集できるVS Code用ライブエディター。",
+  "extension.description": "VS Codeで描画済みMarkdownを直接編集。表、コード、数式、図、画像、書き出しに対応しながら、ソースはきれいで可搬なMarkdownのまま保ちます。",
   "view.outline": "アウトライン",
   "view.files": "ファイル",
   "command.open": "markdaで開く",
