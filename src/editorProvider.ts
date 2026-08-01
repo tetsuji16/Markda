@@ -8,6 +8,7 @@ import { findMinimalChange } from './textChange.js';
 import { OutlineProvider } from './outlineProvider.js';
 import { isRtlLocale } from './localization.js';
 import { isMarkdownDocumentPath, parseDocumentLink } from './documentLink.js';
+import { isPathInside, isRealPathInside } from './pathSecurity.js';
 
 interface EditorView {
   panel: vscode.WebviewPanel;
@@ -308,7 +309,10 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     if (copyFolder && !path.isAbsolute(copyFolder)) {
       const destinationFolder = path.resolve(documentFolder, copyFolder);
       const workspace = vscode.workspace.getWorkspaceFolder(view.document.uri);
-      if (workspace && !isInside(workspace.uri.fsPath, destinationFolder)) {
+      // A standalone document has no workspace root, but its image-folder
+      // setting must still not be able to escape the document's directory.
+      const allowedRoot = workspace?.uri.fsPath ?? documentFolder;
+      if (!isPathInside(allowedRoot, destinationFolder)) {
         void vscode.window.showErrorMessage(vscode.l10n.t('markda: The configured image folder must stay inside the workspace.'));
         throw new Error('Image folder is outside the workspace.');
       }
@@ -346,7 +350,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const sourcePath = path.resolve(documentFolder, decoded);
     const workspace = vscode.workspace.getWorkspaceFolder(view.document.uri);
     const allowedRoot = workspace?.uri.fsPath ?? documentFolder;
-    if (!isInside(allowedRoot, sourcePath)) {
+    if (!isPathInside(allowedRoot, sourcePath) || !await isRealPathInside(allowedRoot, sourcePath)) {
       void vscode.window.showErrorMessage(vscode.l10n.t('markda: Image management is restricted to the current workspace.'));
       return;
     }
@@ -404,7 +408,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const target = vscode.Uri.file(path.resolve(path.dirname(documentUri.fsPath), link.path));
     const workspace = vscode.workspace.getWorkspaceFolder(documentUri);
     const allowedRoot = workspace?.uri.fsPath ?? path.dirname(documentUri.fsPath);
-    if (!isInside(allowedRoot, target.fsPath)) {
+    if (!isPathInside(allowedRoot, target.fsPath)) {
       void vscode.window.showWarningMessage(vscode.l10n.t('markda: Links outside the workspace cannot be opened.'));
       return;
     }
@@ -564,11 +568,6 @@ function encodeMarkdownPath(value: string): string {
 
 function escapeMarkdownLabel(value: string): string {
   return value.replace(/[\\\[\]]/gu, '\\$&');
-}
-
-function isInside(parent: string, child: string): boolean {
-  const relative = path.relative(path.resolve(parent), path.resolve(child));
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
 async function availableDestination(preferred: vscode.Uri): Promise<vscode.Uri> {

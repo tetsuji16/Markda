@@ -686,6 +686,29 @@ describe('live Markdown webview cursor + block decorations', { timeout: 30_000 }
     expect(view.dom.querySelector('.markda-meta-expanded')).not.toBeNull();
   });
 
+  it('refreshes every non-prose fast-path marker when the caret enters it', async () => {
+    vi.resetModules();
+    const source = 'Entity &copy;, HTML <kbd>Ctrl</kbd>, and a hard break  \nOutside';
+    setupEditor(source);
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    view.focus();
+
+    view.dispatch({ selection: { anchor: source.indexOf('&copy;') + 2 } });
+    await tick();
+    expect(view.dom.querySelector('.markda-entity')).toBeNull();
+
+    view.dispatch({ selection: { anchor: source.indexOf('<kbd>') + 2 } });
+    await tick();
+    expect(view.dom.querySelector('.markda-inline-html')).toBeNull();
+
+    view.dispatch({ selection: { anchor: source.indexOf('\n') - 1 } });
+    await tick();
+    expect(view.dom.querySelector('.markda-meta-expanded')).not.toBeNull();
+  });
+
   it.each(['mouseup', 'pointercancel'])('freezes inline decorations during pointer selection and settles them once after %s', async (finishEvent) => {
     vi.resetModules();
     setupEditor(['first paragraph', 'second paragraph', 'third paragraph'].join('\n'));
