@@ -4036,10 +4036,12 @@ function createLivePreviewPlugin() {
       // until the gesture has ended. Document edits are mapped through the frozen
       // set, so composition and externally delivered changes cannot leave stale
       // ranges behind.
+      const selectionRefreshNeeded = update.selectionSet
+        && (update.state.field(modeField).focusMode || selectionTouchesInlineCandidate(update));
       if (this.pointerActive && !settleRequested) {
         if (update.docChanged) this.decorations = this.decorations.map(update.changes);
       } else if (update.docChanged || update.viewportChanged || modeChanged || refreshRequested || inlineRefreshRequested
-        || settleRequested || update.selectionSet) {
+        || settleRequested || selectionRefreshNeeded) {
         this.decorations = buildInlineDecorations(update.view);
       }
 
@@ -4049,7 +4051,11 @@ function createLivePreviewPlugin() {
       // A pointer gesture freezes decorations while its selection changes, so its
       // settle transaction must always rebuild: by then startState no longer
       // contains the line the pointer left and cannot identify that block itself.
-      if ((update.docChanged || modeChanged || refreshRequested || settleRequested
+      // Most keystrokes only change prose. The mapped state-field decorations
+      // remain valid in that case, so rebuilding every document-wide block
+      // widget would make typing cost grow with the whole document size.
+      const blockRefreshNeeded = update.docChanged && updateTouchesBlockDecorations(update);
+      if ((blockRefreshNeeded || modeChanged || refreshRequested || settleRequested
         || (update.selectionSet && !this.pointerActive && selectionTouchesBlockCandidate(update)))
         && !this.applyingBlockRefresh && !this.blockRefreshQueued) {
         this.blockRefreshQueued = true;
@@ -4061,7 +4067,7 @@ function createLivePreviewPlugin() {
             update.view.dispatch({
               effects: [
                 setBlockDecorations.of(buildBlockDecorations(update.view)),
-                ...(update.docChanged || modeChanged || refreshRequested
+                ...(shouldRefreshSoftBreakDecorations(update, modeChanged, refreshRequested)
                   ? [setSoftBreakDecorations.of(buildSoftBreakDecorations(update.view))]
                   : []),
               ],
@@ -4293,7 +4299,7 @@ function createBlockSelectionHighlightPlugin() {
     }
 
     update(update: ViewUpdate): void {
-      if (update.selectionSet || update.docChanged || update.viewportChanged) {
+      if (update.selectionSet) {
         updateBlockSelectionDOM(update.view);
       }
     }
@@ -4329,6 +4335,10 @@ function buildBlockDecorations(editor: EditorView): DecorationSet {
   const selectionTo = livePreviewSelectionFocused ? selection.to : -1;
   let documentSource: string | undefined;
   if (state.sourceMode) return Decoration.none;
+  // A normal prose document cannot produce a block widget. Avoid resolving
+  // every CodeMirror line on initial load (and after a settings refresh) when
+  // there is not even a syntactic candidate to inspect.
+  if (!documentMayContainBlockDecorations(editor.state.doc.toString())) return Decoration.none;
   let processedUntil = -1;
   // Block replacements change the editor's height map. If the decoration set is
   // rebuilt from visibleRanges, that re-layout can move a block outside the next
@@ -5010,6 +5020,96 @@ function normalizeReferenceLabel(label: string): string {
 
 function decodeHtmlEntity(source: string): string {
   return decodeHTML(source);
+}
+
+// Selection changes only affect inline decorations when either endpoint is on
+// a line that can expose source syntax. This is deliberately a conservative
+// superset of addInlineDecorations() triggers: a false positive only refreshes
+// a line, while a false negative leaves stale source markers behind.
+// Keeping ordinary prose cursor moves off this path avoids a visible-range scan
+// for every arrow key in large files.
+function selectionTouchesInlineCandidate(update: ViewUpdate): boolean {
+  if (!update.startState.selection.main.empty || !update.state.selection.main.empty) return true;
+  return hasInlineDecorationCandidateNear(update.startState.doc, update.startState.selection.main.head)
+    || hasInlineDecorationCandidateNear(update.state.doc, update.state.selection.main.head);
+}
+
+function hasInlineDecorationCandidateNear(doc: EditorState['doc'], position: number): boolean {
+  const lineNumber = doc.lineAt(position).number;
+  for (let current = Math.max(1, lineNumber - 1); current <= Math.min(doc.lines, lineNumber + 1); current++) {
+    if (isInlineDecorationCandidateLine(doc.line(current).text)) return true;
+  }
+  return false;
+}
+
+function isInlineDecorationCandidateLine(line: string): boolean {
+  return /[!$&*+:[\]`~_^=<\\]|(?: {2,}|\\)$/u.test(line)
+    || /^\s*(?:#{1,6}[ \t]|>|[-+]\s+|\d+[.)]\s+)/u.test(line);
+}
+
+function documentMayContainBlockDecorations(source: string): boolean {
+  return /\||(?:^|\n)(?:[ \t]{4}|\t|[ \t]*[!$<>\[_`~*-])/u.test(source);
+}
+
+/**
+ * Returns whether a document change can alter a block widget. Existing block
+ * ranges are checked first (so edits inside a code/table widget still redraw),
+ * then only the changed lines and their neighbours are inspected for newly
+ * introduced block syntax.
+ */
+function updateTouchesBlockDecorations(update: ViewUpdate): boolean {
+  let touchesWidget = false;
+  update.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    if (!touchesWidget) {
+      // Insertions have an empty old range. Include the following position so
+      // a character typed inside an existing widget is never mistaken for an
+      // ordinary-prose edit and left with stale rendered content.
+      const oldRangeTo = Math.max(toA, Math.min(fromA + 1, update.startState.doc.length));
+      update.startState.field(blockDecorationsField).between(fromA, oldRangeTo, (_from, _to, value) => {
+        if (value.spec.block) touchesWidget = true;
+      });
+    }
+    if (!touchesWidget && (hasBlockCandidateNear(update.startState.doc, fromA, toA)
+      || hasBlockCandidateNear(update.state.doc, fromB, toB))) {
+      touchesWidget = true;
+    }
+  });
+  return touchesWidget;
+}
+
+function hasBlockCandidateNear(doc: EditorState['doc'], from: number, to: number): boolean {
+  const first = doc.lineAt(Math.max(0, Math.min(from, doc.length))).number;
+  const last = doc.lineAt(Math.max(0, Math.min(to, doc.length))).number;
+  for (let lineNumber = Math.max(1, first - 1); lineNumber <= Math.min(doc.lines, last + 1); lineNumber++) {
+    if (isBlockDecorationCandidate(doc.line(lineNumber).text)) return true;
+  }
+  return false;
+}
+
+/**
+ * Soft-break replacements only depend on line boundaries and the previous
+ * line's trailing break marker. Plain in-line edits are already mapped by
+ * CodeMirror and do not need a document-wide syntax-tree walk.
+ */
+function shouldRefreshSoftBreakDecorations(update: ViewUpdate, modeChanged: boolean, refreshRequested: boolean): boolean {
+  if (!update.docChanged) return modeChanged || refreshRequested;
+  let needsRefresh = false;
+  update.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    if (needsRefresh) return;
+    needsRefresh = softBreakMayChangeNear(update.startState.doc, fromA, toA)
+      || softBreakMayChangeNear(update.state.doc, fromB, toB);
+  });
+  return needsRefresh;
+}
+
+function softBreakMayChangeNear(doc: EditorState['doc'], from: number, to: number): boolean {
+  const first = doc.lineAt(Math.max(0, Math.min(from, doc.length))).number;
+  const last = doc.lineAt(Math.max(0, Math.min(to, doc.length))).number;
+  if (first !== last) return true;
+  // A changed line can affect the break immediately before or after it only
+  // when it is blank or ends in a Markdown hard-break marker.
+  const line = doc.line(first).text;
+  return !line.trim() || /(?: {2,}|\\)$/u.test(line);
 }
 
 function commitHtmlBlock(editor: EditorView, from: number, html: string): void {
