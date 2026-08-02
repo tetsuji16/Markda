@@ -4,6 +4,11 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.24 - 2026-08-02
+
+- Rebuilt the activity-bar glyph as a clear 24-pixel monochrome M with its
+  right leg continuing into a downward arrow across light and dark themes.
+
 ## 0.1.23 - 2026-08-02
 
 - Refreshed the Markda icon, GitHub social preview, Marketplace hero, and
