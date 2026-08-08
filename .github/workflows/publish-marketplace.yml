@@ -1,0 +1,51 @@
+name: Publish to VS Code Marketplace
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+      - id: version
+        name: Check whether the extension version changed
+        shell: bash
+        run: |
+          current_version="$(node -p \"require('./package.json').version\")"
+          previous_version="$(git show HEAD^:package.json 2>/dev/null | node -p \"let source=''; process.stdin.on('data', chunk => source += chunk).on('end', () => console.log(JSON.parse(source).version))\" || true)"
+          echo "current=${current_version}" >> "$GITHUB_OUTPUT"
+          if [[ "${current_version}" != "${previous_version}" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping Marketplace publication because the extension version did not change."
+          fi
+
+      - name: Publish version ${{ steps.version.outputs.current }}
+        if: steps.version.outputs.publish == 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx vsce publish --no-dependencies --allow-missing-repository --pat "$VSCE_PAT"

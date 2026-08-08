@@ -56,6 +56,29 @@ describe('live table toolbar in Chromium', () => {
     await settle();
     expect(Array.from(wideActions).every((action) => getComputedStyle(action).display === 'none')).toBe(true);
     expect(editorToolbar.scrollWidth).toBeLessThanOrEqual(editorToolbar.clientWidth);
+    await page.viewport(360, 700);
+    await settle();
+    const primaryActions = editorToolbar.querySelectorAll<HTMLElement>('.markda-toolbar-primary');
+    expect(Array.from(primaryActions).every((action) => getComputedStyle(action).display === 'none')).toBe(true);
+    expect(editorToolbar.scrollWidth).toBeLessThanOrEqual(editorToolbar.clientWidth);
+    const stylePicker = document.querySelector<HTMLSelectElement>('#paragraph-style')!;
+    stylePicker.focus();
+    stylePicker.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    const formatMenu = editorToolbar.querySelectorAll<HTMLDetailsElement>('.markda-toolbar-menu')[0]!;
+    expect(document.activeElement).toBe(formatMenu.querySelector('summary'));
+    formatMenu.open = true;
+    await settle();
+    expect(getComputedStyle(formatMenu.querySelector<HTMLElement>('.markda-toolbar-popover')!).overflowY).toBe('auto');
+    expect(Array.from(formatMenu.querySelectorAll<HTMLElement>('.markda-toolbar-compact-only'))
+      .every((action) => getComputedStyle(action).display === 'flex')).toBe(true);
+    const insertMenu = editorToolbar.querySelectorAll<HTMLDetailsElement>('.markda-toolbar-menu')[1]!;
+    insertMenu.open = true;
+    await settle();
+    expect(formatMenu.open).toBe(false);
+    expect(insertMenu.open).toBe(true);
+    insertMenu.open = false;
+    await page.viewport(900, 700);
+    await settle();
     const firstLine = document.querySelector<HTMLElement>('.cm-line')!;
     expect(firstLine.getBoundingClientRect().top)
       .toBeGreaterThanOrEqual(editorToolbar.getBoundingClientRect().bottom);

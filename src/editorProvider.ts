@@ -408,7 +408,10 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const target = vscode.Uri.file(path.resolve(path.dirname(documentUri.fsPath), link.path));
     const workspace = vscode.workspace.getWorkspaceFolder(documentUri);
     const allowedRoot = workspace?.uri.fsPath ?? path.dirname(documentUri.fsPath);
-    if (!isPathInside(allowedRoot, target.fsPath)) {
+    // A path can be lexically inside the workspace while a symbolic link in
+    // that path resolves outside it. Do not let a Markdown link bypass the
+    // workspace boundary through such a link.
+    if (!isPathInside(allowedRoot, target.fsPath) || !await isRealPathInside(allowedRoot, target.fsPath)) {
       void vscode.window.showWarningMessage(vscode.l10n.t('markda: Links outside the workspace cannot be opened.'));
       return;
     }

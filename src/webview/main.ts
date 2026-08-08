@@ -174,24 +174,27 @@ document.body.innerHTML = `<style>${getStyles()}</style>
     <label class="markda-style-picker"><span class="visually-hidden">${t('paragraphStyle')}</span><select id="paragraph-style" data-toolbar-item title="${t('paragraphStyle')}" aria-label="${t('paragraphStyle')}">
       <option value="0">${t('paragraph')}</option>${Array.from({ length: 6 }, (_value, index) => `<option value="${index + 1}">${t('heading', index + 1)}</option>`).join('')}
     </select></label>
-    <button data-toolbar-item data-command="toggleBold" title="${t('bold')} (Ctrl+B)" aria-label="${t('bold')}"><i class="codicon codicon-bold" aria-hidden="true"></i></button>
-    <button data-toolbar-item data-command="toggleItalic" title="${t('italic')} (Ctrl+I)" aria-label="${t('italic')}"><i class="codicon codicon-italic" aria-hidden="true"></i></button>
-    <button data-toolbar-item data-command="insertLink" title="${t('insertLink')} (Ctrl+K)" aria-label="${t('insertLink')}"><i class="codicon codicon-link" aria-hidden="true"></i></button>
+    <button class="markda-toolbar-primary" data-toolbar-item data-command="toggleBold" title="${t('bold')} (Ctrl+B)" aria-label="${t('bold')}"><i class="codicon codicon-bold" aria-hidden="true"></i></button>
+    <button class="markda-toolbar-primary" data-toolbar-item data-command="toggleItalic" title="${t('italic')} (Ctrl+I)" aria-label="${t('italic')}"><i class="codicon codicon-italic" aria-hidden="true"></i></button>
+    <button class="markda-toolbar-primary" data-toolbar-item data-command="insertLink" title="${t('insertLink')} (Ctrl+K)" aria-label="${t('insertLink')}"><i class="codicon codicon-link" aria-hidden="true"></i></button>
     <button class="markda-toolbar-wide" data-toolbar-item data-command="toggleBulletList" title="${t('bulletedList')}" aria-label="${t('bulletedList')}"><i class="codicon codicon-list-unordered" aria-hidden="true"></i></button>
     <button class="markda-toolbar-wide" data-toolbar-item data-command="toggleOrderedList" title="${t('orderedList')}" aria-label="${t('orderedList')}"><i class="codicon codicon-list-ordered" aria-hidden="true"></i></button>
     <button class="markda-toolbar-wide" data-toolbar-item data-command="toggleBlockquote" title="${t('blockquote')}" aria-label="${t('blockquote')}"><i class="codicon codicon-quote" aria-hidden="true"></i></button>
     <button class="markda-toolbar-wide" data-toolbar-item data-command="insertCodeBlock" title="${t('codeBlock')}" aria-label="${t('codeBlock')}"><i class="codicon codicon-symbol-method" aria-hidden="true"></i></button>
-    <button class="markda-toolbar-wide" data-toolbar-item data-command="insertTable" title="${t('insertTable')}" aria-label="${t('insertTable')}"><i class="codicon codicon-table" aria-hidden="true"></i></button>
     <button class="markda-toolbar-wide" data-toolbar-item data-command="insertImage" title="${t('insertImages')}" aria-label="${t('insertImages')}"><i class="codicon codicon-file-media" aria-hidden="true"></i></button>
+    <button class="markda-toolbar-wide" data-toolbar-item data-command="insertTable" title="${t('insertTable')}" aria-label="${t('insertTable')}"><i class="codicon codicon-table" aria-hidden="true"></i></button>
     <details class="markda-toolbar-menu">
       <summary data-toolbar-item aria-label="${t('moreFormatting')}" title="${t('moreFormatting')}"><i class="codicon codicon-ellipsis" aria-hidden="true"></i><span>${t('moreFormatting')}</span></summary>
       <div class="markda-toolbar-popover" role="group" aria-label="${t('moreFormatting')}">
+        <button class="markda-toolbar-compact-only" data-command="toggleBold" title="${t('bold')}" aria-label="${t('bold')}"><i class="codicon codicon-bold" aria-hidden="true"></i><span>${t('bold')}</span></button>
+        <button class="markda-toolbar-compact-only" data-command="toggleItalic" title="${t('italic')}" aria-label="${t('italic')}"><i class="codicon codicon-italic" aria-hidden="true"></i><span>${t('italic')}</span></button>
+        <button class="markda-toolbar-compact-only" data-command="insertLink" title="${t('insertLink')}" aria-label="${t('insertLink')}"><i class="codicon codicon-link" aria-hidden="true"></i><span>${t('insertLink')}</span></button>
         <button data-command="toggleInlineCode" title="${t('inlineCode')}" aria-label="${t('inlineCode')}"><i class="codicon codicon-code" aria-hidden="true"></i><span>${t('inlineCode')}</span></button>
+        <button data-command="toggleStrikethrough" title="${t('strikethrough')}" aria-label="${t('strikethrough')}"><span aria-hidden="true"><s>S</s></span><span>${t('strikethrough')}</span></button>
         <button data-command="toggleBulletList" title="${t('bulletedList')}" aria-label="${t('bulletedList')}"><i class="codicon codicon-list-unordered" aria-hidden="true"></i><span>${t('bulletedList')}</span></button>
         <button data-command="toggleOrderedList" title="${t('orderedList')}" aria-label="${t('orderedList')}"><i class="codicon codicon-list-ordered" aria-hidden="true"></i><span>${t('orderedList')}</span></button>
         <button data-command="toggleTaskList" title="${t('taskList')}" aria-label="${t('taskList')}"><i class="codicon codicon-checklist" aria-hidden="true"></i><span>${t('taskList')}</span></button>
         <button data-command="toggleBlockquote" title="${t('blockquote')}" aria-label="${t('blockquote')}"><i class="codicon codicon-quote" aria-hidden="true"></i><span>${t('blockquote')}</span></button>
-        <button data-command="toggleStrikethrough" title="${t('strikethrough')}" aria-label="${t('strikethrough')}"><span aria-hidden="true"><s>S</s></span><span>${t('strikethrough')}</span></button>
         <button data-command="insertCodeBlock" title="${t('codeBlock')}" aria-label="${t('codeBlock')}"><i class="codicon codicon-symbol-method" aria-hidden="true"></i><span>${t('codeBlock')}</span></button>
         <button data-command="clearFormatting" title="${t('clearFormatting')}" aria-label="${t('clearFormatting')}"><i class="codicon codicon-clear-all" aria-hidden="true"></i><span>${t('clearFormatting')}</span></button>
       </div>
@@ -199,8 +202,8 @@ document.body.innerHTML = `<style>${getStyles()}</style>
     <details class="markda-toolbar-menu">
       <summary data-toolbar-item aria-label="${t('moreBlocks')}" title="${t('moreBlocks')}"><i class="codicon codicon-add" aria-hidden="true"></i><span>${t('moreBlocks')}</span></summary>
       <div class="markda-toolbar-popover" role="group" aria-label="${t('moreBlocks')}">
-        <button data-command="insertTable" title="${t('insertTable')}" aria-label="${t('insertTable')}"><i class="codicon codicon-table" aria-hidden="true"></i><span>${t('insertTable')}</span></button>
         <button data-command="insertImage" title="${t('insertImages')}" aria-label="${t('insertImages')}"><i class="codicon codicon-file-media" aria-hidden="true"></i><span>${t('insertImages')}</span></button>
+        <button data-command="insertTable" title="${t('insertTable')}" aria-label="${t('insertTable')}"><i class="codicon codicon-table" aria-hidden="true"></i><span>${t('insertTable')}</span></button>
         <button data-command="insertMathBlock" title="${t('insertMath')}" aria-label="${t('insertMath')}"><span class="math-icon" aria-hidden="true">∑</span><span>${t('insertMath')}</span></button>
       </div>
     </details>
@@ -288,7 +291,16 @@ document.querySelectorAll<HTMLButtonElement>('button[title]').forEach((button) =
 document.querySelectorAll<HTMLElement>('.toolbar-separator').forEach((separator) => separator.setAttribute('aria-hidden', 'true'));
 
 const toolbarItems = [...editorToolbar.querySelectorAll<HTMLElement>('[data-toolbar-item]')];
+function visibleToolbarItems(): HTMLElement[] {
+  return toolbarItems.filter((item) => {
+    const style = getComputedStyle(item);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  });
+}
+
 function activateToolbarItem(item: HTMLElement): void {
+  const visibleItems = visibleToolbarItems();
+  if (!visibleItems.includes(item)) item = visibleItems[0] ?? item;
   toolbarItems.forEach((candidate) => { candidate.tabIndex = candidate === item ? 0 : -1; });
 }
 activateToolbarItem(toolbarItems[0]!);
@@ -298,16 +310,30 @@ editorToolbar.addEventListener('focusin', (event) => {
 editorToolbar.addEventListener('keydown', (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement) || !toolbarItems.includes(target)) return;
-  const current = toolbarItems.indexOf(target);
+  const visibleItems = visibleToolbarItems();
+  const current = visibleItems.indexOf(target);
+  if (current < 0) return;
   const next = event.key === 'ArrowRight'
-    ? (current + 1) % toolbarItems.length
+    ? (current + 1) % visibleItems.length
     : event.key === 'ArrowLeft'
-      ? (current - 1 + toolbarItems.length) % toolbarItems.length
-      : event.key === 'Home' ? 0 : event.key === 'End' ? toolbarItems.length - 1 : -1;
+      ? (current - 1 + visibleItems.length) % visibleItems.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? visibleItems.length - 1 : -1;
   if (next < 0) return;
   event.preventDefault();
-  activateToolbarItem(toolbarItems[next]!);
-  toolbarItems[next]!.focus();
+  activateToolbarItem(visibleItems[next]!);
+  visibleItems[next]!.focus();
+});
+window.addEventListener('resize', () => {
+  const current = toolbarItems.find((item) => item.tabIndex === 0);
+  if (current) activateToolbarItem(current);
+});
+editorToolbar.querySelectorAll<HTMLDetailsElement>('.markda-toolbar-menu').forEach((menu) => {
+  menu.addEventListener('toggle', () => {
+    if (!menu.open) return;
+    editorToolbar.querySelectorAll<HTMLDetailsElement>('.markda-toolbar-menu[open]').forEach((other) => {
+      if (other !== menu) other.removeAttribute('open');
+    });
+  });
 });
 document.addEventListener('pointerdown', (event) => {
   if (event.target instanceof Node && editorToolbar.contains(event.target)) return;
@@ -5292,6 +5318,8 @@ dialog{color:var(--markda-fg);background:var(--markda-elevated);border:1px solid
 body[data-markda-theme="midnight"] .markda-h1,body[data-markda-theme="midnight"] .markda-h2{color:var(--markda-accent)}
 #preview{color:var(--markda-fg);background:var(--markda-bg)}#preview h1,#preview h2,#preview h3,#preview h4,#preview h5,#preview h6{position:relative;margin:1rem 0;color:var(--markda-fg);font-weight:700;line-height:1.4}#preview h1{font-size:2.25em;line-height:1.2;border-bottom:1px solid var(--markda-border)}#preview h2{font-size:1.75em;line-height:1.225;border-bottom:1px solid var(--markda-border)}#preview h3{font-size:1.5em;line-height:1.43}#preview h4{font-size:1.25em}#preview h5{font-size:1em}#preview h6{font-size:1em;color:var(--markda-muted)}#preview p,#preview blockquote,#preview ul,#preview ol,#preview dl,#preview table{margin:.8em 0}#preview ul,#preview ol{padding-left:30px}#preview li>ul,#preview li>ol{margin:0}#preview hr{box-sizing:content-box;height:2px;margin:16px 0;padding:0;overflow:hidden;border:0;background:color-mix(in srgb,var(--markda-border) 75%,var(--markda-bg))}#preview pre{overflow:auto;margin:15px 0;padding:8px 4px 6px;color:var(--markda-code-fg);background:var(--markda-code-bg);border:1px solid var(--markda-border);border-radius:3px}#preview code{font-family:var(--markda-font-mono);font-size:.9em;color:var(--markda-code-fg)}#preview :not(pre)>code{padding:0 2px;background:var(--markda-code-inline-bg);border:1px solid var(--markda-border);border-radius:3px}#preview pre code{padding:0;color:var(--markda-code-fg);background:transparent;border:0}#preview blockquote{padding:0 15px;color:var(--markda-muted);background:transparent;border-left:4px solid var(--markda-border)}#preview blockquote p{color:inherit}#preview table{border-collapse:collapse;width:100%;padding:0;color:var(--markda-fg);background:var(--markda-bg);word-break:initial}#preview tr:nth-child(2n),#preview thead{background:var(--markda-surface)}#preview th,#preview td{border:1px solid var(--markda-border);padding:6px 13px;color:var(--markda-fg);background:transparent}#preview th{font-weight:700}#preview input{accent-color:var(--markda-accent)}#preview img{max-width:100%}.markda-render-error{color:var(--markda-error)}.markda-remote-blocked{display:inline-block;padding:8px 10px;border:1px dashed var(--markda-border);color:var(--markda-muted)}
 #preview .markda-toc{margin:1em 0;padding:12px 16px;border:1px solid var(--markda-border);border-radius:6px;background:var(--markda-surface)}#preview .markda-toc ul{list-style:none;margin:0;padding:0}#preview .markda-toc-level-1{margin-left:18px}#preview .markda-toc-level-2{margin-left:36px}#preview .markda-toc-level-3{margin-left:54px}#preview .markda-toc-level-4,#preview .markda-toc-level-5{margin-left:72px}
+.markda-toolbar-popover button.markda-toolbar-compact-only{display:none}.markda-toolbar-popover{width:min(280px,calc(100vw - 16px));max-height:min(440px,calc(100dvh - 64px));overflow-y:auto;overscroll-behavior:contain}.markda-toolbar-popover button>span:last-child{min-width:0;overflow-wrap:anywhere}
+@media(max-width:420px){.markda-toolbar-primary{display:none!important}.markda-toolbar-popover button.markda-toolbar-compact-only{display:flex!important}.markda-style-picker select{max-width:68px;padding-inline:4px}}
 @media(min-width:1100px){.markda-toolbar-wide{display:flex!important}}@media(max-width:760px){.markda-toolbar{gap:0;padding-inline:4px}.markda-toolbar-menu>summary span{display:none}.markda-style-picker select{max-width:84px;padding-inline:5px}.preview-visible .markda-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,1fr) minmax(180px,1fr)}#preview{border-left:0;border-top:1px solid var(--markda-border)}.cm-scroller{padding-left:20px;padding-right:20px}#document-section-status{display:none}}@media(max-width:340px){.markda-style-picker select{max-width:68px}}
   @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 `; }
