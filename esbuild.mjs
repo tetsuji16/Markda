@@ -94,7 +94,9 @@ if (watch) {
   const webviewBytes = (await stat(new URL('./dist/webview.js', import.meta.url))).size;
   // The document-style controls, status surface, and accessible quick-insert
   // UI are part of first paint; optional parsers and renderers remain split.
-  const startupBundleBudget = 726 * 1024;
+  // The responsive toolbar keeps all editing controls available in compact
+  // layouts; reserve a small, explicit allowance for that first-paint UI.
+  const startupBundleBudget = 728 * 1024;
   if (webviewBytes > startupBundleBudget) {
     throw new Error(`Webview startup bundle is ${webviewBytes} bytes; budget is ${startupBundleBudget} bytes.`);
   }

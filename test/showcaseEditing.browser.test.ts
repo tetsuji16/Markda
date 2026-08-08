@@ -71,7 +71,6 @@ describe('showcase Markdown editing in Chromium', { timeout: 60_000 }, () => {
     vi.unstubAllGlobals();
     delete (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial;
     document.body.innerHTML = '';
-    vi.resetModules();
   });
 
   it('types, inserts a line break, saves, and undoes in all ten samples', async () => {
