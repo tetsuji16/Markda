@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getConfiguration, persistedTheme, updateThemeMode } = vi.hoisted(() => {
+const { documentChangeListeners, getConfiguration, persistedTheme, updateThemeMode } = vi.hoisted(() => {
   const persistedTheme = { value: 'dark' as 'auto' | 'light' | 'dark' };
+  const documentChangeListeners: Array<(event: unknown) => void> = [];
   const updateThemeMode = vi.fn(async (_key: string, value: 'auto' | 'light' | 'dark') => {
     persistedTheme.value = value;
   });
   return {
+    documentChangeListeners,
     persistedTheme,
     updateThemeMode,
     getConfiguration: vi.fn(() => ({
@@ -21,7 +23,10 @@ vi.mock('vscode', () => ({
   l10n: { t: (message: string) => message },
   workspace: {
     getConfiguration,
-    onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidChangeTextDocument: vi.fn((listener: (event: unknown) => void) => {
+      documentChangeListeners.push(listener);
+      return { dispose: vi.fn() };
+    }),
     onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
   },
   window: {
@@ -43,12 +48,44 @@ import { escapeEmbeddedJson, MarkdaEditorProvider } from '../src/editorProvider.
 
 describe('editor provider theme synchronization', () => {
   beforeEach(() => {
+    documentChangeListeners.length = 0;
     persistedTheme.value = 'dark';
     updateThemeMode.mockClear();
   });
 
   it('escapes executable HTML characters in one embedded JSON pass', () => {
     expect(escapeEmbeddedJson('a<&>\u2028\u2029z')).toBe('a\\u003c\\u0026\\u003e\\u2028\\u2029z');
+  });
+
+  it('ignores metadata-only document events so they cannot overwrite queued typing', async () => {
+    const postMessage = vi.fn(async () => true);
+    const panel = {
+      active: true,
+      webview: {
+        options: {}, html: '', cspSource: 'test-source', postMessage,
+        asWebviewUri: (uri: unknown) => uri,
+        onDidReceiveMessage: vi.fn(() => ({ dispose: vi.fn() })),
+      },
+      onDidChangeViewState: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
+    };
+    const document = {
+      uri: { toString: () => 'file:///typing.md' }, version: 2, getText: () => '# Typing',
+    };
+    const provider = new MarkdaEditorProvider(
+      {
+        extensionUri: { toString: () => 'file:///extension' },
+        globalStorageUri: { toString: () => 'file:///storage' },
+      } as never,
+      { update: vi.fn(), setCursor: vi.fn() } as never,
+      { text: '', tooltip: '', show: vi.fn(), hide: vi.fn() } as never,
+    );
+    await provider.resolveCustomTextEditor(document as never, panel as never, {} as never);
+    postMessage.mockClear();
+
+    for (const listener of documentChangeListeners) listener({ document, contentChanges: [] });
+
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'documentChanged' }));
   });
 
   it('re-sends the selected theme whenever another editor tab becomes active', async () => {

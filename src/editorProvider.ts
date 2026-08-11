@@ -234,6 +234,10 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
   }
 
   private onDocumentChanged(event: vscode.TextDocumentChangeEvent): void {
+    // VS Code also emits this event for document metadata transitions such as
+    // dirty-state changes. Echoing those no-content events as an external text
+    // update can overwrite keystrokes queued behind an in-flight webview edit.
+    if (event.contentChanges.length === 0) return;
     const documentUri = event.document.uri.toString();
     let documentText: string | undefined;
     for (const view of this.views) {
