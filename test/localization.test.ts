@@ -15,6 +15,8 @@ describe('localization', () => {
 
   it('translates UI messages and falls back to English for missing entries', () => {
     expect(translate('ja', 'insertTable')).toBe('表を挿入');
+    expect(translate('ja', 'syncSaved')).toBe('同期済み');
+    expect(translate('en', 'syncSaved')).toBe('Synced');
     expect(translate('de-DE', 'largeTable', 4, 3)).toBe('Large table (4 rows × 3 columns)');
     expect(translate('unknown', 'cancel')).toBe('Cancel');
   });
