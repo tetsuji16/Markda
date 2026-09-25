@@ -8,7 +8,7 @@ import { findMinimalChange } from './textChange.js';
 import { OutlineProvider } from './outlineProvider.js';
 import { isRtlLocale } from './localization.js';
 import { isMarkdownDocumentPath, parseDocumentLink } from './documentLink.js';
-import { isPathInside, isRealPathInside } from './pathSecurity.js';
+import { isPathInside, isRealPathInside, isRealPathOrNearestParentInside } from './pathSecurity.js';
 
 interface EditorView {
   panel: vscode.WebviewPanel;
@@ -309,24 +309,32 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const copyFolderSetting = config.get<string>('image.folder', '${currentFileNameWithoutExt}.assets');
     const documentName = path.parse(view.document.uri.fsPath).name;
     const copyFolder = copyFolderSetting.replaceAll('${currentFileNameWithoutExt}', documentName).trim();
+    const workspace = vscode.workspace.getWorkspaceFolder(view.document.uri);
+    // A standalone document has no workspace root, but its image-folder
+    // setting must still not be able to escape the document's directory.
+    const allowedRoot = workspace?.uri.fsPath ?? documentFolder;
     let target = await availableDestination(vscode.Uri.file(path.join(documentFolder, filename)));
     if (copyFolder && !path.isAbsolute(copyFolder)) {
       const destinationFolder = path.resolve(documentFolder, copyFolder);
-      const workspace = vscode.workspace.getWorkspaceFolder(view.document.uri);
-      // A standalone document has no workspace root, but its image-folder
-      // setting must still not be able to escape the document's directory.
-      const allowedRoot = workspace?.uri.fsPath ?? documentFolder;
-      if (!isPathInside(allowedRoot, destinationFolder)) {
-        void vscode.window.showErrorMessage(vscode.l10n.t('markda: The configured image folder must stay inside the workspace.'));
-        throw new Error('Image folder is outside the workspace.');
-      }
+      await this.assertImageDestinationInside(allowedRoot, destinationFolder, true);
       await vscode.workspace.fs.createDirectory(vscode.Uri.file(destinationFolder));
+      await this.assertImageDestinationInside(allowedRoot, destinationFolder);
       target = await availableDestination(vscode.Uri.file(path.join(destinationFolder, filename)));
     } else if (path.isAbsolute(copyFolder)) {
       void vscode.window.showErrorMessage(vscode.l10n.t('markda: Absolute image folders are not allowed. Use a workspace-relative folder.'));
       throw new Error('Invalid absolute image folder.');
     }
+    await this.assertImageDestinationInside(allowedRoot, path.dirname(target.fsPath));
     return target;
+  }
+
+  private async assertImageDestinationInside(allowedRoot: string, destinationFolder: string, allowMissing = false): Promise<void> {
+    if (!isPathInside(allowedRoot, destinationFolder)
+      || !await isRealPathOrNearestParentInside(allowedRoot, destinationFolder)
+      || (!allowMissing && !await isRealPathInside(allowedRoot, destinationFolder))) {
+      void vscode.window.showErrorMessage(vscode.l10n.t('markda: The configured image folder must stay inside the workspace.'));
+      throw new Error('Image folder is outside the workspace.');
+    }
   }
 
   private imagePayload(view: EditorView, target: vscode.Uri, alt: string): { path: string; alt: string } {

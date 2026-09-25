@@ -565,6 +565,40 @@ describe('live Markdown webview cursor + block decorations', { timeout: 30_000 }
     expect(view.dom.querySelector('.markda-inline-math')).not.toBeNull();
   });
 
+  it('keeps a blank-line-separated display-math block in focus mode when its source is selected', async () => {
+    vi.resetModules();
+    const text = ['Before', '', '$$', 'x + y', '', 'z + w', '$$', '', 'After'].join('\n');
+    setupEditor(text);
+    const initial = (globalThis as typeof globalThis & {
+      __markdaInitial: { settings: { markdown: { math: boolean } } };
+    }).__markdaInitial;
+    initial.settings.markdown.math = true;
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await tick();
+
+    const view = __getEditorView();
+    document.querySelector<HTMLButtonElement>('[data-command="toggleFocusMode"]')!.click();
+    await tick();
+    const firstMathLine = view.state.doc.line(4);
+    const lastMathLine = view.state.doc.line(6);
+    view.dispatch({ selection: { anchor: firstMathLine.from, head: lastMathLine.to } });
+    await tick();
+
+    const mathWidget = view.dom.querySelector<HTMLElement>('.markda-block-math-wrap');
+    expect(mathWidget).not.toBeNull();
+    expect(view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to)).toBe('x + y\n\nz + w');
+
+    // Source mode makes the block's individual Markdown lines visible so the
+    // focus boundary can be checked even though WYSIWYG replaces them with one widget.
+    document.querySelector<HTMLButtonElement>('[data-command="toggleSourceMode"]')!.click();
+    await tick();
+    const sourceLines = [...view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')];
+    const mathLines = sourceLines.slice(2, 7);
+    expect(mathLines.map((line) => line.textContent)).toEqual(['$$', 'x + y', '', 'z + w', '$$']);
+    expect(mathLines.every((line) => !line.classList.contains('markda-unfocused'))).toBe(true);
+    expect(sourceLines.find((line) => line.textContent === 'Before')?.classList.contains('markda-unfocused')).toBe(true);
+  });
+
   it('opens inline math source on a single click', async () => {
     vi.resetModules();
     const text = 'Before $x^2$ after.';

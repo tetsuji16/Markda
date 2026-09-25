@@ -23,3 +23,27 @@ export async function isRealPathInside(parent: string, child: string): Promise<b
     return false;
   }
 }
+
+/**
+ * Checks the closest existing ancestor when `child` has not been created yet.
+ * This prevents a not-yet-created destination from escaping through a symlink
+ * in one of its existing parent directories.
+ */
+export async function isRealPathOrNearestParentInside(parent: string, child: string): Promise<boolean> {
+  let candidate = path.resolve(child);
+  while (true) {
+    try {
+      const [resolvedParent, resolvedCandidate] = await Promise.all([realpath(parent), realpath(candidate)]);
+      return isPathInside(resolvedParent, resolvedCandidate);
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== 'ENOENT') return false;
+      const next = path.dirname(candidate);
+      if (next === candidate) return false;
+      candidate = next;
+    }
+  }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
+}

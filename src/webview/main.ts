@@ -115,6 +115,7 @@ let cachedDocumentStatistics: DocumentStatistics = {
 };
 let cachedDocumentHeadings: Heading[] = [];
 let cachedTable: MarkdownTable | undefined;
+const displayMathFocusRanges = new WeakMap<EditorState['doc'], readonly { from: number; to: number }[]>();
 let activeTableFrom: number | undefined;
 let activeLiveTableCursor: { from: number; row: number; column: number } | undefined;
 let activeCodeFrom: number | undefined;
@@ -4712,11 +4713,37 @@ function activeFocusLines(editor: EditorView, activeLine: number): { from: numbe
   const active = editor.state.doc.line(activeLine);
   const table = active.text.includes('|') ? findMarkdownTable(editor.state.doc.toString(), active.from, activeLine - 1) : undefined;
   if (table) return { from: table.startLine + 1, to: table.endLine + 1 };
+  const mathBlock = activeDelimitedBlockLines(editor, activeLine, /^\s*\$\$\s*$/u);
+  if (mathBlock) return mathBlock;
   let from = activeLine;
   let to = activeLine;
   while (from > 1 && editor.state.doc.line(from - 1).text.trim()) from--;
   while (to < editor.state.doc.lines && editor.state.doc.line(to + 1).text.trim()) to++;
   return { from, to };
+}
+
+function activeDelimitedBlockLines(
+  editor: EditorView,
+  activeLine: number,
+  delimiter: RegExp,
+): { from: number; to: number } | undefined {
+  const doc = editor.state.doc;
+  let ranges = displayMathFocusRanges.get(doc);
+  if (!ranges) {
+    const found: { from: number; to: number }[] = [];
+    let openLine: number | undefined;
+    for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber++) {
+      if (!delimiter.test(doc.line(lineNumber).text)) continue;
+      if (openLine === undefined) openLine = lineNumber;
+      else {
+        found.push({ from: openLine, to: lineNumber });
+        openLine = undefined;
+      }
+    }
+    ranges = found;
+    displayMathFocusRanges.set(doc, ranges);
+  }
+  return ranges.find((range) => range.from <= activeLine && activeLine <= range.to);
 }
 
 function addInlineDecorations(
