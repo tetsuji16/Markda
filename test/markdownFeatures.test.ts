@@ -12,6 +12,20 @@ describe('Typora-compatible document features', () => {
     ]);
   });
 
+  it('preserves source offsets across CRLF and CR line endings', () => {
+    for (const newline of ['\r\n', '\r', '\n']) {
+      const markdown = ['Intro', '', '# Target', '', 'Setext', '======'].join(newline);
+      expect(headingAnchors(markdown).map(({ from }) => from)).toEqual([
+        markdown.indexOf('# Target'), markdown.indexOf('Setext'),
+      ]);
+    }
+  });
+
+  it('keeps headings inside longer fences out of navigation', () => {
+    const markdown = ['````js', '```', '# Hidden', '```` trailing', '# Also hidden', '````', '# Visible'].join('\n');
+    expect(headingAnchors(markdown).map(({ text }) => text)).toEqual(['Visible']);
+  });
+
   it('numbers labeled display math and resolves ref and eqref', () => {
     const markdown = [
       '$$',

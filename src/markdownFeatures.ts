@@ -26,32 +26,36 @@ export function slugifyHeading(value: string): string {
 export function headingAnchors(markdown: string): readonly HeadingAnchor[] {
   const anchors: HeadingAnchor[] = [];
   const counts = new Map<string, number>();
-  const lines = markdown.split(/\r\n|\r|\n/gu);
+  const lines = markdown.match(/[^\r\n]*(?:\r\n|\r|\n|$)/gu)?.filter(Boolean) ?? [];
+  const lineTexts = lines.map((line) => line.replace(/[\r\n]+$/u, ''));
   let offset = 0;
-  let fence: string | undefined;
+  let fence: { marker: string; length: number } | undefined;
   let frontMatter = lines[0]?.trim() === '---';
   for (let index = 0; index < lines.length; index++) {
-    const line = lines[index] ?? '';
+    const line = lineTexts[index] ?? '';
+    const advance = lines[index]?.length ?? 0;
     if (frontMatter) {
       if (index > 0 && /^(?:---|\.\.\.)\s*$/u.test(line)) frontMatter = false;
-      offset += line.length + 1;
+      offset += advance;
       continue;
     }
-    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/u);
+    const fenceMatch = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/u);
     if (fenceMatch) {
       const marker = fenceMatch[1]!;
-      if (!fence) fence = marker[0];
-      else if (marker[0] === fence) fence = undefined;
-      offset += line.length + 1;
+      if (!fence && !(marker[0] === '`' && fenceMatch[2]?.includes('`'))) {
+        fence = { marker: marker[0]!, length: marker.length };
+      } else if (fence && marker[0] === fence.marker && marker.length >= fence.length
+        && /^[ \t]*$/u.test(fenceMatch[2] ?? '')) fence = undefined;
+      offset += advance;
       continue;
     }
     if (fence) {
-      offset += line.length + 1;
+      offset += advance;
       continue;
     }
     const atx = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/u);
     const setext = index + 1 < lines.length && line.trim()
-      ? (lines[index + 1] ?? '').match(/^\s{0,3}(=+|-+)\s*$/u)
+      ? (lineTexts[index + 1] ?? '').match(/^\s{0,3}(=+|-+)\s*$/u)
       : undefined;
     const text = atx?.[2] ?? (setext ? line.trim() : undefined);
     if (text) {
@@ -61,7 +65,7 @@ export function headingAnchors(markdown: string): readonly HeadingAnchor[] {
       counts.set(base, occurrence + 1);
       anchors.push({ level, text: stripInlineMarkdown(text), slug: occurrence ? `${base}-${occurrence}` : base, from: offset });
     }
-    offset += line.length + 1;
+    offset += advance;
   }
   return anchors;
 }

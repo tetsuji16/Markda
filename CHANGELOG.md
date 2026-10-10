@@ -4,6 +4,15 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.25 - 2026-10-10
+
+- Keep Recent and Pinned file entries synchronized when files or folders are
+  renamed or deleted, including changes during the initial workspace scan.
+- Preserve heading-link positions in CRLF and CR documents and ignore headings
+  inside code fences until a valid matching closing fence is reached.
+- Validate browser editing regressions before Marketplace publication and
+  retain the packaged VSIX as a workflow artifact.
+
 ## 0.1.24 - 2026-08-02
 
 - Rebuilt the activity-bar glyph as a clear 24-pixel monochrome M with its

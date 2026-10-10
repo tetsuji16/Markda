@@ -17,6 +17,7 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
   private current = '';
   private hasFetched = false;
   private refreshPromise: Promise<void> | undefined;
+  private pendingFileChanges: Array<{ kind: 'delete'; uris: readonly vscode.Uri[] } | { kind: 'rename'; files: readonly { oldUri: vscode.Uri; newUri: vscode.Uri }[] }> = [];
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.recent = context.globalState.get<string[]>('markda.recentFiles', []).map((value) => vscode.Uri.parse(value));
@@ -42,15 +43,21 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
   }
 
   deleteFiles(uris: readonly vscode.Uri[]): void {
-    if (!this.hasFetched) return;
+    if (!this.hasFetched) this.pendingFileChanges.push({ kind: 'delete', uris });
     this.files = this.files.filter((file) => !uris.some((uri) => isSameOrDescendant(uri.fsPath, file.fsPath)));
     this.pinned = this.pinned.filter((file) => !uris.some((uri) => isSameOrDescendant(uri.fsPath, file.fsPath)));
+    this.recent = this.recent.filter((file) => !uris.some((uri) => isSameOrDescendant(uri.fsPath, file.fsPath)));
+    if (this.current) {
+      const currentUri = vscode.Uri.parse(this.current);
+      if (uris.some((uri) => isSameOrDescendant(uri.fsPath, currentUri.fsPath))) this.current = '';
+    }
     void this.context.globalState.update('markda.pinnedFiles', this.pinned.map((item) => item.toString()));
+    void this.context.globalState.update('markda.recentFiles', this.recent.map((item) => item.toString()));
     this.rebuild();
   }
 
   renameFiles(files: readonly { oldUri: vscode.Uri; newUri: vscode.Uri }[]): void {
-    if (!this.hasFetched) return;
+    if (!this.hasFetched) this.pendingFileChanges.push({ kind: 'rename', files });
     const next = new Map<string, vscode.Uri>();
     for (const uri of this.files) {
       const rename = files.find((file) => isSameOrDescendant(file.oldUri.fsPath, uri.fsPath));
@@ -67,7 +74,17 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
       const rename = files.find((file) => isSameOrDescendant(file.oldUri.fsPath, uri.fsPath));
       return rename ? vscode.Uri.file(path.join(rename.newUri.fsPath, path.relative(rename.oldUri.fsPath, uri.fsPath))) : uri;
     });
+    this.recent = this.recent.map((uri) => {
+      const rename = files.find((file) => isSameOrDescendant(file.oldUri.fsPath, uri.fsPath));
+      return rename ? vscode.Uri.file(path.join(rename.newUri.fsPath, path.relative(rename.oldUri.fsPath, uri.fsPath))) : uri;
+    });
+    if (this.current) {
+      const currentUri = vscode.Uri.parse(this.current);
+      const rename = files.find((file) => isSameOrDescendant(file.oldUri.fsPath, currentUri.fsPath));
+      if (rename) this.current = vscode.Uri.file(path.join(rename.newUri.fsPath, path.relative(rename.oldUri.fsPath, currentUri.fsPath))).toString();
+    }
     void this.context.globalState.update('markda.pinnedFiles', this.pinned.map((item) => item.toString()));
+    void this.context.globalState.update('markda.recentFiles', this.recent.map((item) => item.toString()));
     this.rebuild();
   }
 
@@ -150,7 +167,25 @@ export class FileProvider implements vscode.TreeDataProvider<Node> {
 
   private async fetchFiles(): Promise<void> {
     const files = await vscode.workspace.findFiles(markdownPattern, '**/{node_modules,.git}/**', 5000);
-    this.files = sortUris(files);
+    const adjusted = new Map(sortUris(files).map((uri) => [uri.toString(), uri]));
+    for (const change of this.pendingFileChanges) {
+      if (change.kind === 'delete') {
+        for (const [key, uri] of adjusted) if (change.uris.some((root) => isSameOrDescendant(root.fsPath, uri.fsPath))) adjusted.delete(key);
+      } else {
+        const next = new Map<string, vscode.Uri>();
+        for (const uri of adjusted.values()) {
+          const rename = change.files.find((file) => isSameOrDescendant(file.oldUri.fsPath, uri.fsPath));
+          const replacement = rename
+            ? vscode.Uri.file(path.join(rename.newUri.fsPath, path.relative(rename.oldUri.fsPath, uri.fsPath)))
+            : uri;
+          if (isMarkdownUri(replacement)) next.set(replacement.toString(), replacement);
+        }
+        adjusted.clear();
+        for (const [key, uri] of next) adjusted.set(key, uri);
+      }
+    }
+    this.pendingFileChanges = [];
+    this.files = sortUris(adjusted.values());
     this.hasFetched = true;
     this.rebuild();
   }

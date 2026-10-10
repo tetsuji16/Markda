@@ -16,6 +16,11 @@ Markda is a source-preserving Markdown editor for VS Code Desktop. Write directl
 
 The VS Code text document remains the single source of truth. Markda applies focused edits to that document while preserving untouched content and Markdown syntax. Switch to full source whenever you want to inspect or change it directly.
 
+## Latest update
+
+Version 0.1.25 fixes stale Recent/Pinned entries after file changes and improves
+heading navigation for Windows line endings and nested code fences.
+
 ## Highlights
 
 - Edit supported CommonMark and Markda extension syntax in place—including reference links and images, footnotes, indented code, entities, emoji shortcodes, YAML Front Matter, `[toc]`, and explicitly permitted HTML—or switch to the full source view.

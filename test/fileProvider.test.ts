@@ -14,7 +14,7 @@ vi.mock('vscode', () => ({
   Uri: class {
     private constructor(readonly fsPath: string) {}
     static file(value: string) { return new this(value); }
-    static parse(value: string) { return new this(value.replace(/^file:\/+/u, '')); }
+    static parse(value: string) { return new this(value.replace(/^file:\/\//u, '')); }
     toString(): string { return `file:///${this.fsPath.replaceAll('\\', '/')}`; }
   },
   workspace: {
@@ -89,6 +89,53 @@ describe('FileProvider', () => {
     provider.deleteFiles([uri(path.join(workspaceRoot, 'new')) as never]);
     roots = await provider.getChildren();
     expect(roots).toHaveLength(0);
+  });
+
+  it('renames and deletes recent and pinned entries and persists both lists', async () => {
+    const oldFile = uri(path.join(workspaceRoot, 'old', 'a.md'));
+    const newFile = uri(path.join(workspaceRoot, 'new', 'a.md'));
+    const updates = vi.fn(async () => undefined);
+    const provider = new FileProvider({
+      globalState: {
+        get: (key: string) => key.endsWith('recentFiles') ? [oldFile.toString()] : [oldFile.toString()],
+        update: updates,
+      },
+    } as never);
+    findFiles.mockResolvedValue([oldFile]);
+    await provider.getChildren();
+
+    provider.renameFiles([{ oldUri: uri(path.join(workspaceRoot, 'old')) as never, newUri: uri(path.join(workspaceRoot, 'new')) as never }]);
+    let roots = await provider.getChildren();
+    const recent = roots.find((item) => item.label === 'Recent');
+    const pinned = roots.find((item) => item.label === 'Pinned');
+    expect(recent && (await provider.getChildren(recent)).map((item) => (item as { uri: { fsPath: string } }).uri.fsPath)).toEqual([newFile.fsPath]);
+    expect(pinned && (await provider.getChildren(pinned)).map((item) => (item as { uri: { fsPath: string } }).uri.fsPath)).toEqual([newFile.fsPath]);
+    expect(updates).toHaveBeenCalledWith('markda.recentFiles', [newFile.toString()]);
+
+    provider.deleteFiles([uri(path.join(workspaceRoot, 'new')) as never]);
+    roots = await provider.getChildren();
+    expect(roots.some((item) => item.label === 'Recent' || item.label === 'Pinned')).toBe(false);
+    expect(updates).toHaveBeenCalledWith('markda.recentFiles', []);
+    expect(updates).toHaveBeenCalledWith('markda.pinnedFiles', []);
+  });
+
+  it('applies rename and delete events received before the initial scan completes', async () => {
+    let finishScan: ((value: ReturnType<typeof uri>[]) => void) | undefined;
+    findFiles.mockReturnValue(new Promise<ReturnType<typeof uri>[]>((resolve) => { finishScan = resolve; }));
+    const provider = new FileProvider({
+      globalState: { get: () => [], update: vi.fn(async () => undefined) },
+    } as never);
+    const pending = provider.getChildren();
+    provider.renameFiles([{ oldUri: uri(path.join(workspaceRoot, 'old')) as never, newUri: uri(path.join(workspaceRoot, 'new')) as never }]);
+    provider.deleteFiles([uri(path.join(workspaceRoot, 'gone')) as never]);
+    finishScan?.([
+      uri(path.join(workspaceRoot, 'old', 'a.md')),
+      uri(path.join(workspaceRoot, 'gone', 'b.md')),
+      uri(path.join(workspaceRoot, 'keep.md')),
+    ]);
+    await pending;
+    const roots = await provider.getChildren();
+    expect(roots.map((item) => item.label)).toEqual(['new', 'keep.md']);
   });
 
   it('does not rebuild the complete tree when the active file is reported twice', async () => {

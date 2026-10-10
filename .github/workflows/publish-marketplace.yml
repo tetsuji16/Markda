@@ -28,7 +28,15 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
       - run: npm run build
+      - run: npx vsce package --no-dependencies --allow-missing-repository
+      - uses: actions/upload-artifact@v4
+        with:
+          name: markda-vsix
+          path: '*.vsix'
+          retention-days: 14
 
       - id: version
         name: Check whether the extension version changed
