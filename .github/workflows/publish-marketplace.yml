@@ -38,22 +38,7 @@ jobs:
           path: '*.vsix'
           retention-days: 14
 
-      - id: version
-        name: Check whether the extension version changed
-        shell: bash
-        run: |
-          current_version="$(node -p "require('./package.json').version")"
-          previous_version="$(git show HEAD^:package.json 2>/dev/null | node -e "let source=''; process.stdin.on('data', chunk => source += chunk).on('end', () => console.log(JSON.parse(source).version))" || true)"
-          echo "current=${current_version}" >> "$GITHUB_OUTPUT"
-          if [[ "${current_version}" != "${previous_version}" ]]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping Marketplace publication because the extension version did not change."
-          fi
-
-      - name: Publish version ${{ steps.version.outputs.current }}
-        if: steps.version.outputs.publish == 'true'
+      - name: Publish verified VSIX (skip already published versions)
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx vsce publish --no-dependencies --allow-missing-repository --pat "$VSCE_PAT"
+        run: npx vsce publish --packagePath "markda-$(node -p "require('./package.json').version").vsix" --skip-duplicate

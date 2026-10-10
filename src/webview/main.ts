@@ -3880,7 +3880,7 @@ function bindWidgetEditor(
     document.body.append(mirror);
     const sourceHeight = mirror.getBoundingClientRect().height;
     mirror.remove();
-    const height = `${Math.ceil(Math.max(renderedOccupiedHeight, sourceHeight))}px`;
+    const height = `${Math.max(renderedOccupiedHeight, sourceHeight)}px`;
     blockSourceEditor.style.height = height;
     blockSourceEditor.style.maxHeight = height;
     editor.requestMeasure();
@@ -3918,7 +3918,7 @@ function bindWidgetEditor(
     // part of the wrapper's height (the math wrapper is a flow root), so the
     // following document blocks remain at exactly the same vertical position.
     renderedOccupiedHeight = boundary.getBoundingClientRect().height;
-    boundary.style.minHeight = `${Math.ceil(renderedOccupiedHeight)}px`;
+    boundary.style.minHeight = `${renderedOccupiedHeight}px`;
     input.hidden = false;
     rendered.hidden = true;
     resizeBlockSourceEditor();

@@ -10,6 +10,9 @@ All notable changes to Markda are documented in this file.
   renamed or deleted, including changes during the initial workspace scan.
 - Preserve heading-link positions in CRLF and CR documents and ignore headings
   inside code fences until a valid matching closing fence is reached.
+- Preserve subpixel math-block heights when opening source editors to avoid
+  shifting following document blocks.
+- Allow publication retries without bumping an unpublished extension version.
 - Validate browser editing regressions before Marketplace publication and
   retain the packaged VSIX as a workflow artifact.
 
