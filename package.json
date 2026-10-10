@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "%extension.description%",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "publisher": "tetsuji16",
   "license": "MIT",
   "l10n": "./l10n",
@@ -58,7 +58,8 @@
   "activationEvents": [
     "onCustomEditor:markda.editor",
     "onView:markda.outline",
-    "onView:markda.files"
+    "onView:markda.files",
+    "onView:markda.backlinks"
   ],
   "scripts": {
     "clean": "node ./scripts/clean.mjs",
@@ -123,6 +124,11 @@
         {
           "id": "markda.files",
           "name": "%view.files%"
+        },
+        {
+          "id": "markda.backlinks",
+          "name": "%view.backlinks%",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -406,6 +412,47 @@
         "command": "markda.openThemeFolder",
         "title": "%command.themeFolder%",
         "category": "markda"
+      },
+      {
+        "command": "markda.toggleHeadingFold",
+        "title": "%command.toggleHeadingFold%",
+        "category": "Markda"
+      },
+      {
+        "command": "markda.foldAllHeadings",
+        "title": "%command.foldAllHeadings%",
+        "category": "Markda"
+      },
+      {
+        "command": "markda.unfoldAllHeadings",
+        "title": "%command.unfoldAllHeadings%",
+        "category": "Markda"
+      },
+      {
+        "command": "markda.focusCurrentSection",
+        "title": "%command.focusCurrentSection%",
+        "category": "Markda"
+      },
+      {
+        "command": "markda.newFromTemplate",
+        "title": "%command.newFromTemplate%",
+        "category": "Markda"
+      },
+      {
+        "command": "markda.checkLinks",
+        "title": "%command.checkLinks%",
+        "category": "Markda"
+      },
+      {
+        "command": "markda.showBacklinks",
+        "title": "%command.showBacklinks%",
+        "category": "Markda"
+      },
+      {
+        "command": "markda.refreshBacklinks",
+        "title": "%command.refreshBacklinks%",
+        "category": "Markda",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -429,6 +476,21 @@
           "command": "markda.exportPdf",
           "when": "activeCustomEditorId == markda.editor",
           "group": "navigation@4"
+        },
+        {
+          "command": "markda.checkLinks",
+          "when": "activeCustomEditorId == markda.editor",
+          "group": "4_documents"
+        },
+        {
+          "command": "markda.showBacklinks",
+          "when": "activeCustomEditorId == markda.editor",
+          "group": "4_documents"
+        },
+        {
+          "command": "markda.newFromTemplate",
+          "when": "activeCustomEditorId == markda.editor",
+          "group": "4_documents"
         }
       ],
       "view/title": [
@@ -461,6 +523,31 @@
           "command": "markda.clearFileFilter",
           "when": "view == markda.files",
           "group": "navigation@4"
+        },
+        {
+          "command": "markda.foldAllHeadings",
+          "when": "view == markda.outline",
+          "group": "2_sections"
+        },
+        {
+          "command": "markda.unfoldAllHeadings",
+          "when": "view == markda.outline",
+          "group": "2_sections"
+        },
+        {
+          "command": "markda.focusCurrentSection",
+          "when": "view == markda.outline",
+          "group": "2_sections"
+        },
+        {
+          "command": "markda.refreshBacklinks",
+          "when": "view == markda.backlinks",
+          "group": "navigation"
+        },
+        {
+          "command": "markda.newFromTemplate",
+          "when": "view == markda.files",
+          "group": "1_create"
         }
       ],
       "view/item/context": [
@@ -508,6 +595,11 @@
           "command": "markda.moveHeadingDown",
           "when": "view == markda.outline && viewItem =~ /markdaHeading/",
           "group": "2_move@2"
+        },
+        {
+          "command": "markda.toggleHeadingFold",
+          "when": "view == markda.outline && viewItem =~ /markdaHeading/",
+          "group": "2_sections@1"
         }
       ],
       "explorer/context": [
@@ -851,9 +943,56 @@
           "type": "boolean",
           "default": false,
           "scope": "resource"
+        },
+        "markda.links.checkOnEdit": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "%config.checkLinks%"
+        },
+        "markda.links.updateOnRename": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "%config.updateLinks%"
+        },
+        "markda.templates": {
+          "type": "array",
+          "default": [],
+          "scope": "window",
+          "maxItems": 50,
+          "description": "%config.templates%",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "description",
+              "body"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 240
+              },
+              "body": {
+                "type": "string",
+                "maxLength": 50000
+              }
+            }
+          }
         }
       }
-    }
+    },
+    "viewsWelcome": [
+      {
+        "view": "markda.backlinks",
+        "contents": "Documents linking to the current file appear here.\n[Refresh Backlinks](command:markda.refreshBacklinks)"
+      }
+    ]
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.1",

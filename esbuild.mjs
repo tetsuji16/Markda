@@ -17,7 +17,15 @@ const builds = [
     // Keep exportService as a real runtime boundary. Without externalizing this
     // relative import, esbuild folds MarkdownIt and its entity tables into the
     // activation bundle even though extension.ts uses dynamic import().
-    external: ['vscode', './exportService.js'],
+    external: ['vscode', './exportService.js', './workspaceLinks.js'],
+  },
+  {
+    ...common,
+    entryPoints: ['src/workspaceLinks.ts'],
+    outfile: 'dist/workspaceLinks.js',
+    platform: 'node',
+    format: 'cjs',
+    external: ['vscode'],
   },
   {
     ...common,
@@ -96,7 +104,8 @@ if (watch) {
   // UI are part of first paint; optional parsers and renderers remain split.
   // The responsive toolbar keeps all editing controls available in compact
   // layouts; reserve a small, explicit allowance for that first-paint UI.
-  const startupBundleBudget = 728 * 1024;
+  // Heading gutter and CodeMirror fold state add about 15 KiB to first paint.
+  const startupBundleBudget = 750 * 1024;
   if (webviewBytes > startupBundleBudget) {
     throw new Error(`Webview startup bundle is ${webviewBytes} bytes; budget is ${startupBundleBudget} bytes.`);
   }

@@ -116,7 +116,10 @@ function replace(value) {
 }
 replace(manifest);
 await writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-await writeFile(join(root, 'package.nls.json'), `${JSON.stringify(messages, null, 2)}\n`, 'utf8');
+const existingMessages = JSON.parse(await readFile(join(root, 'package.nls.json'), 'utf8'));
+await writeFile(join(root, 'package.nls.json'), `${JSON.stringify({ ...existingMessages, ...messages }, null, 2)}\n`, 'utf8');
 for (const [locale, translated] of Object.entries(translations)) {
-  await writeFile(join(root, `package.nls.${locale}.json`), `${JSON.stringify({ ...messages, ...translated }, null, 2)}\n`, 'utf8');
+  const target = join(root, `package.nls.${locale}.json`);
+  const existing = JSON.parse(await readFile(target, 'utf8'));
+  await writeFile(target, `${JSON.stringify({ ...existing, ...messages, ...translated }, null, 2)}\n`, 'utf8');
 }

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,5 +39,7 @@ const extras = {
 const folder = join(root, 'l10n');
 await mkdir(folder, { recursive: true });
 for (const [locale, values] of Object.entries(common)) {
-  await writeFile(join(folder, `bundle.l10n.${locale}.json`), `${JSON.stringify({ ...Object.fromEntries(keys.map((key, index) => [key, values[index]])), ...(extras[locale] ?? {}) }, null, 2)}\n`, 'utf8');
+  const target = join(folder, `bundle.l10n.${locale}.json`);
+  const existing = JSON.parse(await readFile(target, 'utf8').catch(() => '{}'));
+  await writeFile(target, `${JSON.stringify({ ...existing, ...Object.fromEntries(keys.map((key, index) => [key, values[index]])), ...(extras[locale] ?? {}) }, null, 2)}\n`, 'utf8');
 }

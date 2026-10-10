@@ -62,5 +62,17 @@
   "command.filterFiles": "Filtrer les fichiers",
   "command.clearFiles": "Effacer le filtre des fichiers",
   "command.searchWorkspace": "Rechercher dans les fichiers Markdown",
-  "command.quickOpen": "Ouverture rapide d’un fichier Markdown"
+  "command.quickOpen": "Ouverture rapide d’un fichier Markdown",
+  "command.toggleHeadingFold": "Toggle Section Folding",
+  "command.foldAllHeadings": "Fold All Sections",
+  "command.unfoldAllHeadings": "Expand All Sections",
+  "command.focusCurrentSection": "Focus Current Section",
+  "command.newFromTemplate": "New Document from Template",
+  "command.checkLinks": "Check Document Links",
+  "command.showBacklinks": "Show Backlinks",
+  "command.refreshBacklinks": "Refresh Backlinks",
+  "view.backlinks": "Backlinks",
+  "config.checkLinks": "Check local file, image, and heading links after editing. Results appear in Problems.",
+  "config.updateLinks": "Review incoming and outgoing Markdown link updates when files or folders are renamed in a trusted workspace.",
+  "config.templates": "Custom document templates. Use {{title}} and {{date}} placeholders."
 }

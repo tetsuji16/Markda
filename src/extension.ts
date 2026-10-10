@@ -13,6 +13,8 @@ import { FileProvider } from './fileProvider.js';
 import { OutlineProvider } from './outlineProvider.js';
 import type { Heading } from './protocol.js';
 import { getStatistics } from './statistics.js';
+import { LinkService } from './linkService.js';
+import { getDocumentTemplates, renderTemplate } from './templates.js';
 
 export function activate(context: vscode.ExtensionContext): void {
   if (vscode.env.uiKind !== vscode.UIKind.Desktop || vscode.env.remoteName) {
@@ -24,7 +26,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const files = new FileProvider(context);
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 80);
   status.command = 'markda.showStatistics';
-  const editor = new MarkdaEditorProvider(context, outline, status, (uri) => files.recordOpen(uri));
+  const links = new LinkService();
+  const backlinks = vscode.window.createTreeView('markda.backlinks', { treeDataProvider: links });
+  const editor = new MarkdaEditorProvider(context, outline, status, (uri) => {
+    files.recordOpen(uri);
+    const document = vscode.workspace.textDocuments.find((item) => item.uri.toString() === uri.toString());
+    if (document) links.setDocument(document);
+    if (backlinks.visible) void links.refreshBacklinks(document).catch(reportLinkError);
+  });
   let exporter: ExportService | undefined;
   async function getExporter(): Promise<ExportService> {
     if (!exporter) {
@@ -36,6 +45,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     editor,
+    links,
+    backlinks,
+    backlinks.onDidChangeVisibility((event) => { if (event.visible) void links.refreshBacklinks(editor.getActiveDocument()).catch(reportLinkError); }),
+    vscode.workspace.onDidChangeTextDocument((event) => links.documentChanged(event.document)),
+    vscode.workspace.onDidCloseTextDocument((document) => links.closeDocument(document)),
+    vscode.workspace.onWillRenameFiles((event) => event.waitUntil(links.prepareRename(event.files).catch((error) => { reportLinkError(error); return new vscode.WorkspaceEdit(); }))),
     status,
     vscode.window.registerCustomEditorProvider(MarkdaEditorProvider.viewType, editor, {
       webviewOptions: { retainContextWhenHidden: false },
@@ -44,12 +59,20 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerTreeDataProvider('markda.outline', outline),
     vscode.window.registerTreeDataProvider('markda.files', files),
     vscode.workspace.onDidCreateFiles((event) => files.addFiles(event.files)),
-    vscode.workspace.onDidDeleteFiles((event) => files.deleteFiles(event.files)),
-    vscode.workspace.onDidRenameFiles((event) => files.renameFiles(event.files)),
+    vscode.workspace.onDidDeleteFiles((event) => { files.deleteFiles(event.files); links.invalidate(); if (backlinks.visible) void links.refreshBacklinks(editor.getActiveDocument()).catch(reportLinkError); }),
+    vscode.workspace.onDidRenameFiles((event) => { files.renameFiles(event.files); links.invalidate(); if (backlinks.visible) void links.refreshBacklinks(editor.getActiveDocument()).catch(reportLinkError); }),
     register('markda.open', async (uri?: vscode.Uri) => openWithMarkda(uri)),
     register('markda.reopenWith', () => reopenWithAnotherEditor(editor.getActiveDocument())),
     register('markda.configureFileAssociations', () => configureFileAssociations()),
     register('markda.newFile', () => createMarkdownFile()),
+    register('markda.newFromTemplate', () => createFromTemplate()),
+    register('markda.checkLinks', async () => { const document = editor.getActiveDocument() ?? vscode.window.activeTextEditor?.document; if (document) { await links.check(document).catch(reportLinkError); await vscode.commands.executeCommand('workbench.actions.view.problems'); } }),
+    register('markda.showBacklinks', async () => { await vscode.commands.executeCommand('markda.backlinks.focus'); await links.refreshBacklinks(editor.getActiveDocument()).catch(reportLinkError); }),
+    register('markda.refreshBacklinks', () => links.refreshBacklinks(editor.getActiveDocument()).catch(reportLinkError)),
+    register('markda.toggleHeadingFold', (item?: { heading?: Heading } | Heading) => editor.sendCommand('toggleHeadingFold', itemHeading(item))),
+    register('markda.foldAllHeadings', () => editor.sendCommand('foldAllHeadings')),
+    register('markda.unfoldAllHeadings', () => editor.sendCommand('unfoldAllHeadings')),
+    register('markda.focusCurrentSection', () => editor.sendCommand('focusCurrentSection')),
     register('markda.duplicate', () => duplicateDocument(editor.getActiveDocument())),
     register('markda.toggleSourceMode', () => editor.sendCommand('toggleSourceMode')),
     register('markda.toggleFocusMode', () => editor.sendCommand('toggleFocusMode')),
@@ -274,7 +297,9 @@ async function renameMarkdownFile(uri?: vscode.Uri): Promise<void> {
     valueSelection: [0, path.basename(uri.fsPath, path.extname(uri.fsPath)).length],
   });
   if (!nextName || nextName === path.basename(uri.fsPath) || /[\\/:*?"<>|]/u.test(nextName)) return;
-  await vscode.workspace.fs.rename(uri, vscode.Uri.file(path.join(path.dirname(uri.fsPath), nextName)), { overwrite: false });
+  const edit = new vscode.WorkspaceEdit();
+  edit.renameFile(uri, vscode.Uri.file(path.join(path.dirname(uri.fsPath), nextName)), { overwrite: false });
+  await vscode.workspace.applyEdit(edit);
 }
 
 async function deleteMarkdownFile(uri?: vscode.Uri): Promise<void> {
@@ -450,4 +475,22 @@ async function openThemeFolder(context: vscode.ExtensionContext): Promise<void> 
 async function writeIfMissing(uri: vscode.Uri, value: Uint8Array): Promise<void> {
   try { await vscode.workspace.fs.stat(uri); }
   catch { await vscode.workspace.fs.writeFile(uri, value); }
+}
+
+function reportLinkError(error: unknown): void {
+  void vscode.window.showWarningMessage(error instanceof Error ? error.message : String(error));
+}
+
+async function createFromTemplate(): Promise<void> {
+  const templates = getDocumentTemplates(vscode.workspace.getConfiguration('markda').get('templates', []));
+  const selected = await vscode.window.showQuickPick(templates.map((template) => ({ label: vscode.l10n.t(template.name), description: vscode.l10n.t(template.description), template })), {
+    placeHolder: vscode.l10n.t('Choose a document template'),
+  });
+  if (!selected) return;
+  const title = await vscode.window.showInputBox({ prompt: vscode.l10n.t('Document title'), value: selected.label, validateInput: (value) => !value.trim() || /[\r\n]/u.test(value) ? vscode.l10n.t('Enter a title on one line.') : undefined });
+  if (title === undefined) return;
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const document = await vscode.workspace.openTextDocument({ language: 'markdown', content: renderTemplate(selected.template.body, { title: title.trim(), date }) });
+  await openWithMarkda(document.uri);
 }

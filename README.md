@@ -18,8 +18,39 @@ The VS Code text document remains the single source of truth. Markda applies foc
 
 ## Latest update
 
-Version 0.1.25 fixes stale Recent/Pinned entries after file changes and improves
-heading navigation for Windows line endings and nested code fences.
+Version 0.1.26 adds section folding, local link checks, document templates, rename
+link updates, and backlinks. The editor toolbar stays unchanged; use the Outline
+menu, Files menu, Command Palette, and collapsed Backlinks view.
+
+## Organize connected documents
+
+- **Fold sections:** hover beside a heading to use its fold marker. The Outline
+  menu offers Fold All Sections, Expand All Sections, and Focus Current Section.
+  Heading navigation expands the containing section automatically. Folding does
+  not change the Markdown file.
+- **Check links:** local file, image, and Markdown heading links are checked after
+  editing. Run **Markda: Check Document Links** to open the results in Problems.
+  Remote URLs are not requested. Disable automatic checks with
+  `markda.links.checkOnEdit`.
+- **Create from a template:** run **Markda: New Document from Template** for meeting
+  notes, a project spec, or a daily journal. The result opens as an unsaved
+  document. Add custom `{name, description, body}` entries to `markda.templates`;
+  `{{title}}` and `{{date}}` are replaced when creating the document.
+- **Rename with link updates:** rename a file or folder through VS Code or Markda.
+  Review the before/after destinations, deselect changes you do not want, and
+  confirm. Escape continues the rename without link updates. Relative paths,
+  heading anchors, query strings, and link titles are preserved; fenced,
+  indented, and inline code is excluded. Updates use VS Code workspace edits and
+  can be undone. Turn this off with `markda.links.updateOnRename`.
+- **Find referring documents:** open the collapsed **Backlinks** view or run
+  **Markda: Show Backlinks**. Click a result to open its document. Refresh the view
+  after editing links in another file.
+
+Backlinks and rename reviews cover up to 5,000 Markdown/text files in the open
+workspace, excluding dependency and build folders. They use open documents,
+including unsaved edits. Link updates require a trusted workspace and apply to
+Markdown link/image destinations and reference definitions; HTML links and
+renames performed outside VS Code are not rewritten.
 
 ## Highlights
 

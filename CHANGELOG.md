@@ -4,6 +4,18 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.26 - 2026-10-10
+
+- Add source-preserving heading folding, Outline section commands, and automatic
+  expansion when navigating to a folded heading.
+- Check local document/image links and heading anchors in Problems after editing.
+- Create unsaved documents from meeting, spec, daily, and custom templates.
+- Review and select link updates when renaming files or folders in VS Code;
+  preserve relative paths and anchors and exclude Markdown code blocks/spans.
+- Add a collapsed Backlinks view for referring workspace documents.
+- Keep the existing toolbar unchanged and load link parsing after activation.
+
+
 ## 0.1.25 - 2026-10-10
 
 - Keep Recent and Pinned file entries synchronized when files or folders are

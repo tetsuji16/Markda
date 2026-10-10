@@ -1,3 +1,4 @@
+import { headingFolding, toggleHeadingFold, foldAllHeadings, unfoldAllHeadings, focusCurrentSection, unfoldContaining } from './headingFolding.js';
 import { defaultKeymap, history, historyKeymap, indentWithTab, redo, undo } from '@codemirror/commands';
 import '@vscode/codicons/dist/codicon.css';
 import { markdownKeymap, markdownLanguage } from '@codemirror/lang-markdown';
@@ -451,6 +452,7 @@ const view = new EditorView({
       // by Markda's own widgets. Keeping only the base language removes those
       // parsers from the startup bundle and its first-file compile path.
       markdownLanguage,
+      headingFolding(),
       syntaxHighlighting(createSyntaxHighlightStyle(), { fallback: true }),
       search({ top: true }),
       keymap.of([
@@ -955,10 +957,19 @@ function runCommand(command: EditorCommand, payload?: unknown): void {
     case 'insertText':
       if (payload && typeof payload === 'object' && 'text' in payload && typeof payload.text === 'string') insertAtSelection(payload.text);
       return;
+    case 'toggleHeadingFold': {
+      const heading = payload as Heading | undefined;
+      toggleHeadingFold(view, heading?.from);
+      return;
+    }
+    case 'foldAllHeadings': foldAllHeadings(view); return;
+    case 'unfoldAllHeadings': unfoldAllHeadings(view); return;
+    case 'focusCurrentSection': focusCurrentSection(view); return;
     case 'focusHeading': {
       const heading = payload as Heading;
       if (heading && Number.isInteger(heading.from)) {
         const position = Math.max(0, Math.min(heading.from, view.state.doc.length));
+        unfoldContaining(view, position);
         view.dispatch({ selection: EditorSelection.cursor(position), effects: EditorView.scrollIntoView(position, { y: 'center' }) });
         view.focus();
       }
@@ -996,6 +1007,7 @@ function focusDocumentAnchor(fragment: string): void {
   const heading = headingAnchors(view.state.doc.toString()).find((candidate) => candidate.slug === decoded);
   if (!heading) return;
   const position = Math.max(0, Math.min(heading.from, view.state.doc.length));
+  unfoldContaining(view, position);
   view.dispatch({ selection: EditorSelection.cursor(position), effects: EditorView.scrollIntoView(position, { y: 'center' }) });
   view.focus();
 }
@@ -1870,6 +1882,7 @@ function replaceTable(source: string, original: MarkdownTable, updated: Markdown
   const reparsed = findMarkdownTable(view.state.doc.toString(), original.from, view.state.doc.lineAt(original.from).number - 1);
   if (reparsed) {
     const position = tableCellPosition(view.state, reparsed, row, column);
+    unfoldContaining(view, position);
     view.dispatch({ selection: EditorSelection.cursor(position), effects: EditorView.scrollIntoView(position) });
   }
   view.focus();
@@ -5303,7 +5316,7 @@ button{color:inherit;background:transparent;border:0;border-radius:4px;min-heigh
 .table-toolbar{grid-column:1;grid-row:2;z-index:300;display:none;width:100%;min-height:42px;padding:7px 52px 7px 10px;flex-wrap:wrap;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow:hidden}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{grid-column:1;grid-row:3;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:8px 30px 30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
 .cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:var(--markda-font-size,16px);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:8px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{width:100%;min-width:0;max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-line+.cm-line{margin-top:var(--markda-paragraph-spacing,0)}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionLayer{display:none}.cm-selectionBackground{background:var(--markda-selection)!important}.markda-selected-line-break{width:.5em}
-.cm-editor .markda-block-selection{position:relative}.cm-editor .markda-block-selection::after{content:"";position:absolute;inset:0;z-index:20;pointer-events:none;border:2px solid var(--markda-selection);border-radius:4px;background:color-mix(in srgb,var(--markda-selection) 48%,transparent)}
+.cm-foldGutter .cm-gutterElement{cursor:pointer}.cm-headingFoldMarker{opacity:0;color:var(--markda-muted)}.cm-gutterElement:hover .cm-headingFoldMarker,.cm-headingFoldMarker.is-closed{opacity:1}.cm-foldPlaceholder{border:0;background:var(--markda-hover);color:var(--markda-muted);padding:0 6px;border-radius:3px;cursor:pointer}.cm-gutters{background:transparent;border:0}\n.cm-editor .markda-block-selection{position:relative}.cm-editor .markda-block-selection::after{content:"";position:absolute;inset:0;z-index:20;pointer-events:none;border:2px solid var(--markda-selection);border-radius:4px;background:color-mix(in srgb,var(--markda-selection) 48%,transparent)}
 .cm-editor .cm-panels-top:has(.cm-search){position:absolute;top:0;right:14px;left:auto;z-index:600;color:var(--markda-fg);background:transparent;border:0}
 .cm-editor .cm-panel.cm-search{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) repeat(6,24px);grid-template-rows:24px 24px;gap:3px;width:min(454px,calc(100vw - 32px));padding:4px 28px;color:var(--markda-fg);background:var(--markda-find-widget);border:1px solid var(--markda-border);border-top:0;box-shadow:0 2px 8px var(--markda-widget-shadow);font:13px/1 var(--markda-font-body)}
 .cm-editor .cm-panel.cm-search.markda-replace-collapsed{grid-template-rows:24px}.cm-search.markda-replace-collapsed input[name=replace],.cm-search.markda-replace-collapsed button[name=replace],.cm-search.markda-replace-collapsed button[name=replaceAll]{display:none!important}

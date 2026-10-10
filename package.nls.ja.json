@@ -62,5 +62,17 @@
   "command.filterFiles": "ファイルを絞り込み",
   "command.clearFiles": "ファイルの絞り込みを解除",
   "command.searchWorkspace": "Markdownファイル全体を検索",
-  "command.quickOpen": "Markdownファイルをクイックオープン"
+  "command.quickOpen": "Markdownファイルをクイックオープン",
+  "command.toggleHeadingFold": "セクションの折りたたみを切り替え",
+  "command.foldAllHeadings": "すべてのセクションを折りたたむ",
+  "command.unfoldAllHeadings": "すべてのセクションを展開",
+  "command.focusCurrentSection": "現在のセクションにフォーカス",
+  "command.newFromTemplate": "テンプレートから新規ドキュメントを作成",
+  "command.checkLinks": "ドキュメントのリンクを確認",
+  "command.showBacklinks": "バックリンクを表示",
+  "command.refreshBacklinks": "バックリンクを更新",
+  "view.backlinks": "バックリンク",
+  "config.checkLinks": "編集後にローカルファイル、画像、見出しへのリンクを確認します。結果は「問題」に表示されます。",
+  "config.updateLinks": "信頼されたワークスペースでファイルやフォルダーの名前を変更するとき、Markdownリンクの更新内容を確認します。",
+  "config.templates": "カスタムドキュメントテンプレートです。{{title}} と {{date}} のプレースホルダーを使用します。"
 }

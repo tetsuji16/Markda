@@ -72,6 +72,10 @@ export type EditorCommand =
   | 'clearFormatting'
   | 'replaceImageSource'
   | 'removeImageSource'
+  | 'toggleHeadingFold'
+  | 'foldAllHeadings'
+  | 'unfoldAllHeadings'
+  | 'focusCurrentSection'
   | 'focusHeading'
   | 'focusAnchor';
 

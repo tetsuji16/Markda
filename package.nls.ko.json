@@ -62,5 +62,17 @@
   "command.filterFiles": "파일 필터",
   "command.clearFiles": "파일 필터 지우기",
   "command.searchWorkspace": "Markdown 파일 검색",
-  "command.quickOpen": "Markdown 파일 빠르게 열기"
+  "command.quickOpen": "Markdown 파일 빠르게 열기",
+  "command.toggleHeadingFold": "Toggle Section Folding",
+  "command.foldAllHeadings": "Fold All Sections",
+  "command.unfoldAllHeadings": "Expand All Sections",
+  "command.focusCurrentSection": "Focus Current Section",
+  "command.newFromTemplate": "New Document from Template",
+  "command.checkLinks": "Check Document Links",
+  "command.showBacklinks": "Show Backlinks",
+  "command.refreshBacklinks": "Refresh Backlinks",
+  "view.backlinks": "Backlinks",
+  "config.checkLinks": "Check local file, image, and heading links after editing. Results appear in Problems.",
+  "config.updateLinks": "Review incoming and outgoing Markdown link updates when files or folders are renamed in a trusted workspace.",
+  "config.templates": "Custom document templates. Use {{title}} and {{date}} placeholders."
 }
