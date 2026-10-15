@@ -271,6 +271,7 @@ document.body.innerHTML = `<style>${getStyles()}</style>
 const appRoot = document.querySelector<HTMLElement>('.markda-shell')!;
 const preview = document.querySelector<HTMLElement>('#preview')!;
 const selectionToolbar = document.querySelector<HTMLElement>('#selection-toolbar')!;
+let selectionToolbarCommandActive = false;
 const syncStatus = document.querySelector<HTMLElement>('#document-sync-status')!;
 const documentModeStatus = document.querySelector<HTMLButtonElement>('#document-mode-status')!;
 const documentSectionStatus = document.querySelector<HTMLButtonElement>('#document-section-status')!;
@@ -515,7 +516,14 @@ document.querySelectorAll<HTMLButtonElement>('[data-command]').forEach((button) 
 });
 document.querySelectorAll<HTMLButtonElement>('[data-selection-command]').forEach((button) => {
   button.addEventListener('mousedown', (event) => event.preventDefault());
-  button.addEventListener('click', () => runCommand(button.dataset.selectionCommand as EditorCommand));
+  button.addEventListener('click', () => {
+    selectionToolbarCommandActive = true;
+    try {
+      runCommand(button.dataset.selectionCommand as EditorCommand);
+    } finally {
+      selectionToolbarCommandActive = false;
+    }
+  });
 });
 const paragraphStyle = document.querySelector<HTMLSelectElement>('#paragraph-style')!;
 paragraphStyle.addEventListener('change', () => {
@@ -758,7 +766,9 @@ function onEditorUpdate(update: ViewUpdate): void {
   if (update.docChanged || update.selectionSet) updateDocumentStatus();
   if (update.docChanged || update.selectionSet || update.focusChanged) updateSelectionToolbar();
   const mode = update.state.field(modeField);
-  if (mode.typewriterMode && update.selectionSet && settings.typewriterKeepCentered) {
+  const pointerSelection = update.transactions.some((transaction) => transaction.isUserEvent('select.pointer'));
+  if (mode.typewriterMode && update.selectionSet && settings.typewriterKeepCentered
+    && !pointerSelection && !selectionToolbarCommandActive) {
     view.dispatch({ effects: EditorView.scrollIntoView(update.state.selection.main.head, { y: 'center' }) });
   }
 }
@@ -5287,7 +5297,7 @@ function getStyles(): string { return String.raw`
   --markda-link:#4183c4;--markda-link-hover:#2f6f9f;--markda-border:#dfe2e5;
   --markda-surface:#f8f8f8;--markda-inline-code:#f3f4f4;--markda-surface-secondary:#eef2f2;--markda-elevated:#fff;
   --markda-code-fg:#333;--markda-code-bg:#f8f8f8;--markda-code-inline-bg:#f3f4f4;
-  --markda-hover:#eaeef2;--markda-active:#dbeafe;--markda-selection:#b5d6fc;
+  --markda-hover:#eaeef2;--markda-active:#dbeafe;--markda-selection:#b5d6fc;--markda-selection-fg:#24292f;
   --markda-active-line:transparent;--markda-line-highlight:#0969da14;--markda-find-highlight:#fff8c5;--markda-focus:#0969da;
   --markda-find-widget:#f3f3f3;--markda-find-input:#fff;--markda-find-match:#f6b94a70;--markda-find-match-selected:#f59b2399;
   --markda-widget-shadow:#00000029;
@@ -5304,7 +5314,7 @@ function getStyles(): string { return String.raw`
   --markda-link:#75beff;--markda-link-hover:#a6d5ff;--markda-border:#4a4a4a;
   --markda-surface:#252526;--markda-inline-code:#252526;--markda-surface-secondary:#2d2d30;--markda-elevated:#252526;
   --markda-code-fg:#d4d4d4;--markda-code-bg:#252526;--markda-code-inline-bg:#252526;
-  --markda-hover:#2a2d2e;--markda-active:#37373d;--markda-selection:#4a89dc;
+  --markda-hover:#2a2d2e;--markda-active:#37373d;--markda-selection:#005fb8;--markda-selection-fg:#fff;
   --markda-active-line:transparent;--markda-line-highlight:#ffffff0f;--markda-find-highlight:#515c6a;--markda-focus:#007fd4;
   --markda-find-widget:#252526;--markda-find-input:#3c3c3c;--markda-find-match:#ea5c0055;--markda-find-match-selected:#ea5c0088;
   --markda-widget-shadow:#0000005c;
@@ -5315,7 +5325,7 @@ function getStyles(): string { return String.raw`
   --markda-tip:#89d185;--markda-tip-bg:#17351f;--markda-warning:#e2c08d;--markda-warning-bg:#352f15;
   --markda-scrollbar-thumb:#c8c8c866;--markda-scrollbar-thumb-hover:#c8c8c88c;--markda-scrollbar-thumb-active:#c8c8c8b3;
 }
-*{box-sizing:border-box;scrollbar-color:var(--markda-scrollbar-thumb) var(--markda-scrollbar-track);scrollbar-width:thin}::selection{background:var(--markda-selection)}
+*{box-sizing:border-box;scrollbar-color:var(--markda-scrollbar-thumb) var(--markda-scrollbar-track);scrollbar-width:thin}::selection{color:var(--markda-selection-fg);background:var(--markda-selection)}
 *::-webkit-scrollbar{width:10px;height:10px}*::-webkit-scrollbar-track{background:var(--markda-scrollbar-track)}
 *::-webkit-scrollbar-thumb{background:var(--markda-scrollbar-thumb);border:2px solid transparent;border-radius:8px;background-clip:padding-box}
 *::-webkit-scrollbar-thumb:hover{background-color:var(--markda-scrollbar-thumb-hover)}*::-webkit-scrollbar-thumb:active{background-color:var(--markda-scrollbar-thumb-active)}

@@ -112,11 +112,15 @@ describe('showcase Markdown editing in Chromium', { timeout: 60_000 }, () => {
         await settle();
       }
       postMessage.mockClear();
+      expect(document.querySelector<HTMLButtonElement>('[data-command="toggleTypewriterMode"]')?.getAttribute('aria-pressed'), fileName).toBe('false');
       view.dispatch({ selection: { anchor: view.state.doc.length } });
       view.focus();
+      await settle();
 
       const addition = '\n\nScreenshot check.';
-      await userEvent.keyboard(addition);
+      // Let each key event finish before CodeMirror re-renders decorations and
+      // remaps the next browser selection in these highly decorated documents.
+      for (const character of addition) await userEvent.keyboard(character === '\n' ? '{Enter}' : character);
       const normalizedOriginal = normalizeDocumentText(original);
       const serializedAddition = serializeDocumentText(addition, documentLineSeparator(original));
       expect(view.state.doc.toString(), fileName).toBe(`${normalizedOriginal}${addition}`);

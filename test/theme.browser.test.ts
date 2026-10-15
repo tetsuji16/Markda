@@ -7,6 +7,21 @@ async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (color: string): number => {
+    const channels = color.match(/\d+/gu)?.slice(0, 3).map(Number);
+    if (!channels || channels.length !== 3) throw new Error(`Unexpected computed color: ${color}`);
+    const linear = channels.map((channel) => {
+      const value = channel / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!;
+  };
+  const first = luminance(foreground);
+  const second = luminance(background);
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+}
+
 describe('Markda theme colors in Chromium', () => {
   it('keeps surfaces, text, and native scrollbars on the selected color mode', async () => {
     document.body.className = 'vscode-dark';
@@ -63,6 +78,8 @@ describe('Markda theme colors in Chromium', () => {
     expect(getComputedStyle(blockPre).borderTopWidth).toBe('0px');
     expect(getComputedStyle(blockKeyword).color).toBe('rgb(207, 34, 46)');
     expect(getComputedStyle(blockString).color).toBe('rgb(10, 48, 105)');
+    const lightCodeSelection = getComputedStyle(blockKeyword, '::selection');
+    expect(contrastRatio(lightCodeSelection.color, lightCodeSelection.backgroundColor)).toBeGreaterThanOrEqual(4.5);
     expect(tableCode.textContent).toBe('Ctrl+/');
     expect(tableCode.closest('td')?.textContent).toBe('Use Ctrl+/');
     expect(getComputedStyle(tableCode).backgroundColor).toBe('rgb(243, 244, 244)');
@@ -141,7 +158,7 @@ describe('Markda theme colors in Chromium', () => {
     const selectionSample = document.createElement('span');
     selectionSample.className = 'cm-selectionBackground';
     content.append(selectionSample);
-    expect(getComputedStyle(selectionSample).backgroundColor).toBe('rgb(74, 137, 220)');
+    expect(getComputedStyle(selectionSample).backgroundColor).toBe('rgb(0, 95, 184)');
     selectionSample.remove();
     expect(getComputedStyle(quote).color).toBe('rgb(168, 168, 168)');
     expect(getComputedStyle(inlineCode).backgroundColor).toBe('rgb(37, 37, 38)');
@@ -149,6 +166,15 @@ describe('Markda theme colors in Chromium', () => {
     expect(getComputedStyle(blockPre).backgroundColor).toBe('rgb(37, 37, 38)');
     expect(getComputedStyle(blockKeyword).color).toBe('rgb(255, 123, 114)');
     expect(getComputedStyle(blockString).color).toBe('rgb(165, 214, 255)');
+    const darkCodeSelection = getComputedStyle(blockKeyword, '::selection');
+    expect(darkCodeSelection.color).toBe('rgb(255, 255, 255)');
+    expect(darkCodeSelection.backgroundColor).toBe('rgb(0, 95, 184)');
+    expect(contrastRatio(darkCodeSelection.color, darkCodeSelection.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+    const nativeSelection = window.getSelection()!;
+    nativeSelection.selectAllChildren(blockKeyword);
+    expect(nativeSelection.toString()).toBe('const');
+    expect(getComputedStyle(blockKeyword, '::selection').color).toBe('rgb(255, 255, 255)');
+    nativeSelection.removeAllRanges();
     expect(getComputedStyle(document.querySelector<HTMLElement>('.markda-live-table-wrap code')!).backgroundColor).toBe('rgb(37, 37, 38)');
     expect(getComputedStyle(document.querySelector<HTMLElement>('#preview :not(pre) > code')!).color).toBe('rgb(212, 212, 212)');
     expect(getComputedStyle(document.querySelector<HTMLElement>('#preview :not(pre) > code')!).backgroundColor).toBe('rgb(37, 37, 38)');

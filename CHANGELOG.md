@@ -4,6 +4,12 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.28 - 2026-10-16
+
+- Keep the editor viewport stable during pointer selections and selection-toolbar
+  formatting while retaining keyboard scrolling to off-screen cursors.
+- Improve selected code readability in dark mode and verify selection contrast.
+
 ## 0.1.27 - 2026-10-16
 
 - Preserve the original insertion point when pasted or selected images finish

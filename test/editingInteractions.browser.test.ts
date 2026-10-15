@@ -1,6 +1,7 @@
 /// <reference types="@vitest/browser/providers/playwright" />
 
 import { describe, expect, it, vi } from 'vitest';
+import { EditorView } from '@codemirror/view';
 
 async function settle(): Promise<void> {
   await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -93,5 +94,46 @@ describe('rendered math and Mermaid editing in Chromium', () => {
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'save', text: expect.stringContaining('A-->C'),
     }));
+    const scrollDocument = Array.from({ length: 80 }, (_, index) => `Stable line ${index + 1} has enough text to select.`).join('\n');
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: scrollDocument }, selection: { anchor: 0 } });
+    await settle();
+    const selectionToolbar = document.querySelector<HTMLElement>('#selection-toolbar')!;
+    const toggleTypewriter = document.querySelector<HTMLButtonElement>('[data-command="toggleTypewriterMode"]')!;
+    toggleTypewriter.click();
+    expect(toggleTypewriter.getAttribute('aria-pressed')).toBe('true');
+
+    const middle = view.state.doc.line(40);
+    view.dispatch({ effects: EditorView.scrollIntoView(middle.from, { y: 'center' }) });
+    await settle();
+    expect(view.scrollDOM.scrollTop).toBeGreaterThan(0);
+    const visibleScrollTop = view.scrollDOM.scrollTop;
+    const pointerSelection = view.state.doc.line(48);
+    view.dispatch({ selection: { anchor: pointerSelection.from + 2 }, userEvent: 'select.pointer' });
+    await settle();
+    expect(view.scrollDOM.scrollTop).toBe(visibleScrollTop);
+
+    const editorBounds = view.dom.getBoundingClientRect();
+    view.dispatch({
+      selection: { anchor: pointerSelection.from + 2, head: pointerSelection.from + 12 },
+      userEvent: 'select.pointer',
+    });
+    await settle();
+    expect(selectionToolbar.hidden).toBe(false);
+    expect(view.scrollDOM.scrollTop).toBe(visibleScrollTop);
+    expect(view.dom.getBoundingClientRect().top).toBe(editorBounds.top);
+    expect(view.dom.getBoundingClientRect().bottom).toBe(editorBounds.bottom);
+
+    const beforeToolbarAction = view.scrollDOM.scrollTop;
+    selectionToolbar.querySelector<HTMLButtonElement>('[data-selection-command="toggleBold"]')!.click();
+    await settle();
+    expect(view.scrollDOM.scrollTop).toBe(beforeToolbarAction);
+
+    view.contentDOM.focus({ preventScroll: true });
+    view.scrollDOM.scrollTop = 0;
+    view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'ArrowDown', bubbles: true, cancelable: true,
+    }));
+    await settle();
+    expect(view.scrollDOM.scrollTop).toBeGreaterThan(0);
   });
 });
