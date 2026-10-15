@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
-import { areValidTextChanges, decodeImageSource, parseEditorToHostMessage, type EditorCommand, type EditorDiagnostic, type EditorToHostMessage, type HostToEditorMessage, type TextChange } from './protocol.js';
+import { areValidTextChanges, decodeImageSource, parseEditorToHostMessage, type EditorCommand, type EditorDiagnostic, type EditorToHostMessage, type HostToEditorMessage, type SelectionAnchor, type TextChange } from './protocol.js';
 import { getEditorSettings, getThemeMode } from './settings.js';
 import { getStatistics } from './statistics.js';
 import { findMinimalChange } from './textChange.js';
@@ -138,10 +138,10 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
         await this.openLink(view.document.uri, message.href);
         return;
       case 'requestImage':
-        await this.insertImage(view);
+        await this.insertImage(view, message.selection);
         return;
       case 'saveImages':
-        await this.saveImages(view, message.images);
+        await this.saveImages(view, message.selection, message.images);
         return;
       case 'manageImage':
         await this.manageImage(view, message.source, message.from, message.action);
@@ -270,15 +270,15 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     return view.pendingTransactions.values().next().value as string | undefined;
   }
 
-  private async insertImage(view: EditorView): Promise<void> {
+  private async insertImage(view: EditorView, selection: SelectionAnchor): Promise<void> {
     const picked = await vscode.window.showOpenDialog({ canSelectMany: true, filters: { Images: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'] } });
     if (!picked?.length) return;
     const images: { path: string; alt: string }[] = [];
     for (const source of picked) images.push(await this.copyImage(view, source));
-    this.post(view, { type: 'command', command: 'insertImage', payload: { images } });
+    this.post(view, { type: 'command', command: 'insertImage', payload: { images, selection } });
   }
 
-  private async saveImages(view: EditorView, values: readonly { name: string; dataUrl: string }[]): Promise<void> {
+  private async saveImages(view: EditorView, selection: SelectionAnchor, values: readonly { name: string; dataUrl: string }[]): Promise<void> {
     const images: { path: string; alt: string }[] = [];
     for (const [index, value] of values.entries()) {
       const match = value.dataUrl.match(/^data:image\/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=]+)$/u);
@@ -289,7 +289,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       await vscode.workspace.fs.writeFile(destination, Buffer.from(match[2] ?? '', 'base64'));
       images.push(this.imagePayload(view, destination, safeStem));
     }
-    if (images.length) this.post(view, { type: 'command', command: 'insertImage', payload: { images } });
+    if (images.length) this.post(view, { type: 'command', command: 'insertImage', payload: { images, selection } });
   }
 
   private async copyImage(view: EditorView, source: vscode.Uri): Promise<{ path: string; alt: string }> {

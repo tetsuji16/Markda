@@ -100,4 +100,30 @@ describe('Markda color themes', () => {
     }));
     expect(mermaid.render.mock.calls.length).toBeGreaterThan(lightRenderCount);
   });
+
+  it('tracks VS Code theme changes in auto mode and preserves an explicit dark choice', async () => {
+    initialize('auto');
+    const { __getEditorView } = await import('../src/webview/main.js');
+    await settle();
+    const root = document.documentElement;
+    expect(root.dataset.markdaColorMode).toBe('dark');
+
+    document.body.className = 'vscode-light';
+    await settle();
+    expect(root.dataset.markdaColorMode).toBe('light');
+
+    const settings = (globalThis as typeof globalThis & {
+      __markdaInitial: { settings: Record<string, unknown> };
+    }).__markdaInitial.settings;
+    window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'configurationChanged', settings: { ...settings, themeMode: 'dark' } },
+    }));
+    await settle();
+    expect(root.dataset.markdaColorMode).toBe('dark');
+
+    document.body.className = 'vscode-light';
+    await settle();
+    expect(root.dataset.markdaColorMode).toBe('dark');
+    expect(__getEditorView().state.doc.toString()).toBe('# Theme');
+  });
 });

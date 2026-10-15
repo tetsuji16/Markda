@@ -890,7 +890,8 @@ function runCommand(command: EditorCommand, payload?: unknown): void {
     case 'insertImage':
       if (payload && typeof payload === 'object' && 'images' in payload && Array.isArray(payload.images)) {
         const images = payload.images as { path: string; alt?: string }[];
-        insertAtSelection(images.map((image) => `![${image.alt ?? ''}](${image.path})`).join('\n\n'));
+        const selection = 'selection' in payload ? payload.selection : undefined;
+        insertAtSelection(images.map((image) => `![${image.alt ?? ''}](${image.path})`).join('\n\n'), isSelectionAnchor(selection) ? selection : undefined);
       } else if (payload && typeof payload === 'object' && 'path' in payload) {
         const image = payload as { path: string; alt?: string };
         insertAtSelection(`![${image.alt ?? ''}](${image.path})`);
@@ -1089,14 +1090,25 @@ new MutationObserver((mutations) => {
   }
 }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-function insertAtSelection(value: string): void {
-  const selection = view.state.selection.main;
+function insertAtSelection(value: string, requestedSelection?: { anchor: number; head: number }): void {
+  const selection = requestedSelection
+    ? EditorSelection.range(
+      Math.min(requestedSelection.anchor, view.state.doc.length),
+      Math.min(requestedSelection.head, view.state.doc.length),
+    )
+    : view.state.selection.main;
   view.dispatch({
     changes: { from: selection.from, to: selection.to, insert: value },
     selection: EditorSelection.cursor(selection.from + value.length),
     scrollIntoView: true,
   });
   view.focus();
+}
+
+function isSelectionAnchor(value: unknown): value is { anchor: number; head: number } {
+  return typeof value === 'object' && value !== null
+    && 'anchor' in value && Number.isInteger(value.anchor) && (value.anchor as number) >= 0
+    && 'head' in value && Number.isInteger(value.head) && (value.head as number) >= 0;
 }
 
 function updateImageSource(payload: unknown, remove: boolean): void {
@@ -1358,11 +1370,12 @@ async function receiveImageFiles(files: FileList | undefined, event: Event): Pro
   const images = Array.from(files ?? []).filter((file) => /^image\/(?:png|jpeg|gif|webp)$/iu.test(file.type));
   if (!images.length) return;
   event.preventDefault();
+  const selection = currentSelection();
   const values = await Promise.all(images.map(async (file, index) => ({
     name: file.name || `pasted-image-${index + 1}`,
     dataUrl: await readDataUrl(file),
   })));
-  vscode.postMessage({ type: 'saveImages', selection: currentSelection(), images: values });
+  vscode.postMessage({ type: 'saveImages', selection, images: values });
 }
 
 async function handlePaste(event: ClipboardEvent): Promise<void> {

@@ -4,6 +4,11 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+## 0.1.27 - 2026-10-16
+
+- Preserve the original insertion point when pasted or selected images finish
+  saving asynchronously.
+
 ## 0.1.26 - 2026-10-10
 
 - Add source-preserving heading folding, Outline section commands, and automatic

@@ -1,18 +1,15 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { deferSelectionChange } from './helpers/deferredSelectionChange';
+
+let removeSelectionChangeShim: (() => void) | undefined;
 
 function setupEditor(text: string): ReturnType<typeof vi.fn> {
   // The webview HTML template mounts the editor into #editor; recreate it here
   // before importing main.js so the EditorView has a parent element.
   document.body.innerHTML = '<div id="app"><div id="editor"></div></div>';
-  // happy-dom dispatches selectionchange synchronously from Selection.collapse,
-  // unlike browsers, which queue it after the current CodeMirror update.
-  const dispatchEvent = document.dispatchEvent.bind(document);
-  vi.spyOn(document, 'dispatchEvent').mockImplementation((event) => {
-    if (event.type === 'selectionchange') return true;
-    return dispatchEvent(event);
-  });
+  removeSelectionChangeShim = deferSelectionChange(document, window.setTimeout.bind(window));
   (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial = {
     type: 'initialize', uri: 'file:///cursor.md', resourceBaseUri: 'file:///', themeBaseUri: 'data:text/css,',
     version: 1, text,
@@ -42,7 +39,15 @@ async function tick(): Promise<void> {
 }
 
 describe('live Markdown webview cursor + block decorations', { timeout: 30_000 }, () => {
-  afterEach(() => {
+  afterEach(async () => {
+    removeSelectionChangeShim?.();
+    removeSelectionChangeShim = undefined;
+    try {
+      const { __getEditorView } = await import('../src/webview/main.js');
+      __getEditorView().destroy();
+    } catch {
+      // A test that failed before importing the webview has no editor to dispose.
+    }
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     Reflect.deleteProperty(document, 'caretPositionFromPoint');

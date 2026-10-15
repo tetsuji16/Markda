@@ -62,6 +62,44 @@ describe('live document features', () => {
     expect(view.state.doc.toString()).toBe(source);
   });
 
+  it('keeps a pasted image at the selection where the paste began while the file is loading', async () => {
+    vi.resetModules();
+    const postMessage = setupEditor('abcdef');
+    let finishRead: (() => void) | undefined;
+    vi.stubGlobal('FileReader', class {
+      result = 'data:image/png;base64,AA==';
+      error = null;
+      onload: ((event: ProgressEvent<FileReader>) => void) | null = null;
+      onerror: ((event: ProgressEvent<FileReader>) => void) | null = null;
+      readAsDataURL(): void {
+        finishRead = () => this.onload?.(new ProgressEvent('load') as ProgressEvent<FileReader>);
+      }
+    });
+    const { __getEditorView } = await import('../src/webview/main.js');
+    const view = __getEditorView();
+    view.dispatch({ selection: { anchor: 1, head: 3 } });
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, 'clipboardData', { value: { files: [new File(['image'], 'pasted.png', { type: 'image/png' })] } });
+    view.dom.dispatchEvent(paste);
+    view.dispatch({ selection: { anchor: 5, head: 5 } });
+    finishRead?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'saveImages', selection: { anchor: 1, head: 3 },
+    }));
+    window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'command', command: 'insertImage',
+      payload: { images: [{ path: 'assets/pasted.png', alt: 'pasted' }], selection: { anchor: 1, head: 3 } },
+    } }));
+    expect(view.state.doc.toString()).toBe('a![pasted](assets/pasted.png)def');
+
+    window.dispatchEvent(new MessageEvent('message', { data: {
+      type: 'command', command: 'insertImage', payload: { images: [{ path: 'assets/current.png' }] },
+    } }));
+    expect(view.state.doc.toString()).toBe('a![pasted](assets/pasted.png)![](assets/current.png)def');
+  });
+
   it('maps VS Code diagnostics into live editor decorations', async () => {
     vi.resetModules();
     setupEditor('Misspelled word');
