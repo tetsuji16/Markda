@@ -6,6 +6,13 @@ function setupEditor(text: string): ReturnType<typeof vi.fn> {
   // The webview HTML template mounts the editor into #editor; recreate it here
   // before importing main.js so the EditorView has a parent element.
   document.body.innerHTML = '<div id="app"><div id="editor"></div></div>';
+  // happy-dom dispatches selectionchange synchronously from Selection.collapse,
+  // unlike browsers, which queue it after the current CodeMirror update.
+  const dispatchEvent = document.dispatchEvent.bind(document);
+  vi.spyOn(document, 'dispatchEvent').mockImplementation((event) => {
+    if (event.type === 'selectionchange') return true;
+    return dispatchEvent(event);
+  });
   (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial = {
     type: 'initialize', uri: 'file:///cursor.md', resourceBaseUri: 'file:///', themeBaseUri: 'data:text/css,',
     version: 1, text,
@@ -37,6 +44,7 @@ async function tick(): Promise<void> {
 describe('live Markdown webview cursor + block decorations', { timeout: 30_000 }, () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     Reflect.deleteProperty(document, 'caretPositionFromPoint');
     delete (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial;
     document.body.innerHTML = '';

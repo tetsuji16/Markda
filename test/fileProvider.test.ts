@@ -14,7 +14,12 @@ vi.mock('vscode', () => ({
   Uri: class {
     private constructor(readonly fsPath: string) {}
     static file(value: string) { return new this(value); }
-    static parse(value: string) { return new this(value.replace(/^file:\/\//u, '')); }
+    static parse(value: string) {
+      const pathValue = decodeURIComponent(value.replace(/^file:\/\/\/?/u, ''));
+      return new this(process.platform === 'win32'
+        ? pathValue.replace(/^\/([A-Za-z]:\/)/u, '$1').replaceAll('/', '\\')
+        : pathValue);
+    }
     toString(): string { return `file:///${this.fsPath.replaceAll('\\', '/')}`; }
   },
   workspace: {

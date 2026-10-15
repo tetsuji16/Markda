@@ -93,7 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
     register('markda.auditImages', () => auditDocumentImages(editor.getActiveDocument())),
     register('markda.pinFile', (item: vscode.Uri | { uri?: vscode.Uri; resourceUri?: vscode.Uri }) => { const uri = itemUri(item); if (uri) files.togglePin(uri); }),
     register('markda.renameFile', (item: vscode.Uri | { uri?: vscode.Uri; resourceUri?: vscode.Uri }) => renameMarkdownFile(itemUri(item))),
-    register('markda.deleteFile', (item: vscode.Uri | { uri?: vscode.Uri; resourceUri?: vscode.Uri }) => deleteMarkdownFile(itemUri(item))),
+    register('markda.deleteFile', (item: vscode.Uri | { uri?: vscode.Uri; resourceUri?: vscode.Uri }) => deleteMarkdownFile(itemUri(item), files)),
     register('markda.revealFile', (item: vscode.Uri | { uri?: vscode.Uri; resourceUri?: vscode.Uri }) => { const uri = itemUri(item); if (uri) void vscode.commands.executeCommand('revealFileInOS', uri); }),
     register('markda.showSearch', () => editor.sendCommand('showSearch')),
     register('markda.copyAsMarkdown', () => editor.sendCommand('copyAsMarkdown')),
@@ -302,13 +302,16 @@ async function renameMarkdownFile(uri?: vscode.Uri): Promise<void> {
   await vscode.workspace.applyEdit(edit);
 }
 
-async function deleteMarkdownFile(uri?: vscode.Uri): Promise<void> {
+async function deleteMarkdownFile(uri: vscode.Uri | undefined, files: FileProvider): Promise<void> {
   if (!uri) return;
   const remove = vscode.l10n.t('Move to Trash');
   const picked = await vscode.window.showWarningMessage(
     vscode.l10n.t('Move {0} to trash?', path.basename(uri.fsPath)), { modal: true }, remove,
   );
-  if (picked === remove) await vscode.workspace.fs.delete(uri, { useTrash: true });
+  if (picked === remove) {
+    await vscode.workspace.fs.delete(uri, { useTrash: true });
+    files.deleteFiles([uri]);
+  }
 }
 
 async function auditDocumentImages(document?: vscode.TextDocument): Promise<void> {
