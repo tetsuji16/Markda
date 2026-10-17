@@ -44,6 +44,10 @@ describe('table toolbar layout stability in a short document in Chromium', () =>
     const tableTop = () => document.querySelector('table')!.getBoundingClientRect().top;
     expect(shell.classList.contains('table-active')).toBe(false);
     const before = tableTop();
+    const tableBox = () => { const r = document.querySelector("table")!.getBoundingClientRect(); return [r.left, r.width]; };
+    const boxBefore = tableBox();
+    const gutter = () => scroller.offsetWidth - scroller.clientWidth;
+    const gutterBefore = gutter();
 
     const cell = document.querySelectorAll<HTMLElement>('td')[0]!;
     cell.focus();
@@ -51,6 +55,8 @@ describe('table toolbar layout stability in a short document in Chromium', () =>
     await settle();
     expect(shell.classList.contains('table-active')).toBe(true);
     expect(Math.abs(tableTop() - before)).toBeLessThanOrEqual(1);
+    expect(tableBox()).toEqual(boxBefore);
+    expect(gutter()).toBe(gutterBefore);
 
     document.querySelector<HTMLElement>('.cm-content')!.focus();
     await settle();

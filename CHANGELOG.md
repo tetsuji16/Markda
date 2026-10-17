@@ -2,6 +2,12 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.32 - 2026-10-17
+
+- Fix: reserve the editor scrollbar gutter so the scrollbar appearing while a
+  table is open (short documents) cannot change the text width and re-wrap or
+  shift the document.
+
 ## 0.1.31 - 2026-10-17
 
 - Fix: opening a table no longer shifts the document down when the document is
