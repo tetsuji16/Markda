@@ -56,4 +56,34 @@ describe('Markdown table model', () => {
     expect(table.startLine).toBe(20_000);
     expect(table.rows[0]).toEqual(['value']);
   });
+
+  it('finds every table in a long LF document without rescanning the document per table', () => {
+    // Live decorations look up each table in turn. Each lookup must cost the
+    // size of the table, not of the text before it (no '\r' in an LF file once
+    // made every lookup walk back to the start of the document).
+    const block = '## Heading\n\nProse line.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n';
+    const large = block.repeat(20_000);
+    const offsets: number[] = [];
+    for (let at = large.indexOf('| A'); at >= 0; at = large.indexOf('| A', at + 1)) offsets.push(at);
+    expect(offsets).toHaveLength(20_000);
+    const started = performance.now();
+    for (const [index, offset] of offsets.entries()) {
+      const table = findMarkdownTable(large, offset, index * 8 + 4)!;
+      expect(table.from).toBe(offset);
+    }
+    // Linear lookups take about 0.1s here; the quadratic scan took over 10s.
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it('finds the line around an offset at LF, CRLF, and CR boundaries', () => {
+    for (const eol of ['\n', '\r\n', '\r']) {
+      const text = ['intro', '| A | B |', '| --- | --- |', '| 1 | 2 |', 'outro'].join(eol);
+      const start = text.indexOf('| A');
+      for (const offset of [start, start + 3, text.indexOf('| 1') + 1]) {
+        const table = findMarkdownTable(text, offset, 1)!;
+        expect(table.from).toBe(start);
+        expect(table.rows).toEqual([['1', '2']]);
+      }
+    }
+  });
 });
