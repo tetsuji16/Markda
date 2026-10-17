@@ -2,6 +2,15 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.34 - 2026-10-17
+
+- Performance: typing inside a table or code block no longer slows down with
+  the number of tables in the document (34ms to 8ms per keystroke in a
+  6,400-line document with 400 tables).
+- Security: update markdown-it, Mermaid, and DOMPurify past published
+  advisories, including a linkify slowdown on large documents and Mermaid CSS
+  injection from diagram source.
+
 ## 0.1.33 - 2026-10-17
 
 - Fix: leaving a table near the end of a document no longer shifts the
