@@ -232,6 +232,15 @@ export function decodeImageSource(value: unknown): string | undefined {
   return decoded;
 }
 
+/**
+ * The image toolbar can move, copy, or trash the referenced file. The path comes
+ * from the webview, so restrict those file operations to image files: a crafted
+ * reference such as `![](package.json)` must not offer to trash project files.
+ */
+export function isManagedImagePath(value: string): boolean {
+  return /\.(?:apng|avif|bmp|gif|ico|jpe?g|png|svg|tiff?|webp)$/iu.test(value);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }

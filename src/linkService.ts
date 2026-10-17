@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { parseDocumentLink, isMarkdownDocumentPath } from './documentLink.js';
 import { headingAnchors } from './markdownFeatures.js';
+import { isPathInside } from './pathSecurity.js';
 
 const pattern = '**/*.{md,markdown,mdown,mkd,mkdn,mdwn,txt}';
 const exclude = '**/{node_modules,.git,dist,build}/**';
@@ -69,9 +70,16 @@ export class LinkService implements vscode.Disposable, vscode.TreeDataProvider<v
     const text = document.getText();
     const results: vscode.Diagnostic[] = [];
     const targets = new Map<string, Promise<string | undefined>>();
+    // This check runs automatically when a document is opened, so the document
+    // content controls which paths are touched. Apply the same boundary as link
+    // navigation: never stat or read outside the workspace (or, for a standalone
+    // file, its folder). This also keeps `//host/share` links, which resolve to
+    // UNC paths on Windows, from opening network connections.
+    const allowedRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? path.dirname(document.uri.fsPath);
     for (const link of extractLocalLinks(text)) {
       const target = parseDocumentLink(link.href);
       if (target.kind !== 'local' && target.kind !== 'anchor') continue;
+      if (target.kind === 'local' && !isPathInside(allowedRoot, path.resolve(path.dirname(document.uri.fsPath), target.path))) continue;
       const uri = target.kind === 'anchor' ? document.uri : vscode.Uri.file(path.resolve(path.dirname(document.uri.fsPath), target.path));
       const fragment: string | undefined = target.fragment;
       let message: string | undefined;

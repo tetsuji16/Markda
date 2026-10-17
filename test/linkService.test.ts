@@ -11,7 +11,7 @@ vi.mock('vscode', () => ({
   TreeItem: class { constructor(public label: string) {} },
   ThemeIcon: class { constructor(public id: string) {} },
   WorkspaceEdit: class { entries: unknown[] = []; replace(...args: unknown[]) { this.entries.push(args); } },
-  workspace: { isTrusted: true, textDocuments: [], fs: { stat: mocks.stat, readFile: mocks.readFile }, findFiles: mocks.findFiles, openTextDocument: mocks.openTextDocument, asRelativePath: (uri: {fsPath: string}) => uri.fsPath, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }) },
+  workspace: { isTrusted: true, textDocuments: [], fs: { stat: mocks.stat, readFile: mocks.readFile }, findFiles: mocks.findFiles, openTextDocument: mocks.openTextDocument, asRelativePath: (uri: {fsPath: string}) => uri.fsPath, getWorkspaceFolder: () => undefined, getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }) },
   window: { showQuickPick: mocks.showQuickPick },
 }));
 import { LinkService } from '../src/linkService.js';
@@ -31,6 +31,15 @@ describe('workspace link integration', () => {
     const service = new LinkService();
     await service.check(document('[file](b.md) [heading](b.md#absent)') as never);
     expect(mocks.set.mock.calls[0]?.[1]).toHaveLength(1);
+    service.dispose();
+  });
+  it('never touches link targets outside the document boundary, including UNC hosts', async () => {
+    const service = new LinkService();
+    await service.check(document('[unc](//attacker.example/share/x.md#h) [up](../outside.md) [abs](/etc/notes.md) [ok](b.md)') as never);
+    const touched = [...mocks.stat.mock.calls, ...mocks.readFile.mock.calls].map(([uri]) => (uri as { fsPath: string }).fsPath);
+    expect(touched).toHaveLength(1);
+    expect(touched[0]).toMatch(/[\\/]workspace[\\/]b\.md$/u);
+    expect(mocks.set.mock.calls[0]?.[1]).toEqual([]);
     service.dispose();
   });
   it('offers before/after link review and returns a single workspace edit', async () => {

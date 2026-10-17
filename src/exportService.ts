@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
 import { createMarkdownRenderer, extractTitle } from './markdown.js';
-import { createHtmlDocument } from './htmlExport.js';
+import { browserExportContentSecurityPolicy, createHtmlDocument, isNetworkPathReference } from './htmlExport.js';
 import { substituteVariables } from './externalExport.js';
 
 interface PreviousExport {
@@ -71,6 +71,7 @@ export class ExportService {
       vscode.env.language,
       `${await this.loadKatexCss()}\n@page{size:${safePaper};margin:${margin}mm}`,
       baseHref,
+      browserExportPolicy(document.uri),
     );
     const temporaryFolder = await mkdtemp(path.join(os.tmpdir(), 'markda-pdf-'));
     const temporaryHtml = path.join(temporaryFolder, 'document.html');
@@ -80,7 +81,6 @@ export class ExportService {
         '--headless=new',
         '--disable-gpu',
         '--no-pdf-header-footer',
-        '--allow-file-access-from-files',
         `--print-to-pdf=${target.fsPath}`,
         pathToFileURL(temporaryHtml).href,
       ];
@@ -122,13 +122,14 @@ export class ExportService {
       vscode.env.language,
       `${await this.loadKatexCss()}\nbody{font-size:${fontSize}px}.markda-export{max-width:${width - 80}px;padding:40px}`,
       baseHref,
+      browserExportPolicy(document.uri),
     );
     const temporaryFolder = await mkdtemp(path.join(os.tmpdir(), 'markda-image-'));
     const temporaryHtml = path.join(temporaryFolder, 'document.html');
     try {
       await vscode.workspace.fs.writeFile(vscode.Uri.file(temporaryHtml), Buffer.from(html, 'utf8'));
       await runProcess(browser, [
-        '--headless=new', '--disable-gpu', '--hide-scrollbars', '--allow-file-access-from-files',
+        '--headless=new', '--disable-gpu', '--hide-scrollbars',
         `--window-size=${width},${estimatedHeight}`,
         `--screenshot=${target.fsPath}`,
         pathToFileURL(temporaryHtml).href,
@@ -206,10 +207,19 @@ export class ExportService {
 
   private rendererFor(document: vscode.TextDocument) {
     const config = vscode.workspace.getConfiguration('markda', document.uri);
-    return createMarkdownRenderer({
+    const renderer = createMarkdownRenderer({
       breaks: config.get('markdown.breaks', false),
       html: config.get('markdown.html', true) && config.get('security.allowUnsafeHtml', false),
     });
+    // The browser loads this page from file:// with the document folder as its
+    // base, so `//host/share/x.png` would become a UNC path on Windows.
+    const defaultImage = renderer.renderer.rules.image!;
+    renderer.renderer.rules.image = (tokens, index, options, env, self) => {
+      const token = tokens[index];
+      if (token && isNetworkPathReference(token.attrGet('src') ?? '')) token.attrSet('src', '');
+      return defaultImage(tokens, index, options, env, self);
+    };
+    return renderer;
   }
 
   private async findPdfBrowser(uri: vscode.Uri): Promise<string | undefined> {
@@ -238,6 +248,11 @@ export class ExportService {
     if (!this.extensionUri) return Promise.resolve('');
     return this.katexCss ??= inlineStylesheetAssets(vscode.Uri.joinPath(this.extensionUri, 'dist', 'katex.css'));
   }
+}
+
+function browserExportPolicy(uri: vscode.Uri): string {
+  const remote = vscode.workspace.getConfiguration('markda', uri).get<string>('security.allowRemoteResources', 'prompt');
+  return browserExportContentSecurityPolicy(remote === 'always');
 }
 
 function isExternalTarget(value: unknown): value is ExternalExportTarget {

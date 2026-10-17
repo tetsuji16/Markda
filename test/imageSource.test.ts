@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { decodeImageSource } from '../src/protocol.js';
+import { decodeImageSource, isManagedImagePath } from '../src/protocol.js';
+
+describe('isManagedImagePath', () => {
+  it('accepts image files regardless of extension case', () => {
+    for (const value of ['a.png', 'b.JPG', 'c.jpeg', 'd.gif', 'e.svg', 'f.webp', 'g.avif', 'h.tiff', 'dir.v2/i.bmp']) {
+      expect(isManagedImagePath(value)).toBe(true);
+    }
+  });
+
+  it('rejects non-image files that a crafted image reference could point at', () => {
+    for (const value of ['package.json', '.git/config', 'src/extension.ts', 'notes.md', 'photo.png.exe', 'png']) {
+      expect(isManagedImagePath(value)).toBe(false);
+    }
+  });
+});
 
 describe('decodeImageSource', () => {
   it('accepts a plain relative path', () => {
