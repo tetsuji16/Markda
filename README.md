@@ -6,8 +6,6 @@
 
 Markda is a source-preserving Markdown editor for VS Code Desktop. Write directly in the rendered document—headings, tasks, tables, code, math, diagrams, and images included—while the file on disk remains clean, portable Markdown.
 
-> Markda 0.1 is a preview release. Keep important work under version control and report reproducible editing issues.
-
 [Report a bug](https://github.com/tetsuji16/Markda/issues) · [Release history](https://github.com/tetsuji16/Markda/blob/main/CHANGELOG.md) · [Sponsor Markda](https://github.com/sponsors/tetsuji16)
 
 ## Source-preserving by design

@@ -2,6 +2,10 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.30 - 2026-10-17
+
+- Remove the Marketplace "Preview" label.
+
 ## 0.1.29 - 2026-10-17
 
 - Fix: image export now measures the rendered page, so the PNG contains the
