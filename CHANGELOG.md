@@ -2,7 +2,7 @@
 
 All notable changes to Markda are documented in this file.
 
-## Unreleased
+## 0.1.29 - 2026-10-17
 
 - Fix: image export now measures the rendered page, so the PNG contains the
   whole document instead of cutting off documents with images, tables, or
