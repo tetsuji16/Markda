@@ -1798,13 +1798,17 @@ function setTableToolbarVisible(visible: boolean): void {
   if (appRoot.classList.contains('table-active') === visible) return;
   const scroller = view.scrollDOM;
   const before = scroller.getBoundingClientRect().top;
+  // Read before toggling: when the editor grows, the browser clamps scrollTop to
+  // the smaller range on the next layout, and adding the shift to that clamped
+  // value would move the document a second time.
+  const scrollTop = scroller.scrollTop;
   appRoot.classList.toggle('table-active', visible);
   const shift = scroller.getBoundingClientRect().top - before;
   // A short document has no scroll range, so there is nothing to scroll by. While
   // the toolbar is shown, grow the content by the toolbar height so the
   // compensation below always has room.
   if (visible) appRoot.style.setProperty('--markda-table-toolbar-room', `${Math.max(shift, 0)}px`);
-  if (shift !== 0) scroller.scrollTop += shift;
+  if (shift !== 0) scroller.scrollTop = scrollTop + shift;
   if (!visible) appRoot.style.removeProperty('--markda-table-toolbar-room');
 }
 
