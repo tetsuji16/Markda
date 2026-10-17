@@ -87,7 +87,7 @@ export class ExportService {
         `--print-to-pdf=${target.fsPath}`,
         pathToFileURL(temporaryHtml).href,
       ];
-      await runProcess(browser, args, path.dirname(document.uri.fsPath));
+      await runProcess(browser, args, path.dirname(document.uri.fsPath), browserTimeoutMs);
       try {
         await vscode.workspace.fs.stat(target);
       } catch {
@@ -141,7 +141,7 @@ export class ExportService {
         measuredHeight = parseProbedHeight(await runProcess(browser, [
           '--headless=new', '--disable-gpu', '--hide-scrollbars', '--virtual-time-budget=10000',
           `--window-size=${width},${minimumImageHeight}`, '--dump-dom', pageUrl,
-        ], cwd));
+        ], cwd, probeTimeoutMs), nonce);
       } catch { /* Use the estimate below. */ }
       const height = Math.max(minimumImageHeight, Math.min(maximumImageHeight, measuredHeight
         ?? Math.ceil((markdown.split(/\r\n|\r|\n/u).length * fontSize * 1.7) + 180)));
@@ -150,7 +150,7 @@ export class ExportService {
         `--window-size=${width},${height}`,
         `--screenshot=${target.fsPath}`,
         pageUrl,
-      ], cwd);
+      ], cwd, browserTimeoutMs);
       await vscode.workspace.fs.stat(target);
       if (measuredHeight !== undefined && measuredHeight > maximumImageHeight) {
         void vscode.window.showWarningMessage(vscode.l10n.t('markda: The document is taller than {0}px, so the exported image only shows the beginning. Use PDF export for the full document.', maximumImageHeight));
@@ -273,6 +273,11 @@ export class ExportService {
 
 const minimumImageHeight = 720;
 const maximumImageHeight = 16_000;
+// A remote image that never finishes loading keeps a headless page open
+// indefinitely. Height probing falls back to the estimate after its timeout;
+// PDF and screenshot runs report an error instead of hanging the command.
+const probeTimeoutMs = 20_000;
+const browserTimeoutMs = 120_000;
 
 function browserExportPolicy(uri: vscode.Uri, scriptNonce?: string): string {
   const remote = vscode.workspace.getConfiguration('markda', uri).get<string>('security.allowRemoteResources', 'prompt');
@@ -295,15 +300,20 @@ function normalizeExtension(value = ''): string {
 }
 
 /** Resolves with the start of stdout; callers only need the head of a dumped DOM. */
-function runProcess(command: string, args: readonly string[], cwd: string): Promise<string> {
+function runProcess(command: string, args: readonly string[], cwd: string, timeoutMs?: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], { cwd, windowsHide: true, shell: false });
+    const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
+      child.kill();
+      reject(new Error(`Export command did not finish within ${timeoutMs / 1000} seconds.`));
+    }, timeoutMs);
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => { if (stdout.length < 64_000) stdout += chunk.toString('utf8'); });
     child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 32_000) stderr += chunk.toString('utf8'); });
-    child.once('error', reject);
+    child.once('error', (error) => { clearTimeout(timer); reject(error); });
     child.once('exit', (code) => {
+      clearTimeout(timer);
       if (code === 0) resolve(stdout);
       else reject(new Error(`Export command exited with code ${code ?? 'unknown'}.${stderr ? `\n${stderr.trim()}` : ''}`));
     });

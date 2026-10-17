@@ -38,19 +38,24 @@ export function browserExportContentSecurityPolicy(allowRemoteImages: boolean, s
  * Image export first loads the page with `--dump-dom` to learn how tall the
  * rendered document is, because images, tables and display math make any
  * estimate from the Markdown source unreliable. Only this nonce-tagged script
- * may run; document HTML stays blocked by the policy above.
+ * may run; document HTML stays blocked by the policy above. The value is
+ * prefixed with the nonce because raw HTML such as `<html data-markda-height>`
+ * inside the body is merged onto the root element by the HTML parser.
  */
 export function heightProbeScript(nonce: string): string {
-  return `<script nonce="${escapeHtml(nonce)}">addEventListener('load',()=>document.fonts.ready.then(()=>{`
-    + `document.documentElement.setAttribute('data-markda-height',String(Math.ceil(document.documentElement.getBoundingClientRect().height)))}))</script>`;
+  if (!/^[\w-]+$/u.test(nonce)) throw new Error('Invalid script nonce.');
+  return `<script nonce="${nonce}">addEventListener('load',()=>document.fonts.ready.then(()=>{`
+    + `document.documentElement.setAttribute('data-markda-height','${nonce}:'+Math.ceil(document.documentElement.getBoundingClientRect().height))}))</script>`;
 }
 
-/** Reads the height written by {@link heightProbeScript} from a dumped DOM; only the root element counts. */
-export function parseProbedHeight(dom: string): number | undefined {
-  const root = /^\s*(?:<!doctype[^>]*>\s*)?<html\b[^>]*>/iu.exec(dom)?.[0];
-  const value = root ? /\sdata-markda-height="(\d{1,9})"/u.exec(root)?.[1] : undefined;
-  const height = value ? Number(value) : NaN;
-  return Number.isFinite(height) && height > 0 ? height : undefined;
+/** Reads the height written by {@link heightProbeScript} from the root element of a dumped DOM. */
+export function parseProbedHeight(dom: string, nonce: string): number | undefined {
+  const root = /<html\b[^>]*>/iu.exec(dom)?.[0];
+  const value = root ? /\sdata-markda-height="([^"]*)"/u.exec(root)?.[1] : undefined;
+  if (!nonce || !value?.startsWith(`${nonce}:`)) return undefined;
+  const digits = value.slice(nonce.length + 1);
+  const height = /^\d{1,9}$/u.test(digits) ? Number(digits) : 0;
+  return height > 0 ? height : undefined;
 }
 
 /** Protocol-relative and backslash references resolve to network shares from a file:// page. */

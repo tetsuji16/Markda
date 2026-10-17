@@ -45,13 +45,18 @@ describe('HTML export', () => {
     const policy = browserExportContentSecurityPolicy(false, 'n0nce');
     expect(policy).toMatch(/; script-src 'nonce-n0nce'$/u);
     const html = createHtmlDocument('Title', '<p>body</p>', 'en', '', '', policy, heightProbeScript('n0nce'));
-    expect(html).toMatch(/<\/main><script nonce="n0nce">[^<]*data-markda-height[^<]*<\/script><\/body>/u);
+    expect(html).toMatch(/<\/main><script nonce="n0nce">[^<]*'n0nce:'[^<]*<\/script><\/body>/u);
+    expect(() => heightProbeScript(`x'</script>`)).toThrow();
   });
 
-  it('reads the probed height only from the root element of a dumped DOM', () => {
-    expect(parseProbedHeight('<!DOCTYPE html>\n<html lang="en" data-markda-height="2317"><head>')).toBe(2317);
-    expect(parseProbedHeight('<html data-markda-height="0"><head>')).toBeUndefined();
-    expect(parseProbedHeight('<!DOCTYPE html>\n<html lang="en"><head></head><body><div data-markda-height="99999">')).toBeUndefined();
-    expect(parseProbedHeight('')).toBeUndefined();
+  it('accepts only a probed height bound to the export nonce on the root element', () => {
+    expect(parseProbedHeight('<!DOCTYPE html>\n<html lang="en" data-markda-height="n0nce:2317"><head>', 'n0nce')).toBe(2317);
+    // Raw HTML can merge `<html data-markda-height>` onto the root element, but it cannot know the nonce.
+    expect(parseProbedHeight('<html data-markda-height="99999"><head>', 'n0nce')).toBeUndefined();
+    expect(parseProbedHeight('<html data-markda-height="other:99999"><head>', 'n0nce')).toBeUndefined();
+    expect(parseProbedHeight('<html data-markda-height="n0nce:0"><head>', 'n0nce')).toBeUndefined();
+    expect(parseProbedHeight('<html data-markda-height="n0nce:12px"><head>', 'n0nce')).toBeUndefined();
+    expect(parseProbedHeight('<html><head></head><body><div data-markda-height="n0nce:99999">', 'n0nce')).toBeUndefined();
+    expect(parseProbedHeight('', 'n0nce')).toBeUndefined();
   });
 });
