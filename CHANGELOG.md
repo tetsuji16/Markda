@@ -4,6 +4,14 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+- Security: limit automatic link checking to the workspace (or a standalone
+  document's folder), so opening a document no longer reads files outside it
+  or contacts `//host/share` network paths.
+- Security: block scripts, network requests, and network-share images in the
+  page rendered for PDF and image export, and apply `allowRemoteResources` to
+  remote images there.
+- Security: restrict image move, copy, and trash actions to image files.
+
 ## 0.1.28 - 2026-10-16
 
 - Keep the editor viewport stable during pointer selections and selection-toolbar

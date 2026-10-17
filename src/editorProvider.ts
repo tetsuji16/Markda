@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
-import { areValidTextChanges, decodeImageSource, parseEditorToHostMessage, type EditorCommand, type EditorDiagnostic, type EditorToHostMessage, type HostToEditorMessage, type SelectionAnchor, type TextChange } from './protocol.js';
+import { areValidTextChanges, decodeImageSource, isManagedImagePath, parseEditorToHostMessage, type EditorCommand, type EditorDiagnostic, type EditorToHostMessage, type HostToEditorMessage, type SelectionAnchor, type TextChange } from './protocol.js';
 import { getEditorSettings, getThemeMode } from './settings.js';
 import { getStatistics } from './statistics.js';
 import { findMinimalChange } from './textChange.js';
@@ -354,7 +354,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       return;
     }
     const decoded = decodeImageSource(sourceValue);
-    if (decoded === undefined) {
+    if (decoded === undefined || !isManagedImagePath(decoded)) {
       void vscode.window.showErrorMessage(vscode.l10n.t('markda: The image path is invalid.'));
       return;
     }

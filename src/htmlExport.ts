@@ -1,17 +1,40 @@
 import { isRtlLocale } from './localization.js';
 
-export function createHtmlDocument(title: string, body: string, locale = 'en', additionalCss = '', baseHref = ''): string {
+export function createHtmlDocument(
+  title: string,
+  body: string,
+  locale = 'en',
+  additionalCss = '',
+  baseHref = '',
+  contentSecurityPolicy = '',
+): string {
   return `<!doctype html>
 <html lang="${escapeHtml(locale)}" dir="${isRtlLocale(locale) ? 'rtl' : 'ltr'}">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+${contentSecurityPolicy ? `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(contentSecurityPolicy)}">\n` : ''}<meta name="viewport" content="width=device-width, initial-scale=1">
 ${baseHref ? `<base href="${escapeHtml(baseHref)}">` : ''}
 <title>${escapeHtml(title)}</title>
 <style>${exportCss}${additionalCss}</style>
 </head>
 <body><main class="markda-export">${body}</main></body>
 </html>\n`;
+}
+
+/**
+ * Policy for the page rendered by a headless browser during PDF and image
+ * export. Raw HTML is passed through when the user allows unsafe HTML, but the
+ * live editor still strips scripts; the export browser must not run them with
+ * access to local files and the network. Remote images follow the same
+ * `allowRemoteResources` rule as the editor: only `always` loads them.
+ */
+export function browserExportContentSecurityPolicy(allowRemoteImages: boolean): string {
+  return `default-src 'none'; img-src file: data:${allowRemoteImages ? ' https:' : ''}; style-src 'unsafe-inline'; font-src data:`;
+}
+
+/** Protocol-relative and backslash references resolve to network shares from a file:// page. */
+export function isNetworkPathReference(source: string): boolean {
+  return /^\s*(?:[\\/]{2}|\\)/u.test(source);
 }
 
 function escapeHtml(value: string): string {
