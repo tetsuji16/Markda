@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { browserExportContentSecurityPolicy, createHtmlDocument, isNetworkPathReference } from '../src/htmlExport.js';
+import {
+  browserExportContentSecurityPolicy, createHtmlDocument, heightProbeScript, isNetworkPathReference, parseProbedHeight,
+} from '../src/htmlExport.js';
 import { substituteVariables } from '../src/externalExport.js';
 
 describe('HTML export', () => {
@@ -37,5 +39,24 @@ describe('HTML export', () => {
     expect(isNetworkPathReference('images/x.png')).toBe(false);
     expect(isNetworkPathReference('/images/x.png')).toBe(false);
     expect(isNetworkPathReference('data:image/png;base64,AA==')).toBe(false);
+  });
+
+  it('lets only the nonce-tagged height probe run in the image export page', () => {
+    const policy = browserExportContentSecurityPolicy(false, 'n0nce');
+    expect(policy).toMatch(/; script-src 'nonce-n0nce'$/u);
+    const html = createHtmlDocument('Title', '<p>body</p>', 'en', '', '', policy, heightProbeScript('n0nce'));
+    expect(html).toMatch(/<\/main><script nonce="n0nce">[^<]*'n0nce:'[^<]*<\/script><\/body>/u);
+    expect(() => heightProbeScript(`x'</script>`)).toThrow();
+  });
+
+  it('accepts only a probed height bound to the export nonce on the root element', () => {
+    expect(parseProbedHeight('<!DOCTYPE html>\n<html lang="en" data-markda-height="n0nce:2317"><head>', 'n0nce')).toBe(2317);
+    // Raw HTML can merge `<html data-markda-height>` onto the root element, but it cannot know the nonce.
+    expect(parseProbedHeight('<html data-markda-height="99999"><head>', 'n0nce')).toBeUndefined();
+    expect(parseProbedHeight('<html data-markda-height="other:99999"><head>', 'n0nce')).toBeUndefined();
+    expect(parseProbedHeight('<html data-markda-height="n0nce:0"><head>', 'n0nce')).toBeUndefined();
+    expect(parseProbedHeight('<html data-markda-height="n0nce:12px"><head>', 'n0nce')).toBeUndefined();
+    expect(parseProbedHeight('<html><head></head><body><div data-markda-height="n0nce:99999">', 'n0nce')).toBeUndefined();
+    expect(parseProbedHeight('', 'n0nce')).toBeUndefined();
   });
 });

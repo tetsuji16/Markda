@@ -7,6 +7,7 @@ export function createHtmlDocument(
   additionalCss = '',
   baseHref = '',
   contentSecurityPolicy = '',
+  trailingBodyHtml = '',
 ): string {
   return `<!doctype html>
 <html lang="${escapeHtml(locale)}" dir="${isRtlLocale(locale) ? 'rtl' : 'ltr'}">
@@ -17,7 +18,7 @@ ${baseHref ? `<base href="${escapeHtml(baseHref)}">` : ''}
 <title>${escapeHtml(title)}</title>
 <style>${exportCss}${additionalCss}</style>
 </head>
-<body><main class="markda-export">${body}</main></body>
+<body><main class="markda-export">${body}</main>${trailingBodyHtml}</body>
 </html>\n`;
 }
 
@@ -28,8 +29,33 @@ ${baseHref ? `<base href="${escapeHtml(baseHref)}">` : ''}
  * access to local files and the network. Remote images follow the same
  * `allowRemoteResources` rule as the editor: only `always` loads them.
  */
-export function browserExportContentSecurityPolicy(allowRemoteImages: boolean): string {
-  return `default-src 'none'; img-src file: data:${allowRemoteImages ? ' https:' : ''}; style-src 'unsafe-inline'; font-src data:`;
+export function browserExportContentSecurityPolicy(allowRemoteImages: boolean, scriptNonce = ''): string {
+  const scripts = scriptNonce ? `; script-src 'nonce-${scriptNonce}'` : '';
+  return `default-src 'none'; img-src file: data:${allowRemoteImages ? ' https:' : ''}; style-src 'unsafe-inline'; font-src data:${scripts}`;
+}
+
+/**
+ * Image export first loads the page with `--dump-dom` to learn how tall the
+ * rendered document is, because images, tables and display math make any
+ * estimate from the Markdown source unreliable. Only this nonce-tagged script
+ * may run; document HTML stays blocked by the policy above. The value is
+ * prefixed with the nonce because raw HTML such as `<html data-markda-height>`
+ * inside the body is merged onto the root element by the HTML parser.
+ */
+export function heightProbeScript(nonce: string): string {
+  if (!/^[\w-]+$/u.test(nonce)) throw new Error('Invalid script nonce.');
+  return `<script nonce="${nonce}">addEventListener('load',()=>document.fonts.ready.then(()=>{`
+    + `document.documentElement.setAttribute('data-markda-height','${nonce}:'+Math.ceil(document.documentElement.getBoundingClientRect().height))}))</script>`;
+}
+
+/** Reads the height written by {@link heightProbeScript} from the root element of a dumped DOM. */
+export function parseProbedHeight(dom: string, nonce: string): number | undefined {
+  const root = /<html\b[^>]*>/iu.exec(dom)?.[0];
+  const value = root ? /\sdata-markda-height="([^"]*)"/u.exec(root)?.[1] : undefined;
+  if (!nonce || !value?.startsWith(`${nonce}:`)) return undefined;
+  const digits = value.slice(nonce.length + 1);
+  const height = /^\d{1,9}$/u.test(digits) ? Number(digits) : 0;
+  return height > 0 ? height : undefined;
 }
 
 /** Protocol-relative and backslash references resolve to network shares from a file:// page. */

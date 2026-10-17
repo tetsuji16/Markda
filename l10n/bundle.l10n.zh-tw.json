@@ -9,6 +9,7 @@
   "markda: No active markda document.": "markda: 沒有作用中的 markda 文件。",
   "Export": "匯出",
   "markda: Exported {0}": "markda: 已匯出 {0}",
+  "markda: The document is taller than {0}px, so the exported image only shows the beginning. Use PDF export for the full document.": "markda: 文件高度超過 {0}px，匯出的圖片僅包含開頭部分。如需完整文件，請使用 PDF 匯出。",
   "markda: This document has no previous export.": "markda: 此文件沒有上次匯出。",
   "current": "目前",
   "Recent": "最近",

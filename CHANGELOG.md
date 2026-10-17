@@ -4,6 +4,10 @@ All notable changes to Markda are documented in this file.
 
 ## Unreleased
 
+- Fix: image export now measures the rendered page, so the PNG contains the
+  whole document instead of cutting off documents with images, tables, or
+  display math. Documents taller than 16,000px show a warning that suggests
+  PDF export.
 - Security: limit automatic link checking to the workspace (or a standalone
   document's folder), so opening a document no longer reads files outside it
   or contacts `//host/share` network paths.

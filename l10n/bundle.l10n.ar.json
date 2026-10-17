@@ -9,6 +9,7 @@
   "markda: No active markda document.": "markda: لا يوجد مستند markda نشط.",
   "Export": "تصدير",
   "markda: Exported {0}": "markda: تم تصدير {0}",
+  "markda: The document is taller than {0}px, so the exported image only shows the beginning. Use PDF export for the full document.": "markda: المستند أطول من {0} بكسل، لذا تعرض الصورة المصدّرة بدايته فقط. استخدم التصدير إلى PDF للحصول على المستند كاملاً.",
   "markda: This document has no previous export.": "markda: لا يحتوي هذا المستند على تصدير سابق.",
   "current": "الحالي",
   "Recent": "الأخيرة",

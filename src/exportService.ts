@@ -2,10 +2,13 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
 import { createMarkdownRenderer, extractTitle } from './markdown.js';
-import { browserExportContentSecurityPolicy, createHtmlDocument, isNetworkPathReference } from './htmlExport.js';
+import {
+  browserExportContentSecurityPolicy, createHtmlDocument, heightProbeScript, isNetworkPathReference, parseProbedHeight,
+} from './htmlExport.js';
 import { substituteVariables } from './externalExport.js';
 
 interface PreviousExport {
@@ -84,7 +87,7 @@ export class ExportService {
         `--print-to-pdf=${target.fsPath}`,
         pathToFileURL(temporaryHtml).href,
       ];
-      await runProcess(browser, args, path.dirname(document.uri.fsPath));
+      await runProcess(browser, args, path.dirname(document.uri.fsPath), browserTimeoutMs);
       try {
         await vscode.workspace.fs.stat(target);
       } catch {
@@ -114,28 +117,46 @@ export class ExportService {
     const markdown = document.getText();
     const body = this.rendererFor(document).render(markdown);
     const baseHref = pathToFileURL(`${path.dirname(document.uri.fsPath)}${path.sep}`).href;
-    const estimatedHeight = Math.max(720, Math.min(16_000,
-      Math.ceil((markdown.split(/\r\n|\r|\n/u).length * fontSize * 1.7) + 180)));
+    const nonce = randomBytes(16).toString('base64url');
     const html = createHtmlDocument(
       extractTitle(markdown, path.basename(document.fileName)),
       body,
       vscode.env.language,
       `${await this.loadKatexCss()}\nbody{font-size:${fontSize}px}.markda-export{max-width:${width - 80}px;padding:40px}`,
       baseHref,
-      browserExportPolicy(document.uri),
+      browserExportPolicy(document.uri, nonce),
+      heightProbeScript(nonce),
     );
     const temporaryFolder = await mkdtemp(path.join(os.tmpdir(), 'markda-image-'));
     const temporaryHtml = path.join(temporaryFolder, 'document.html');
     try {
       await vscode.workspace.fs.writeFile(vscode.Uri.file(temporaryHtml), Buffer.from(html, 'utf8'));
+      const pageUrl = pathToFileURL(temporaryHtml).href;
+      const cwd = path.dirname(document.uri.fsPath);
+      // Measure at the final width with scrollbars hidden so text wraps exactly
+      // as in the screenshot. Fall back to a source-based estimate if the
+      // browser cannot report a height.
+      let measuredHeight: number | undefined;
+      try {
+        measuredHeight = parseProbedHeight(await runProcess(browser, [
+          '--headless=new', '--disable-gpu', '--hide-scrollbars', '--virtual-time-budget=10000',
+          `--window-size=${width},${minimumImageHeight}`, '--dump-dom', pageUrl,
+        ], cwd, probeTimeoutMs), nonce);
+      } catch { /* Use the estimate below. */ }
+      const height = Math.max(minimumImageHeight, Math.min(maximumImageHeight, measuredHeight
+        ?? Math.ceil((markdown.split(/\r\n|\r|\n/u).length * fontSize * 1.7) + 180)));
       await runProcess(browser, [
         '--headless=new', '--disable-gpu', '--hide-scrollbars',
-        `--window-size=${width},${estimatedHeight}`,
+        `--window-size=${width},${height}`,
         `--screenshot=${target.fsPath}`,
-        pathToFileURL(temporaryHtml).href,
-      ], path.dirname(document.uri.fsPath));
+        pageUrl,
+      ], cwd, browserTimeoutMs);
       await vscode.workspace.fs.stat(target);
-      void vscode.window.showInformationMessage(vscode.l10n.t('markda: Exported {0}', path.basename(target.fsPath)));
+      if (measuredHeight !== undefined && measuredHeight > maximumImageHeight) {
+        void vscode.window.showWarningMessage(vscode.l10n.t('markda: The document is taller than {0}px, so the exported image only shows the beginning. Use PDF export for the full document.', maximumImageHeight));
+      } else {
+        void vscode.window.showInformationMessage(vscode.l10n.t('markda: Exported {0}', path.basename(target.fsPath)));
+      }
     } finally {
       await rm(temporaryFolder, { recursive: true, force: true });
     }
@@ -250,9 +271,17 @@ export class ExportService {
   }
 }
 
-function browserExportPolicy(uri: vscode.Uri): string {
+const minimumImageHeight = 720;
+const maximumImageHeight = 16_000;
+// A remote image that never finishes loading keeps a headless page open
+// indefinitely. Height probing falls back to the estimate after its timeout;
+// PDF and screenshot runs report an error instead of hanging the command.
+const probeTimeoutMs = 20_000;
+const browserTimeoutMs = 120_000;
+
+function browserExportPolicy(uri: vscode.Uri, scriptNonce?: string): string {
   const remote = vscode.workspace.getConfiguration('markda', uri).get<string>('security.allowRemoteResources', 'prompt');
-  return browserExportContentSecurityPolicy(remote === 'always');
+  return browserExportContentSecurityPolicy(remote === 'always', scriptNonce);
 }
 
 function isExternalTarget(value: unknown): value is ExternalExportTarget {
@@ -270,14 +299,22 @@ function normalizeExtension(value = ''): string {
   return cleaned ? `.${cleaned}` : '';
 }
 
-function runProcess(command: string, args: readonly string[], cwd: string): Promise<void> {
+/** Resolves with the start of stdout; callers only need the head of a dumped DOM. */
+function runProcess(command: string, args: readonly string[], cwd: string, timeoutMs?: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], { cwd, windowsHide: true, shell: false });
+    const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
+      child.kill();
+      reject(new Error(`Export command did not finish within ${timeoutMs / 1000} seconds.`));
+    }, timeoutMs);
+    let stdout = '';
     let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { if (stdout.length < 64_000) stdout += chunk.toString('utf8'); });
     child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 32_000) stderr += chunk.toString('utf8'); });
-    child.once('error', reject);
+    child.once('error', (error) => { clearTimeout(timer); reject(error); });
     child.once('exit', (code) => {
-      if (code === 0) resolve();
+      clearTimeout(timer);
+      if (code === 0) resolve(stdout);
       else reject(new Error(`Export command exited with code ${code ?? 'unknown'}.${stderr ? `\n${stderr.trim()}` : ''}`));
     });
   });
