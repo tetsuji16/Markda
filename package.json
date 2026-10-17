@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "%extension.description%",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "publisher": "tetsuji16",
   "license": "MIT",
   "l10n": "./l10n",
@@ -39,7 +39,6 @@
     "color": "#111318",
     "theme": "dark"
   },
-  "preview": true,
   "main": "./dist/extension.js",
   "extensionKind": [
     "ui"
