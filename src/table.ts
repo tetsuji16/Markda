@@ -61,10 +61,12 @@ export function findMarkdownTable(source: string, offset: number, activeLineNumb
 interface SourceLine { from: number; to: number; text: string }
 
 function lineAt(source: string, offset: number): SourceLine {
-  const searchBefore = offset > 0 ? offset - 1 : -1;
-  const previousLf = searchBefore < 0 ? -1 : source.lastIndexOf('\n', searchBefore);
-  const previousCr = searchBefore < 0 ? -1 : source.lastIndexOf('\r', searchBefore);
-  const from = Math.max(previousLf, previousCr) + 1;
+  // Scan back only to the start of this line. Searching for '\n' and '\r'
+  // separately with lastIndexOf walks to the start of the document whenever
+  // one of them is absent (every LF-only file), which made finding each table
+  // cost the size of the whole document.
+  let from = offset;
+  while (from > 0 && source[from - 1] !== '\n' && source[from - 1] !== '\r') from--;
   let to = from;
   while (to < source.length && source[to] !== '\r' && source[to] !== '\n') to++;
   return { from, to, text: source.slice(from, to) };
