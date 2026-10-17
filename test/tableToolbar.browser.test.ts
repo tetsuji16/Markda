@@ -95,9 +95,8 @@ describe('live table toolbar in Chromium', () => {
     expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
     expect(getComputedStyle(toolbar).overflowX).toBe('hidden');
     expect(toolbar.scrollWidth).toBeLessThanOrEqual(toolbar.clientWidth);
-    expect(followingHeading.getBoundingClientRect().top).toBeGreaterThan(followingHeadingTop);
-    expect(firstLine.getBoundingClientRect().top)
-      .toBeGreaterThanOrEqual(toolbar.getBoundingClientRect().bottom);
+    // The toolbar must not push the document down: the content stays where it was.
+    expect(Math.abs(followingHeading.getBoundingClientRect().top - followingHeadingTop)).toBeLessThanOrEqual(1);
 
     const rowAfter = document.querySelector<HTMLButtonElement>('[data-table-command="row-after"]')!;
     const rowAfterRect = rowAfter.getBoundingClientRect();
