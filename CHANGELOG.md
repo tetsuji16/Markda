@@ -2,6 +2,11 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.31 - 2026-10-17
+
+- Fix: opening a table no longer shifts the document down when the document is
+  too short to scroll; the table toolbar now always keeps the text in place.
+
 ## 0.1.30 - 2026-10-17
 
 - Remove the Marketplace "Preview" label.
