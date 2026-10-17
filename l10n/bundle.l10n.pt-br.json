@@ -9,6 +9,7 @@
   "markda: No active markda document.": "markda: Nenhum documento markda ativo.",
   "Export": "Exportar",
   "markda: Exported {0}": "markda: {0} exportado",
+  "markda: The document is taller than {0}px, so the exported image only shows the beginning. Use PDF export for the full document.": "markda: O documento tem mais de {0} px de altura, então a imagem exportada mostra apenas o início. Use a exportação para PDF para o documento completo.",
   "markda: This document has no previous export.": "markda: Este documento não tem exportação anterior.",
   "current": "atual",
   "Recent": "Recentes",

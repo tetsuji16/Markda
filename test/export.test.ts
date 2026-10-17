@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { browserExportContentSecurityPolicy, createHtmlDocument, isNetworkPathReference } from '../src/htmlExport.js';
+import {
+  browserExportContentSecurityPolicy, createHtmlDocument, heightProbeScript, isNetworkPathReference, parseProbedHeight,
+} from '../src/htmlExport.js';
 import { substituteVariables } from '../src/externalExport.js';
 
 describe('HTML export', () => {
@@ -37,5 +39,19 @@ describe('HTML export', () => {
     expect(isNetworkPathReference('images/x.png')).toBe(false);
     expect(isNetworkPathReference('/images/x.png')).toBe(false);
     expect(isNetworkPathReference('data:image/png;base64,AA==')).toBe(false);
+  });
+
+  it('lets only the nonce-tagged height probe run in the image export page', () => {
+    const policy = browserExportContentSecurityPolicy(false, 'n0nce');
+    expect(policy).toMatch(/; script-src 'nonce-n0nce'$/u);
+    const html = createHtmlDocument('Title', '<p>body</p>', 'en', '', '', policy, heightProbeScript('n0nce'));
+    expect(html).toMatch(/<\/main><script nonce="n0nce">[^<]*data-markda-height[^<]*<\/script><\/body>/u);
+  });
+
+  it('reads the probed height only from the root element of a dumped DOM', () => {
+    expect(parseProbedHeight('<!DOCTYPE html>\n<html lang="en" data-markda-height="2317"><head>')).toBe(2317);
+    expect(parseProbedHeight('<html data-markda-height="0"><head>')).toBeUndefined();
+    expect(parseProbedHeight('<!DOCTYPE html>\n<html lang="en"><head></head><body><div data-markda-height="99999">')).toBeUndefined();
+    expect(parseProbedHeight('')).toBeUndefined();
   });
 });

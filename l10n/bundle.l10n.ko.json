@@ -9,6 +9,7 @@
   "markda: No active markda document.": "markda: 활성 markda 문서가 없습니다.",
   "Export": "내보내기",
   "markda: Exported {0}": "markda: {0} 내보냄",
+  "markda: The document is taller than {0}px, so the exported image only shows the beginning. Use PDF export for the full document.": "markda: 문서 높이가 {0}px를 넘어 내보낸 이미지에는 앞부분만 포함됩니다. 전체 문서는 PDF로 내보내세요.",
   "markda: This document has no previous export.": "markda: 이 문서에는 이전 내보내기가 없습니다.",
   "current": "현재",
   "Recent": "최근",

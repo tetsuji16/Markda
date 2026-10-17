@@ -7,6 +7,7 @@ export function createHtmlDocument(
   additionalCss = '',
   baseHref = '',
   contentSecurityPolicy = '',
+  trailingBodyHtml = '',
 ): string {
   return `<!doctype html>
 <html lang="${escapeHtml(locale)}" dir="${isRtlLocale(locale) ? 'rtl' : 'ltr'}">
@@ -17,7 +18,7 @@ ${baseHref ? `<base href="${escapeHtml(baseHref)}">` : ''}
 <title>${escapeHtml(title)}</title>
 <style>${exportCss}${additionalCss}</style>
 </head>
-<body><main class="markda-export">${body}</main></body>
+<body><main class="markda-export">${body}</main>${trailingBodyHtml}</body>
 </html>\n`;
 }
 
@@ -28,8 +29,28 @@ ${baseHref ? `<base href="${escapeHtml(baseHref)}">` : ''}
  * access to local files and the network. Remote images follow the same
  * `allowRemoteResources` rule as the editor: only `always` loads them.
  */
-export function browserExportContentSecurityPolicy(allowRemoteImages: boolean): string {
-  return `default-src 'none'; img-src file: data:${allowRemoteImages ? ' https:' : ''}; style-src 'unsafe-inline'; font-src data:`;
+export function browserExportContentSecurityPolicy(allowRemoteImages: boolean, scriptNonce = ''): string {
+  const scripts = scriptNonce ? `; script-src 'nonce-${scriptNonce}'` : '';
+  return `default-src 'none'; img-src file: data:${allowRemoteImages ? ' https:' : ''}; style-src 'unsafe-inline'; font-src data:${scripts}`;
+}
+
+/**
+ * Image export first loads the page with `--dump-dom` to learn how tall the
+ * rendered document is, because images, tables and display math make any
+ * estimate from the Markdown source unreliable. Only this nonce-tagged script
+ * may run; document HTML stays blocked by the policy above.
+ */
+export function heightProbeScript(nonce: string): string {
+  return `<script nonce="${escapeHtml(nonce)}">addEventListener('load',()=>document.fonts.ready.then(()=>{`
+    + `document.documentElement.setAttribute('data-markda-height',String(Math.ceil(document.documentElement.getBoundingClientRect().height)))}))</script>`;
+}
+
+/** Reads the height written by {@link heightProbeScript} from a dumped DOM; only the root element counts. */
+export function parseProbedHeight(dom: string): number | undefined {
+  const root = /^\s*(?:<!doctype[^>]*>\s*)?<html\b[^>]*>/iu.exec(dom)?.[0];
+  const value = root ? /\sdata-markda-height="(\d{1,9})"/u.exec(root)?.[1] : undefined;
+  const height = value ? Number(value) : NaN;
+  return Number.isFinite(height) && height > 0 ? height : undefined;
 }
 
 /** Protocol-relative and backslash references resolve to network shares from a file:// page. */
