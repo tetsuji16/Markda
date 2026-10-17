@@ -286,7 +286,7 @@ const editorToolbar = document.querySelector<HTMLElement>('#editor-toolbar')!;
 editorToolbar.addEventListener('focusin', () => {
   activeTableFrom = undefined;
   activeLiveTableCursor = undefined;
-  appRoot.classList.remove('table-active');
+  setTableToolbarVisible(false);
 });
 document.querySelectorAll<HTMLButtonElement>('button[title]').forEach((button) => {
   if (!button.getAttribute('aria-label')) button.setAttribute('aria-label', button.title);
@@ -1788,12 +1788,27 @@ function insertLiveLineBreak(editor: EditorView, shiftKey: boolean): boolean {
   return true;
 }
 
+/**
+ * Show or hide the table toolbar without moving the document on screen. The
+ * toolbar occupies its own grid row above the editor, so toggling it changes
+ * the editor's top edge. Compensate the scroll position by exactly that shift
+ * so the text under the pointer and caret stays where the user is looking.
+ */
+function setTableToolbarVisible(visible: boolean): void {
+  if (appRoot.classList.contains('table-active') === visible) return;
+  const scroller = view.scrollDOM;
+  const before = scroller.getBoundingClientRect().top;
+  appRoot.classList.toggle('table-active', visible);
+  const shift = scroller.getBoundingClientRect().top - before;
+  if (shift !== 0) scroller.scrollTop += shift;
+}
+
 function updateTableToolbar(source = cachedDocumentText): void {
   const activeElement = document.activeElement;
   const tableToolbar = document.querySelector<HTMLElement>('#table-toolbar');
   if (activeElement && activeElement !== document.body
     && !view.dom.contains(activeElement) && !tableToolbar?.contains(activeElement)) {
-    appRoot.classList.remove('table-active');
+    setTableToolbarVisible(false);
     return;
   }
   if (activeLiveTableCursor) {
@@ -1801,7 +1816,7 @@ function updateTableToolbar(source = cachedDocumentText): void {
     const table = findMarkdownTable(source, activeLiveTableCursor.from,
       view.state.doc.lineAt(activeLiveTableCursor.from).number - 1);
     if (table) {
-      appRoot.classList.add('table-active');
+      setTableToolbarVisible(true);
       updateTableToolbarButtons(table, activeLiveTableCursor.row);
       return;
     }
@@ -1811,7 +1826,7 @@ function updateTableToolbar(source = cachedDocumentText): void {
   // Almost every cursor move is outside a table. Avoid materializing and splitting
   // the complete document unless the active line can actually be a table row.
   if (!view.state.doc.lineAt(position).text.includes('|')) {
-    appRoot.classList.remove('table-active');
+    setTableToolbarVisible(false);
     return;
   }
   if (!source) source = view.state.doc.toString();
@@ -1819,7 +1834,7 @@ function updateTableToolbar(source = cachedDocumentText): void {
     ? cachedTable
     : findMarkdownTable(source, position, view.state.doc.lineAt(position).number - 1);
   cachedTable = table;
-  appRoot.classList.toggle('table-active', Boolean(table));
+  setTableToolbarVisible(Boolean(table));
   const cursor = table ? tableCursor(source, table, position) : undefined;
   if (table) updateTableToolbarButtons(table, cursor?.row ?? -1);
 }
@@ -5330,16 +5345,16 @@ function getStyles(): string { return String.raw`
 *::-webkit-scrollbar-thumb{background:var(--markda-scrollbar-thumb);border:2px solid transparent;border-radius:8px;background-clip:padding-box}
 *::-webkit-scrollbar-thumb:hover{background-color:var(--markda-scrollbar-thumb-hover)}*::-webkit-scrollbar-thumb:active{background-color:var(--markda-scrollbar-thumb-active)}
 *::-webkit-scrollbar-corner{background:var(--markda-bg)}
-html,body,#app{height:100%;margin:0}body{overflow:hidden;color:var(--markda-fg);background:var(--markda-bg);font-family:var(--markda-font-body);-webkit-font-smoothing:antialiased}
+html,body,#app{height:100%;margin:0;padding:0}body{overflow:hidden;color:var(--markda-fg);background:var(--markda-bg);font-family:var(--markda-font-body);-webkit-font-smoothing:antialiased}
 .markda-link-text,.markda-source-link,#preview a{color:var(--markda-link);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px}.markda-link-text:hover,#preview a:hover{color:var(--markda-link-hover)}
 .markda-meta{font-size:0!important;line-height:0!important;letter-spacing:0!important;color:transparent!important}.markda-meta.markda-meta-expanded{font-size:inherit!important;line-height:inherit!important;letter-spacing:inherit!important;color:var(--markda-muted)!important}
-.markda-list-bullet-source{font-size:0;color:var(--markda-muted)}.markda-list-bullet-source::after{content:'•';display:inline-block;min-width:.8em;font-size:var(--vscode-editor-font-size);font-weight:700;text-align:center}.markda-list-bullet-source.markda-meta-expanded{font-size:inherit;color:inherit}.markda-list-bullet-source.markda-meta-expanded::after{content:none}
+.markda-list-bullet-source{font-size:0;color:var(--markda-muted)}.markda-list-bullet-source::after{content:'•';display:inline-block;min-width:.8em;font-size:var(--markda-font-size,16px);font-weight:700;text-align:center}.markda-list-bullet-source.markda-meta-expanded{font-size:inherit;color:inherit}.markda-list-bullet-source.markda-meta-expanded::after{content:none}
 button{color:inherit;background:transparent;border:0;border-radius:4px;min-height:28px;padding:4px 8px;cursor:pointer}button:hover{background:var(--markda-hover)}button.active{background:var(--markda-active)}button:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--markda-focus);outline-offset:2px}
 .markda-shell{position:relative;height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr) 24px}.markda-toolbar{position:relative;grid-column:1;grid-row:1;z-index:500;min-height:48px;padding:4px 8px;display:flex;flex-wrap:nowrap;align-items:center;gap:2px;overflow:visible;background:color-mix(in srgb,var(--markda-elevated) 92%,transparent);border:0;border-bottom:1px solid color-mix(in srgb,var(--markda-border) 78%,transparent);border-radius:0;box-shadow:none;backdrop-filter:blur(12px)}.markda-toolbar>button,.markda-toolbar-menu>summary{display:flex;gap:5px;align-items:center;justify-content:center;flex:0 0 auto;min-width:40px;min-height:40px;padding:4px 8px;border-radius:6px;cursor:pointer}.markda-toolbar>button.active,.markda-toolbar-popover button.active{color:var(--markda-accent);background:color-mix(in srgb,var(--markda-active) 72%,transparent)}.markda-toolbar-wide{display:none!important}.markda-style-picker{flex:0 1 auto;min-width:0}.markda-style-picker select{height:40px;max-width:9em;padding:0 8px;color:var(--markda-fg);background:transparent;border:1px solid transparent;border-radius:6px}.markda-style-picker select:hover{background:var(--markda-hover)}.markda-style-picker select:focus-visible{outline:2px solid var(--markda-focus);outline-offset:-2px}.markda-toolbar-menu{position:relative;flex:0 0 auto}.markda-toolbar-menu>summary{list-style:none}.markda-toolbar-menu>summary::-webkit-details-marker{display:none}.markda-toolbar-menu[open]>summary{color:var(--markda-accent);background:var(--markda-active)}.markda-toolbar-popover{position:absolute;top:calc(100% + 5px);right:0;z-index:700;display:grid;gap:2px;width:max-content;min-width:220px;max-width:calc(100vw - 16px);padding:6px;color:var(--markda-fg);background:var(--markda-elevated);border:1px solid var(--markda-border);border-radius:7px;box-shadow:0 8px 28px var(--markda-widget-shadow)}.markda-toolbar-popover button{display:flex;align-items:center;gap:9px;width:100%;min-height:40px;padding:6px 10px;text-align:left;border-radius:5px}.markda-toolbar-popover button i,.markda-toolbar-popover button>.math-icon,.markda-toolbar-popover button>span:first-child{display:inline-grid;place-items:center;width:20px;flex:0 0 20px}.toolbar-separator{height:16px;border-left:1px solid color-mix(in srgb,var(--markda-border) 72%,transparent);margin:0 6px}.toolbar-spacer{flex:1 1 12px;min-width:0}.math-icon{font:bold 17px serif}
 .table-toolbar{grid-column:1;grid-row:2;z-index:300;display:none;width:100%;min-height:42px;padding:7px 52px 7px 10px;flex-wrap:wrap;align-items:center;gap:2px;border-bottom:1px solid var(--markda-border);background:var(--markda-surface);box-shadow:0 2px 8px var(--markda-widget-shadow);overflow:hidden}.table-active .table-toolbar{display:flex}.table-toolbar>span:first-child{font-weight:600;margin-right:6px}.table-toolbar button{display:flex;gap:4px;align-items:center}.table-toolbar button:disabled{opacity:.4;cursor:default}
 .markda-workspace{grid-column:1;grid-row:3;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}.preview-visible .markda-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,42%)}#editor,#preview{min-width:0}#editor{overflow:hidden}#preview{display:none;overflow:auto;border-left:1px solid var(--markda-border);padding:8px 30px 30px;font-family:var(--markda-font-body);font-size:16px;line-height:1.6}.preview-visible #preview{display:block}
 .cm-editor{height:100%;min-height:100%;font-family:var(--markda-font-body);font-size:var(--markda-font-size,16px);color:var(--markda-fg);background:transparent}.cm-editor.cm-focused{outline:none}.cm-editor .cm-scroller{padding:8px var(--markda-padding-x,30px) 100px;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content,[contenteditable]{caret-color:var(--markda-cursor-color)}.cm-editor .cm-content{width:100%;min-width:0;max-width:var(--markda-content-width);margin:0 auto;font-family:var(--markda-font-body);line-height:var(--markda-line-height,1.6)}.cm-content:focus{outline:none}.cm-editor .cm-line{padding:0;transition:opacity .12s}.cm-editor .cm-line+.cm-line{margin-top:var(--markda-paragraph-spacing,0)}.cm-line.markda-thematic-blank-line{height:0;min-height:0;overflow:hidden;line-height:0}.cm-editor .cm-activeLine{background-color:var(--markda-active-line)!important}.cm-editor .cm-cursor,.cm-editor .cm-dropCursor{border-left:2px solid var(--markda-cursor-color)!important;margin-left:-1px;box-shadow:none}.cm-selectionLayer{display:none}.cm-selectionBackground{background:var(--markda-selection)!important}.markda-selected-line-break{width:.5em}
-.cm-foldGutter .cm-gutterElement{cursor:pointer}.cm-headingFoldMarker{opacity:0;color:var(--markda-muted)}.cm-gutterElement:hover .cm-headingFoldMarker,.cm-headingFoldMarker.is-closed{opacity:1}.cm-foldPlaceholder{border:0;background:var(--markda-hover);color:var(--markda-muted);padding:0 6px;border-radius:3px;cursor:pointer}.cm-gutters{background:transparent;border:0}\n.cm-editor .markda-block-selection{position:relative}.cm-editor .markda-block-selection::after{content:"";position:absolute;inset:0;z-index:20;pointer-events:none;border:2px solid var(--markda-selection);border-radius:4px;background:color-mix(in srgb,var(--markda-selection) 48%,transparent)}
+.cm-foldGutter .cm-gutterElement{cursor:pointer}.cm-headingFoldMarker{opacity:0;color:var(--markda-muted)}.cm-gutterElement:hover .cm-headingFoldMarker,.cm-headingFoldMarker.is-closed{opacity:1}.cm-foldPlaceholder{border:0;background:var(--markda-hover);color:var(--markda-muted);padding:0 6px;border-radius:3px;cursor:pointer}.cm-editor .cm-gutters{background:transparent!important;border:0!important}\n.cm-editor .markda-block-selection{position:relative}.cm-editor .markda-block-selection::after{content:"";position:absolute;inset:0;z-index:20;pointer-events:none;border:2px solid var(--markda-selection);border-radius:4px;background:color-mix(in srgb,var(--markda-selection) 48%,transparent)}
 .cm-editor .cm-panels-top:has(.cm-search){position:absolute;top:0;right:14px;left:auto;z-index:600;color:var(--markda-fg);background:transparent;border:0}
 .cm-editor .cm-panel.cm-search{position:relative;display:grid;grid-template-columns:minmax(150px,1fr) repeat(6,24px);grid-template-rows:24px 24px;gap:3px;width:min(454px,calc(100vw - 32px));padding:4px 28px;color:var(--markda-fg);background:var(--markda-find-widget);border:1px solid var(--markda-border);border-top:0;box-shadow:0 2px 8px var(--markda-widget-shadow);font:13px/1 var(--markda-font-body)}
 .cm-editor .cm-panel.cm-search.markda-replace-collapsed{grid-template-rows:24px}.cm-search.markda-replace-collapsed input[name=replace],.cm-search.markda-replace-collapsed button[name=replace],.cm-search.markda-replace-collapsed button[name=replaceAll]{display:none!important}
