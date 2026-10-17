@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - run: npm run build
+      - run: npx vsce package --no-dependencies --allow-missing-repository
+
+      # Merging to main publishes only when package.json carries a new version;
+      # otherwise the publish workflow skips the duplicate without failing.
+      - name: Warn when the version is not bumped
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --depth=1 origin "$BASE_REF"
+          base=$(git show "origin/$BASE_REF:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
+          head=$(node -p "require('./package.json').version")
+          if [ "$base" = "$head" ]; then
+            echo "::warning title=Version not bumped::package.json is still $head. Merging will not publish a new Marketplace release."
+          fi
