@@ -23,6 +23,10 @@ export default defineConfig({
       headless: true,
       instances: [{ browser: 'chromium' }],
       viewport: { width: 900, height: 700 },
+      // Vitest's default browser port (63315) falls inside the dynamic port
+      // range (49152-65535) where Windows Hyper-V/WinNAT reserves blocks such
+      // as 63304-63403, which makes the server fail with EACCES. Stay below it.
+      api: { port: 43315 },
     },
   },
 });
