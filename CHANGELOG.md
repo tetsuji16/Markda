@@ -2,6 +2,11 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.33 - 2026-10-17
+
+- Fix: leaving a table near the end of a document no longer shifts the
+  document down when the table toolbar closes.
+
 ## 0.1.32 - 2026-10-17
 
 - Fix: reserve the editor scrollbar gutter so the scrollbar appearing while a
