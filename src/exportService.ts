@@ -1,15 +1,20 @@
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
 import { createMarkdownRenderer, extractTitle } from './markdown.js';
 import {
-  browserExportContentSecurityPolicy, createHtmlDocument, heightProbeScript, isNetworkPathReference, parseProbedHeight,
+  blockedRemoteImagePlaceholder, browserExportContentSecurityPolicy, createHtmlDocument, exportReadinessScript, heightProbeScript, isNetworkPathReference,
+  mermaidExportScript, parseProbedHeight,
 } from './htmlExport.js';
 import { substituteVariables } from './externalExport.js';
+import {
+  browserArgs, browserWorkingDirectory, exportFailureMessage, findBrowserExecutable, isValidPdf, isValidPng, staticRenderedDocument,
+  verifyRenderedHtml,
+} from './exportBrowser.js';
 
 interface PreviousExport {
   source: string;
@@ -55,45 +60,48 @@ export class ExportService {
       saveLabel: vscode.l10n.t('Export PDF'),
     });
     if (!target) return;
-    const browser = await this.findPdfBrowser(document.uri);
-    if (!browser) {
-      void vscode.window.showErrorMessage(vscode.l10n.t('markda: PDF export requires Microsoft Edge, Google Chrome, or Chromium. Set markda.export.pdfBrowserPath if it is installed in a custom location.'));
-      return;
-    }
     const markdown = document.getText();
     const renderer = this.rendererFor(document);
     const body = renderer.render(markdown);
     const exportConfig = vscode.workspace.getConfiguration('markda', document.uri);
+    const allowRemoteImages = exportConfig.get<string>('security.allowRemoteResources', 'prompt') === 'always';
     const paper = exportConfig.get<string>('export.pdfPaperSize', 'A4');
     const safePaper = ['A4', 'A5', 'Letter', 'Legal'].includes(paper) ? paper : 'A4';
     const margin = Math.max(0, Math.min(80, exportConfig.get<number>('export.pdfMarginMm', 15)));
-    const baseHref = pathToFileURL(`${path.dirname(document.uri.fsPath)}${path.sep}`).href;
+    const localDocument = document.uri.scheme === 'file';
+    const baseHref = localDocument ? pathToFileURL(`${path.dirname(document.uri.fsPath)}${path.sep}`).href : '';
+    const nonce = randomBytes(16).toString('base64url');
+    const scripts = await this.exportScripts(body, nonce, allowRemoteImages);
     const html = createHtmlDocument(
       extractTitle(markdown, path.basename(document.fileName)),
       body,
       vscode.env.language,
       `${await this.loadKatexCss()}\n@page{size:${safePaper};margin:${margin}mm}`,
       baseHref,
-      browserExportPolicy(document.uri),
+      browserExportContentSecurityPolicy(allowRemoteImages, nonce),
+      scripts,
     );
     const temporaryFolder = await mkdtemp(path.join(os.tmpdir(), 'markda-pdf-'));
     const temporaryHtml = path.join(temporaryFolder, 'document.html');
     try {
+      await this.assertWritableDestination(target);
+      const browser = await this.findPdfBrowser(document.uri);
+      if (!browser) throw new Error('PDF export requires Microsoft Edge, Google Chrome, or Chromium. Set markda.export.pdfBrowserPath to its executable path.');
       await vscode.workspace.fs.writeFile(vscode.Uri.file(temporaryHtml), Buffer.from(html, 'utf8'));
-      const args = [
-        '--headless=new',
-        '--disable-gpu',
-        '--no-pdf-header-footer',
-        `--print-to-pdf=${target.fsPath}`,
-        pathToFileURL(temporaryHtml).href,
-      ];
-      await runProcess(browser, args, path.dirname(document.uri.fsPath), browserTimeoutMs);
-      try {
-        await vscode.workspace.fs.stat(target);
-      } catch {
-        throw new Error('The browser completed without creating the PDF file.');
-      }
+      const userDataDirectory = path.join(temporaryFolder, 'browser-profile');
+      const pageUrl = pathToFileURL(temporaryHtml).href;
+      const cwd = await browserWorkingDirectory(localDocument ? path.dirname(document.uri.fsPath) : undefined);
+      const renderedPage = await runProcess(browser, browserArgs('probe', userDataDirectory, pageUrl, undefined, 1280), cwd, renderTimeoutMs);
+      const captureHtml = path.join(temporaryFolder, 'capture.html');
+      await vscode.workspace.fs.writeFile(vscode.Uri.file(captureHtml), Buffer.from(staticRenderedDocument(renderedPage, nonce), 'utf8'));
+      const temporaryPdf = path.join(temporaryFolder, 'export.pdf');
+      await runProcess(browser, browserArgs('pdf', userDataDirectory, pathToFileURL(captureHtml).href, temporaryPdf), cwd, browserTimeoutMs);
+      const pdf = await readFile(temporaryPdf).catch(() => undefined);
+      if (!isValidPdf(pdf)) throw new Error('The browser did not create a valid PDF.');
+      await vscode.workspace.fs.writeFile(target, pdf);
       void vscode.window.showInformationMessage(vscode.l10n.t('markda: Exported {0}', path.basename(target.fsPath)));
+    } catch (error) {
+      void vscode.window.showErrorMessage(exportFailureMessage(error));
     } finally {
       await rm(temporaryFolder, { recursive: true, force: true });
     }
@@ -106,57 +114,62 @@ export class ExportService {
       saveLabel: vscode.l10n.t('Export Image'),
     });
     if (!target) return;
-    const browser = await this.findPdfBrowser(document.uri);
-    if (!browser) {
-      void vscode.window.showErrorMessage(vscode.l10n.t('markda: Image export requires Microsoft Edge, Google Chrome, or Chromium.'));
-      return;
-    }
     const config = vscode.workspace.getConfiguration('markda', document.uri);
+    const allowRemoteImages = config.get<string>('security.allowRemoteResources', 'prompt') === 'always';
     const width = Math.max(480, Math.min(2400, config.get<number>('export.imageWidth', 900)));
     const fontSize = Math.max(12, Math.min(48, config.get<number>('export.imageFontSize', 18)));
     const markdown = document.getText();
     const body = this.rendererFor(document).render(markdown);
-    const baseHref = pathToFileURL(`${path.dirname(document.uri.fsPath)}${path.sep}`).href;
+    const localDocument = document.uri.scheme === 'file';
+    const baseHref = localDocument ? pathToFileURL(`${path.dirname(document.uri.fsPath)}${path.sep}`).href : '';
     const nonce = randomBytes(16).toString('base64url');
+    const scripts = await this.exportScripts(body, nonce, allowRemoteImages);
     const html = createHtmlDocument(
       extractTitle(markdown, path.basename(document.fileName)),
       body,
       vscode.env.language,
       `${await this.loadKatexCss()}\nbody{font-size:${fontSize}px}.markda-export{max-width:${width - 80}px;padding:40px}`,
       baseHref,
-      browserExportPolicy(document.uri, nonce),
-      heightProbeScript(nonce),
+      browserExportContentSecurityPolicy(allowRemoteImages, nonce),
+      `${scripts}${heightProbeScript(nonce)}`,
     );
     const temporaryFolder = await mkdtemp(path.join(os.tmpdir(), 'markda-image-'));
     const temporaryHtml = path.join(temporaryFolder, 'document.html');
     try {
+      await this.assertWritableDestination(target);
+      const browser = await this.findPdfBrowser(document.uri);
+      if (!browser) throw new Error('Image export requires Microsoft Edge, Google Chrome, or Chromium. Set markda.export.pdfBrowserPath to its executable path.');
       await vscode.workspace.fs.writeFile(vscode.Uri.file(temporaryHtml), Buffer.from(html, 'utf8'));
       const pageUrl = pathToFileURL(temporaryHtml).href;
-      const cwd = path.dirname(document.uri.fsPath);
+      const cwd = await browserWorkingDirectory(localDocument ? path.dirname(document.uri.fsPath) : undefined);
+      const userDataDirectory = path.join(temporaryFolder, 'browser-profile');
       // Measure at the final width with scrollbars hidden so text wraps exactly
-      // as in the screenshot. Fall back to a source-based estimate if the
-      // browser cannot report a height.
-      let measuredHeight: number | undefined;
+      // as in the screenshot. Readiness is verified separately from this estimate.
       try {
-        measuredHeight = parseProbedHeight(await runProcess(browser, [
-          '--headless=new', '--disable-gpu', '--hide-scrollbars', '--virtual-time-budget=10000',
-          `--window-size=${width},${minimumImageHeight}`, '--dump-dom', pageUrl,
-        ], cwd, probeTimeoutMs), nonce);
-      } catch { /* Use the estimate below. */ }
-      const height = Math.max(minimumImageHeight, Math.min(maximumImageHeight, measuredHeight
-        ?? Math.ceil((markdown.split(/\r\n|\r|\n/u).length * fontSize * 1.7) + 180)));
-      await runProcess(browser, [
-        '--headless=new', '--disable-gpu', '--hide-scrollbars',
-        `--window-size=${width},${height}`,
-        `--screenshot=${target.fsPath}`,
-        pageUrl,
-      ], cwd, browserTimeoutMs);
-      await vscode.workspace.fs.stat(target);
-      if (measuredHeight !== undefined && measuredHeight > maximumImageHeight) {
-        void vscode.window.showWarningMessage(vscode.l10n.t('markda: The document is taller than {0}px, so the exported image only shows the beginning. Use PDF export for the full document.', maximumImageHeight));
-      } else {
-        void vscode.window.showInformationMessage(vscode.l10n.t('markda: Exported {0}', path.basename(target.fsPath)));
+        const probe = await runProcess(browser, browserArgs('probe', userDataDirectory, pageUrl, undefined, width), cwd, probeTimeoutMs);
+        const renderedHtml = staticRenderedDocument(probe, nonce);
+        const measuredHeight = parseProbedHeight(probe, nonce);
+        const captureHtml = path.join(temporaryFolder, 'capture.html');
+        await vscode.workspace.fs.writeFile(vscode.Uri.file(captureHtml), Buffer.from(renderedHtml, 'utf8'));
+        const height = Math.max(minimumImageHeight, Math.min(maximumImageHeight, measuredHeight
+          ?? Math.ceil((markdown.split(/\r\n|\r|\n/u).length * fontSize * 1.7) + 180)));
+        const temporaryImage = path.join(temporaryFolder, 'export.png');
+        await runProcess(browser, browserArgs('screenshot', userDataDirectory, pathToFileURL(captureHtml).href, temporaryImage, width, height), cwd, browserTimeoutMs);
+        const image = await readFile(temporaryImage).catch(() => undefined);
+        if (!isValidPng(image)) throw new Error('The browser did not create a valid PNG image.');
+        await vscode.workspace.fs.writeFile(target, image);
+        if (measuredHeight !== undefined && measuredHeight > maximumImageHeight) {
+          void vscode.window.showWarningMessage(vscode.l10n.t('markda: The document is taller than {0}px, so the exported image only shows the beginning. Use PDF export for the full document.', maximumImageHeight));
+        } else {
+          void vscode.window.showInformationMessage(vscode.l10n.t('markda: Exported {0}', path.basename(target.fsPath)));
+        }
+        return;
+      } catch (error) {
+        if (error instanceof Error && /Mermaid|diagram|page assets/u.test(error.message)) throw error;
+        throw new Error('The browser could not finish preparing the image export. Check local image paths and retry.');
       }
+    } catch (error) {
+      void vscode.window.showErrorMessage(exportFailureMessage(error));
     } finally {
       await rm(temporaryFolder, { recursive: true, force: true });
     }
@@ -202,7 +215,7 @@ export class ExportService {
     await vscode.window.withProgress({
       location: vscode.ProgressLocation.Notification,
       title: vscode.l10n.t('markda: Exporting with {0}', target.name),
-    }, async () => runProcess(substituteVariables(target.command, variables), args, variables['documentDir']!));
+    }, async () => runProcess(substituteVariables(target.command, variables), args, variables['documentDir']!, undefined, 'External export command'));
     void vscode.window.showInformationMessage(vscode.l10n.t('markda: External export completed: {0}', target.name));
   }
 
@@ -237,7 +250,10 @@ export class ExportService {
     const defaultImage = renderer.renderer.rules.image!;
     renderer.renderer.rules.image = (tokens, index, options, env, self) => {
       const token = tokens[index];
-      if (token && isNetworkPathReference(token.attrGet('src') ?? '')) token.attrSet('src', '');
+      if (token && isNetworkPathReference(token.attrGet('src') ?? '')) {
+        token.attrSet('data-markda-remote-blocked', 'true');
+        token.attrSet('src', blockedRemoteImagePlaceholder);
+      }
       return defaultImage(tokens, index, options, env, self);
     };
     return renderer;
@@ -245,24 +261,30 @@ export class ExportService {
 
   private async findPdfBrowser(uri: vscode.Uri): Promise<string | undefined> {
     const configured = vscode.workspace.getConfiguration('markda', uri).get<string>('export.pdfBrowserPath', '').trim();
-    const roots = [process.env['PROGRAMFILES'], process.env['PROGRAMFILES(X86)'], process.env['LOCALAPPDATA']].filter(Boolean) as string[];
-    const candidates = [
-      configured,
-      ...roots.flatMap((root) => [
-        path.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-        path.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      ]),
-      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/usr/bin/microsoft-edge', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
-    ].filter(Boolean);
-    for (const candidate of candidates) {
-      try {
-        await vscode.workspace.fs.stat(vscode.Uri.file(candidate));
-        return candidate;
-      } catch { /* Try the next installed browser. */ }
+    return findBrowserExecutable({ configuredPath: configured });
+  }
+
+  private async exportScripts(body: string, nonce: string, allowRemoteImages: boolean): Promise<string> {
+    if (!/language-mermaid/iu.test(body)) return exportReadinessScript(nonce, allowRemoteImages);
+    if (!this.extensionUri) throw new Error('The bundled Mermaid renderer is unavailable. Rebuild the extension and retry the export.');
+    const bundleUri = vscode.Uri.joinPath(this.extensionUri, 'dist', 'exportMermaid.js');
+    let bundle: string;
+    try { bundle = Buffer.from(await vscode.workspace.fs.readFile(bundleUri)).toString('utf8'); }
+    catch { throw new Error('The bundled Mermaid renderer is unavailable. Rebuild the extension and retry the export.'); }
+    return mermaidExportScript(bundle, nonce, allowRemoteImages);
+  }
+
+  private async assertWritableDestination(target: vscode.Uri): Promise<void> {
+    const folder = target.with({ path: path.posix.dirname(target.path) });
+    try {
+      const stat = await vscode.workspace.fs.stat(folder);
+      if ((stat.type & vscode.FileType.Directory) === 0) throw new Error();
+      const probe = vscode.Uri.joinPath(folder, `.markda-export-${randomBytes(8).toString('hex')}.tmp`);
+      try { await vscode.workspace.fs.writeFile(probe, Buffer.from('')); }
+      finally { await vscode.workspace.fs.delete(probe).then(() => undefined, () => undefined); }
+    } catch {
+      throw new Error('The export destination folder is unavailable or read-only. Choose a writable folder and retry.');
     }
-    return undefined;
   }
 
   private loadKatexCss(): Promise<string> {
@@ -278,11 +300,7 @@ const maximumImageHeight = 16_000;
 // PDF and screenshot runs report an error instead of hanging the command.
 const probeTimeoutMs = 20_000;
 const browserTimeoutMs = 120_000;
-
-function browserExportPolicy(uri: vscode.Uri, scriptNonce?: string): string {
-  const remote = vscode.workspace.getConfiguration('markda', uri).get<string>('security.allowRemoteResources', 'prompt');
-  return browserExportContentSecurityPolicy(remote === 'always', scriptNonce);
-}
+const renderTimeoutMs = 35_000;
 
 function isExternalTarget(value: unknown): value is ExternalExportTarget {
   if (!value || typeof value !== 'object') return false;
@@ -300,7 +318,7 @@ function normalizeExtension(value = ''): string {
 }
 
 /** Resolves with the start of stdout; callers only need the head of a dumped DOM. */
-function runProcess(command: string, args: readonly string[], cwd: string, timeoutMs?: number): Promise<string> {
+function runProcess(command: string, args: readonly string[], cwd: string, timeoutMs?: number, processLabel = 'Export browser'): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], { cwd, windowsHide: true, shell: false });
     const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
@@ -308,14 +326,13 @@ function runProcess(command: string, args: readonly string[], cwd: string, timeo
       reject(new Error(`Export command did not finish within ${timeoutMs / 1000} seconds.`));
     }, timeoutMs);
     let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk: Buffer) => { if (stdout.length < 64_000) stdout += chunk.toString('utf8'); });
-    child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 32_000) stderr += chunk.toString('utf8'); });
-    child.once('error', (error) => { clearTimeout(timer); reject(error); });
-    child.once('exit', (code) => {
+    child.stdout.on('data', (chunk: Buffer) => { if (stdout.length < 8_000_000) stdout += chunk.toString('utf8'); });
+    child.stderr.on('data', () => undefined);
+    child.once('error', () => { clearTimeout(timer); reject(new Error(`${processLabel} could not start.`)); });
+    child.once('close', (code) => {
       clearTimeout(timer);
       if (code === 0) resolve(stdout);
-      else reject(new Error(`Export command exited with code ${code ?? 'unknown'}.${stderr ? `\n${stderr.trim()}` : ''}`));
+      else reject(new Error(`${processLabel} exited with code ${code ?? 'unknown'}.`));
     });
   });
 }

@@ -108,7 +108,7 @@ Run **Markda: Configure File Associations** to choose which of `.md`, `.markdown
 
 ## Settings
 
-Settings under `markda.*` control editor width, delimiter pairing, typewriter behavior, split-preview delay, the live-table size limit, Markdown features, image paths, themes, export behavior, remote resources, and unsafe HTML. `markda.export.pdfBrowserPath` selects a custom Edge/Chrome/Chromium binary, while `markda.export.targets` registers trusted argument-array commands using `${source}`, `${destination}`, `${documentDir}`, `${documentName}`, and `${workspaceFolder}`. Open **Settings** and search for `markda` to see descriptions and defaults.
+Settings under `markda.*` control editor width, delimiter pairing, typewriter behavior, split-preview delay, the live-table size limit, Markdown features, image paths, themes, export behavior, remote resources, and unsafe HTML. `markda.export.pdfBrowserPath` selects a custom Edge/Chrome/Chromium binary; when empty, Markda searches `PATH` and common system and per-user application locations. `markda.export.targets` registers trusted argument-array commands using `${source}`, `${destination}`, `${documentDir}`, `${documentName}`, and `${workspaceFolder}`. Open **Settings** and search for `markda` to see descriptions and defaults.
 
 By default, remote resources require confirmation and unsafe HTML is disabled. In an untrusted workspace, workspace-controlled image destinations and security overrides are restricted.
 

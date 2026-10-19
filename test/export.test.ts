@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  browserExportContentSecurityPolicy, createHtmlDocument, heightProbeScript, isNetworkPathReference, parseProbedHeight,
+  browserExportContentSecurityPolicy, createHtmlDocument, exportReadinessScript, heightProbeScript,
+  isNetworkPathReference, mermaidExportScript, parseProbedHeight,
 } from '../src/htmlExport.js';
 import { substituteVariables } from '../src/externalExport.js';
 
@@ -47,6 +48,20 @@ describe('HTML export', () => {
     const html = createHtmlDocument('Title', '<p>body</p>', 'en', '', '', policy, heightProbeScript('n0nce'));
     expect(html).toMatch(/<\/main><script nonce="n0nce">[^<]*'n0nce:'[^<]*<\/script><\/body>/u);
     expect(() => heightProbeScript(`x'</script>`)).toThrow();
+  });
+
+  it('allows only nonce-tagged local Mermaid export code and signals readiness', () => {
+    const script = mermaidExportScript('window.markdaMermaid={initialize(){},render(){}};', 'export-nonce');
+    const policy = browserExportContentSecurityPolicy(false, 'export-nonce');
+    const html = createHtmlDocument('Title', '<pre><code class="language-mermaid">graph TD</code></pre>', 'en', '', '', policy, script);
+    expect(policy).toContain("script-src 'nonce-export-nonce'");
+    expect(html).toContain('dataset.markdaExportState');
+    expect(html).toContain('securityLevel:\'strict\'');
+    expect(html).toContain('htmlLabels:false');
+    expect(exportReadinessScript('export-nonce')).toContain("dataset.markdaExportState='export-nonce:ready'");
+    expect(mermaidExportScript('window.markdaMermaid={};', 'export-nonce')).toContain("image.dataset.markdaRemoteBlocked='true'");
+    expect(mermaidExportScript('window.markdaMermaid={};', 'export-nonce', true)).not.toContain('markdaRemoteBlocked');
+    expect(() => mermaidExportScript('', 'bad\'nonce')).toThrow();
   });
 
   it('accepts only a probed height bound to the export nonce on the root element', () => {
