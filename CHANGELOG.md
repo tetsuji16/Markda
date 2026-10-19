@@ -2,6 +2,12 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.35 - 2026-10-19
+
+- Fix: keep editable fenced code and native controls on Markda's selected light or dark palette when the VS Code host uses the opposite theme.
+- Fix: discover installed Chromium-family browsers across PATH and common system and per-user locations, and make PDF/image export use isolated profiles and verify fresh output files.
+- Fix: render Mermaid diagrams in PDF and image exports before capture, reuse the rendered document, and replace policy-blocked remote images with visible placeholders.
+
 ## 0.1.34 - 2026-10-17
 
 - Performance: typing inside a table or code block no longer slows down with

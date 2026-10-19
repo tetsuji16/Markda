@@ -34,6 +34,36 @@ export function browserExportContentSecurityPolicy(allowRemoteImages: boolean, s
   return `default-src 'none'; img-src file: data:${allowRemoteImages ? ' https:' : ''}; style-src 'unsafe-inline'; font-src data:${scripts}`;
 }
 
+export const blockedRemoteImagePlaceholder = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="40" viewBox="0 0 240 40"><rect x=".5" y=".5" width="239" height="39" rx="4" fill="#f1f3f5" stroke="#8c959f"/><text x="12" y="25" fill="#57606a" font-family="sans-serif" font-size="13">Remote image blocked by Markda</text></svg>',
+);
+
+/** Runs the trusted, locally bundled diagram renderer and reports bounded completion. */
+export function mermaidExportScript(bundle: string, nonce: string, allowRemoteImages = false): string {
+  if (!/^[\w-]+$/u.test(nonce)) throw new Error('Invalid script nonce.');
+  const safeBundle = bundle.replace(/<\/script/giu, '<\\/script');
+  const prepareImages = blockedRemoteImagePreparation(allowRemoteImages);
+  return `<script nonce="${nonce}">${safeBundle}\n;(()=>{${prepareImages}const root=document.documentElement;const diagrams=[...document.querySelectorAll('pre > code.language-mermaid')];`
+    + `root.dataset.markdaExportState='${nonce}:pending';let failed=false;const finish=async()=>{try{await Promise.all([...document.images].map(i=>i.decode()));await document.fonts.ready;root.dataset.markdaExportState='${nonce}:'+(failed?'error':'ready');`
+    + `dispatchEvent(new Event('markda-export-ready'))}catch(e){root.dataset.markdaExportState='${nonce}:error';root.dataset.markdaExportError=String(e);dispatchEvent(new Event('markda-export-ready'))}};`
+    + `const render=async()=>{try{const exported=window.markdaMermaid,m=exported.default||exported; m.initialize({startOnLoad:false,securityLevel:'strict',htmlLabels:false,theme:'default'});`
+    + `for(let i=0;i<diagrams.length;i++){const code=diagrams[i],host=code.parentElement;try{const result=await m.render('markda-export-'+i,code.textContent||'');host.innerHTML=result.svg}`
+    + `catch(e){failed=true;host.dataset.markdaDiagramError='true';host.setAttribute('data-markda-export-error',String(e));host.style.color='#b00020';host.textContent='Mermaid render error: '+String(e)}}await finish()}`
+    + `catch(e){failed=true;root.dataset.markdaExportState='${nonce}:error';root.dataset.markdaExportError=String(e);dispatchEvent(new Event('markda-export-ready'))}};if(window.markdaMermaid)void render();else{failed=true;root.dataset.markdaExportState='${nonce}:error';root.dataset.markdaExportError='Mermaid renderer did not load';void finish()}})()</script>`;
+}
+
+export function exportReadinessScript(nonce: string, allowRemoteImages = false): string {
+  if (!/^[\w-]+$/u.test(nonce)) throw new Error('Invalid script nonce.');
+  const prepareImages = blockedRemoteImagePreparation(allowRemoteImages);
+  return `<script nonce="${nonce}">(()=>{${prepareImages}const r=document.documentElement;r.dataset.markdaExportState='${nonce}:pending';`
+    + `Promise.all([...document.images].map(i=>i.decode())).then(()=>document.fonts.ready).then(()=>{r.dataset.markdaExportState='${nonce}:ready';dispatchEvent(new Event('markda-export-ready'))},()=>{r.dataset.markdaExportState='${nonce}:error';dispatchEvent(new Event('markda-export-ready'))})})()</script>`;
+}
+
+function blockedRemoteImagePreparation(allowRemoteImages: boolean): string {
+  if (allowRemoteImages) return '';
+  return `const placeholder=${JSON.stringify(blockedRemoteImagePlaceholder)};for(const image of document.images){const picture=image.closest('picture');const refs=[image.getAttribute('src')||'',image.getAttribute('srcset')||'',...(picture?[...picture.querySelectorAll('source')].map(source=>source.getAttribute('srcset')||''):[])].join(' ');if(!/(?:https?:)?\\/\\/[^\\s,]+/iu.test(refs))continue;if(picture)picture.querySelectorAll('source').forEach(source=>source.remove());image.removeAttribute('srcset');image.dataset.markdaRemoteBlocked='true';image.src=placeholder}`;
+}
+
 /**
  * Image export first loads the page with `--dump-dom` to learn how tall the
  * rendered document is, because images, tables and display math make any
@@ -44,8 +74,9 @@ export function browserExportContentSecurityPolicy(allowRemoteImages: boolean, s
  */
 export function heightProbeScript(nonce: string): string {
   if (!/^[\w-]+$/u.test(nonce)) throw new Error('Invalid script nonce.');
-  return `<script nonce="${nonce}">addEventListener('load',()=>document.fonts.ready.then(()=>{`
-    + `document.documentElement.setAttribute('data-markda-height','${nonce}:'+Math.ceil(document.documentElement.getBoundingClientRect().height))}))</script>`;
+  return `<script nonce="${nonce}">const probe=()=>document.fonts.ready.then(()=>{`
+    + `document.documentElement.setAttribute('data-markda-height','${nonce}:'+Math.ceil(document.documentElement.getBoundingClientRect().height))});`
+    + `addEventListener('load',()=>{if(document.documentElement.dataset.markdaExportState==='${nonce}:pending')addEventListener('markda-export-ready',probe,{once:true});else probe()})</script>`;
 }
 
 /** Reads the height written by {@link heightProbeScript} from the root element of a dumped DOM. */

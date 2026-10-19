@@ -37,6 +37,14 @@ const builds = [
   },
   {
     ...common,
+    entryPoints: ['src/webview/exportMermaid.ts'],
+    outfile: 'dist/exportMermaid.js',
+    platform: 'browser',
+    format: 'iife',
+    globalName: 'markdaMermaid',
+  },
+  {
+    ...common,
     entryPoints: ['src/webview/main.ts'],
     outfile: 'dist/webview.js',
     platform: 'browser',

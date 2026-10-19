@@ -2,6 +2,10 @@
 .github/**
 .vscode/**
 .playwright-cli/**
+.claude/**
+*.patch
+pnpm-workspace.yaml
+release-smoke/**
 media/videos/**
 .gitignore
 clean.diff
