@@ -28,7 +28,8 @@ import {
 } from '../markdownFeatures.js';
 import { analyzeDocument, getStatistics } from '../statistics.js';
 import { findMinimalChange } from '../textChange.js';
-import { translate } from '../localization.js';
+import { enMessages, formatMessage } from '../locales/core.js';
+import type { MessageKey } from '../locales/core.js';
 import {
   addTableColumn, addTableRow, alignTableColumn, deleteTableColumn, deleteTableRow,
   findMarkdownTable, serializeMarkdownTable, tableCursor, type MarkdownTable, type TableAlignment,
@@ -55,8 +56,9 @@ interface ViewState {
 
 type InitializationMessage = Extract<HostToEditorMessage, { type: 'initialize' }>;
 const initialDocument = (globalThis as typeof globalThis & { __markdaInitial?: InitializationMessage }).__markdaInitial;
-const locale = initialDocument?.locale ?? 'en';
-const t = (key: Parameters<typeof translate>[1], ...values: readonly (string | number)[]) => translate(locale, key, ...values);
+const uiDirection = initialDocument?.direction ?? 'ltr';
+const messages = initialDocument?.messages;
+const t = (key: MessageKey, ...values: readonly (string | number)[]) => formatMessage(messages?.[key] ?? enMessages[key], ...values);
 
 const vscode = acquireVsCodeApi<ViewState>();
 const savedViewState = vscode.getState();
@@ -171,7 +173,7 @@ function createSyntaxHighlightStyle(): HighlightStyle {
 }
 
 document.body.innerHTML = `<style>${getStyles()}</style>
-<div class="markda-shell">
+<div class="markda-shell" dir="${uiDirection}">
   <header id="editor-toolbar" class="markda-toolbar" role="toolbar" aria-label="${t('editorControls')}" aria-orientation="horizontal">
     <label class="markda-style-picker"><span class="visually-hidden">${t('paragraphStyle')}</span><select id="paragraph-style" data-toolbar-item title="${t('paragraphStyle')}" aria-label="${t('paragraphStyle')}">
       <option value="0">${t('paragraph')}</option>${Array.from({ length: 6 }, (_value, index) => `<option value="${index + 1}">${t('heading', index + 1)}</option>`).join('')}
@@ -235,7 +237,7 @@ document.body.innerHTML = `<style>${getStyles()}</style>
     <button data-table-command="align-center" title="${t('alignCenter')}">↔</button>
     <button data-table-command="align-right" title="${t('alignRight')}"><i class="codicon codicon-list-ordered"></i></button>
   </div>
-  <div class="markda-workspace"><div id="editor"></div><aside id="preview" aria-label="${t('renderedPreview')}"></aside></div>
+  <div class="markda-workspace" dir="ltr"><div id="editor" dir="ltr"></div><aside id="preview" dir="auto" aria-label="${t('renderedPreview')}"></aside></div>
   <div id="markda-welcome" class="markda-welcome" hidden><strong>${t('welcomeTitle')}</strong><span>${t('welcomeBody')}</span></div>
   <div id="quick-insert" class="markda-quick-insert" role="dialog" aria-label="${t('quickInsert')}" hidden>
     <input id="quick-insert-filter" type="text" autocomplete="off" placeholder="${t('quickInsertHint')}" aria-label="${t('quickInsertHint')}">
@@ -455,6 +457,13 @@ const view = new EditorView({
       markdownLanguage,
       headingFolding(),
       syntaxHighlighting(createSyntaxHighlightStyle(), { fallback: true }),
+      EditorState.phrases.of({
+        Find: t('searchFind'), Replace: t('searchReplace'), next: t('searchNext'), previous: t('searchPrevious'),
+        all: t('searchAll'), 'match case': t('searchMatchCase'), regexp: t('searchRegexp'), 'by word': t('searchByWord'),
+        'replace all': t('searchReplaceAll'), close: t('searchClose'), 'Fold line': t('foldLine'),
+        'Unfold line': t('unfoldLine'), 'folded code': t('foldedCode'), unfold: t('unfold'),
+        'Folded lines': t('foldedLines'), 'Unfolded lines': t('unfoldedLines'), to: t('to'),
+      }),
       search({ top: true }),
       keymap.of([
         ...createMarkdaKeymap(),
@@ -712,8 +721,8 @@ function enhanceSearchPanel(panel: HTMLElement): void {
   toggle.className = 'markda-replace-toggle';
   toggle.setAttribute('aria-controls', replaceInput.id);
   toggle.setAttribute('aria-expanded', 'false');
-  toggle.setAttribute('aria-label', replaceInput.placeholder || 'Replace');
-  toggle.title = replaceInput.placeholder || 'Replace';
+  toggle.setAttribute('aria-label', replaceInput.placeholder || t('searchReplace'));
+  toggle.title = replaceInput.placeholder || t('searchReplace');
   panel.classList.add('markda-replace-collapsed');
   toggle.addEventListener('click', () => {
     const expanded = panel.classList.toggle('markda-replace-collapsed') === false;
@@ -2476,7 +2485,7 @@ class FrontMatterWidget extends WidgetType {
       if (yaml.errors.length || !yamlApi.isMap(yaml.contents)) {
         const error = document.createElement('div');
         error.className = 'markda-front-matter-error';
-        error.textContent = yaml.errors[0]?.message ?? 'Front Matter must contain a YAML mapping.';
+        error.textContent = yaml.errors[0]?.message ?? t('yamlMappingError');
         fields.append(error);
         sourceEditor.hidden = false;
         toggle.hidden = true;
@@ -2520,7 +2529,7 @@ class FrontMatterWidget extends WidgetType {
     toggle.addEventListener('click', () => {
       sourceEditor.hidden = !sourceEditor.hidden;
       fields.hidden = !sourceEditor.hidden;
-      toggle.textContent = sourceEditor.hidden ? 'Edit YAML' : 'Show fields';
+      toggle.textContent = sourceEditor.hidden ? t('editYaml') : t('showYamlFields');
       if (!sourceEditor.hidden) sourceEditor.focus();
     });
     sourceEditor.addEventListener('focus', () => { activeFrontMatterFrom = this.from; });
@@ -2645,7 +2654,7 @@ class TaskWidget extends WidgetType {
     input.type = 'checkbox';
     input.className = 'markda-task-checkbox';
     input.checked = this.checked;
-    input.ariaLabel = this.checked ? 'Mark task incomplete' : 'Mark task complete';
+    input.ariaLabel = this.checked ? t('markTaskIncomplete') : t('markTaskComplete');
     input.addEventListener('change', () => this.editor.dispatch({ changes: { from: this.from + 1, to: this.from + 2, insert: input.checked ? 'x' : ' ' } }));
     return input;
   }

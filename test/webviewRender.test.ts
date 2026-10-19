@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getMessageCatalog } from '../src/localization.js';
 
 describe('live Markdown webview', () => {
   afterEach(() => {
@@ -22,7 +23,7 @@ describe('live Markdown webview', () => {
     ].join('\n');
     (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial = {
       type: 'initialize', uri: 'file:///support.md', resourceBaseUri: 'file:///', themeBaseUri: 'data:text/css,',
-      locale: 'ja', direction: 'ltr', version: 1, text,
+      locale: 'ar', messages: getMessageCatalog('ar'), direction: 'rtl', version: 1, text,
       settings: {
         contentWidth: 860, autoPairMarkdown: true, typewriterKeepCentered: true,
         previewUpdateDelay: 500, liveTableMaxCells: 600,
@@ -57,7 +58,11 @@ describe('live Markdown webview', () => {
     // A logical CodeMirror selection exists before the editor is focused, but
     // it must not expose Markdown source syntax on initial render.
     expect(editor.querySelectorAll('.markda-meta-expanded')).toHaveLength(0);
-    expect(document.querySelector('[data-command="insertTable"]')?.getAttribute('title')).toBe('表を挿入');
-    expect(document.querySelector('#table-dialog-title')?.textContent).toBe('表を挿入');
+    expect(document.querySelector('[data-command="insertTable"]')?.getAttribute('title')).toBe('إدراج جدول');
+    expect(document.querySelector('#table-dialog-title')?.textContent).toBe('إدراج جدول');
+    expect(document.querySelector('.markda-shell')?.getAttribute('dir')).toBe('rtl');
+    expect(document.querySelector('.markda-workspace')?.getAttribute('dir')).toBe('ltr');
+    expect(document.querySelector('#editor')?.getAttribute('dir')).toBe('ltr');
+    expect(document.querySelector('#preview')?.getAttribute('dir')).toBe('auto');
   });
 });

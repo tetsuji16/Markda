@@ -2,6 +2,7 @@
 
 import { userEvent } from '@vitest/browser/context';
 import { describe, expect, it, vi } from 'vitest';
+import { getMessageCatalog } from '../src/localization.js';
 
 async function settle(): Promise<void> {
   await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -13,7 +14,8 @@ describe('VS Code-style document search in Chromium', () => {
     document.body.className = 'vscode-dark';
     (globalThis as typeof globalThis & { __markdaInitial?: unknown }).__markdaInitial = {
       type: 'initialize', uri: 'file:///search-browser.md', resourceBaseUri: 'http://localhost/', themeBaseUri: '',
-      version: 1, text: ['# Search', '', 'alpha beta alpha', '', 'Alpha'].join('\n'), locale: 'en',
+      version: 1, text: ['# Search', '', 'alpha beta alpha', '', 'Alpha'].join('\n'), locale: 'ja',
+      messages: getMessageCatalog('ja'), direction: 'ltr',
       settings: {
         contentWidth: 860, autoPairMarkdown: true, typewriterKeepCentered: true,
         previewUpdateDelay: 500, liveTableMaxCells: 600, themeMode: 'light',
@@ -44,6 +46,10 @@ describe('VS Code-style document search in Chromium', () => {
     const replace = panel.querySelector<HTMLInputElement>('input[name=replace]')!;
     const replaceToggle = panel.querySelector<HTMLButtonElement>('.markda-replace-toggle')!;
     expect(panel).not.toBeNull();
+    expect(search.placeholder).toBe('検索');
+    expect(replace.placeholder).toBe('置換');
+    expect(panel.querySelector<HTMLButtonElement>('button[name=next]')?.textContent).toBe('次へ');
+    expect(panel.querySelector('input[name=case]')?.closest('label')?.textContent).toBe('大文字と小文字を区別');
     expect(getComputedStyle(panels).position).toBe('absolute');
     expect(getComputedStyle(panel).display).toBe('grid');
     expect(getComputedStyle(panel).backgroundColor).toBe('rgb(243, 243, 243)');

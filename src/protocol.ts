@@ -1,3 +1,5 @@
+import type { MessageCatalog } from './locales/core.js';
+
 export interface SelectionAnchor {
   anchor: number;
   head: number;
@@ -36,6 +38,7 @@ export type HostToEditorMessage =
       themeBaseUri: string;
       assetBaseUri?: string;
       locale: string;
+      messages?: MessageCatalog;
       direction: 'ltr' | 'rtl';
       version: number;
       text: string;

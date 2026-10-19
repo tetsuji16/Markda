@@ -1,5 +1,5 @@
 {
-  "extension.description": "Edit rendered Markdown directly in VS Code while keeping clean, portable source—with tables, code, math, diagrams, images, and export.",
+  "extension.description": "A visual Markdown editor for VS Code. Edit tables, math and Mermaid diagrams while keeping portable Markdown source.",
   "view.outline": "Outline",
   "view.files": "Files",
   "command.open": "Open with markda",
@@ -74,5 +74,19 @@
   "view.backlinks": "Backlinks",
   "config.checkLinks": "Check local file, image, and heading links after editing. Results appear in Problems.",
   "config.updateLinks": "Review incoming and outgoing Markdown link updates when files or folders are renamed in a trusted workspace.",
-  "config.templates": "Custom document templates. Use {{title}} and {{date}} placeholders."
+  "config.templates": "Custom document templates. Use {{title}} and {{date}} placeholders.",
+  "capabilities.untrustedWorkspaces.description": "Editing and preview remain available. Workspace-controlled image destination and security settings are disabled.",
+  "config.defaultKeybindings": "Use Markda's keyboard shortcuts while its editor is active. Off by default so VS Code shortcuts take priority.",
+  "config.fontFamily": "Document font family. Leave empty to use the selected theme.",
+  "config.fontSize": "Document font size in pixels.",
+  "config.lineHeight": "Document line height.",
+  "config.paragraphSpacing": "Additional spacing between Markdown source lines, in em.",
+  "config.pdfBrowserPath": "Path to Microsoft Edge, Google Chrome, or Chromium for PDF export. Leave empty to search PATH and common system and per-user application locations.",
+  "config.pdfPaperSize": "Paper size for PDF export.",
+  "config.pdfMarginMm": "Page margin in millimeters for PDF export.",
+  "config.imageWidth": "Width in pixels for PNG image export.",
+  "config.imageFontSize": "Font size in pixels for PNG image export.",
+  "config.exportTargets": "Trusted external export commands. Variables: ${source}, ${destination}, ${documentDir}, ${documentName}, ${workspaceFolder}.",
+  "config.exportTargetExtension": "Output extension such as docx. Leave empty for commands without an output file.",
+  "welcome.backlinks": "Documents linking to the current file appear here.\n[Refresh Backlinks](command:markda.refreshBacklinks)"
 }

@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "%extension.description%",
-  "version": "0.1.35",
+  "version": "0.1.36",
   "publisher": "tetsuji16",
   "license": "MIT",
   "l10n": "./l10n",
@@ -27,12 +27,15 @@
   "keywords": [
     "markdown",
     "markdown-editor",
+    "visual-markdown-editor",
     "wysiwym",
-    "editor",
     "live-preview",
     "source-preserving",
+    "tables",
     "math",
-    "mermaid"
+    "mermaid",
+    "html-export",
+    "pdf-export"
   ],
   "icon": "media/icon-refined.png",
   "galleryBanner": {
@@ -46,7 +49,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Editing and preview remain available. Workspace-controlled image destination and security settings are disabled.",
+      "description": "%capabilities.untrustedWorkspaces.description%",
       "restrictedConfigurations": [
         "markda.image.folder",
         "markda.security.allowRemoteResources",
@@ -712,7 +715,7 @@
           "type": "boolean",
           "default": false,
           "scope": "window",
-          "description": "Enable Markda's contributed keyboard shortcuts while the Markda editor is active. Disabled by default so VS Code keybindings take precedence."
+          "description": "%config.defaultKeybindings%"
         },
         "markda.editor.autoPairMarkdown": {
           "type": "boolean",
@@ -769,7 +772,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "description": "Document font family. Leave empty to use the selected theme."
+          "description": "%config.fontFamily%"
         },
         "markda.editor.fontSize": {
           "type": "number",
@@ -777,7 +780,7 @@
           "minimum": 10,
           "maximum": 48,
           "scope": "resource",
-          "description": "Document font size in pixels."
+          "description": "%config.fontSize%"
         },
         "markda.editor.lineHeight": {
           "type": "number",
@@ -785,7 +788,7 @@
           "minimum": 1,
           "maximum": 3,
           "scope": "resource",
-          "description": "Document line height."
+          "description": "%config.lineHeight%"
         },
         "markda.editor.paragraphSpacing": {
           "type": "number",
@@ -793,7 +796,7 @@
           "minimum": 0,
           "maximum": 3,
           "scope": "resource",
-          "description": "Additional spacing between Markdown source lines, in em."
+          "description": "%config.paragraphSpacing%"
         },
         "markda.markdown.math": {
           "type": "boolean",
@@ -858,7 +861,7 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "Path to Microsoft Edge, Google Chrome, or Chromium for PDF export. Leave empty to search PATH and common system and per-user application locations."
+          "description": "%config.pdfBrowserPath%"
         },
         "markda.export.pdfPaperSize": {
           "type": "string",
@@ -870,7 +873,7 @@
           ],
           "default": "A4",
           "scope": "resource",
-          "description": "Paper size for PDF export."
+          "description": "%config.pdfPaperSize%"
         },
         "markda.export.pdfMarginMm": {
           "type": "number",
@@ -878,7 +881,7 @@
           "minimum": 0,
           "maximum": 80,
           "scope": "resource",
-          "description": "Page margin in millimeters for PDF export."
+          "description": "%config.pdfMarginMm%"
         },
         "markda.export.imageWidth": {
           "type": "integer",
@@ -886,7 +889,7 @@
           "minimum": 480,
           "maximum": 2400,
           "scope": "resource",
-          "description": "Width in pixels for PNG image export."
+          "description": "%config.imageWidth%"
         },
         "markda.export.imageFontSize": {
           "type": "integer",
@@ -894,13 +897,13 @@
           "minimum": 12,
           "maximum": 48,
           "scope": "resource",
-          "description": "Font size in pixels for PNG image export."
+          "description": "%config.imageFontSize%"
         },
         "markda.export.targets": {
           "type": "array",
           "default": [],
           "scope": "resource",
-          "description": "Trusted external export commands. Variables: ${source}, ${destination}, ${documentDir}, ${documentName}, ${workspaceFolder}.",
+          "description": "%config.exportTargets%",
           "items": {
             "type": "object",
             "required": [
@@ -923,7 +926,7 @@
               },
               "extension": {
                 "type": "string",
-                "description": "Output extension such as docx. Leave empty for commands without an output file."
+                "description": "%config.exportTargetExtension%"
               }
             }
           }
@@ -989,7 +992,7 @@
     "viewsWelcome": [
       {
         "view": "markda.backlinks",
-        "contents": "Documents linking to the current file appear here.\n[Refresh Backlinks](command:markda.refreshBacklinks)"
+        "contents": "%welcome.backlinks%"
       }
     ]
   },

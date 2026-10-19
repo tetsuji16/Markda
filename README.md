@@ -1,24 +1,30 @@
 # Markda
 
-![Markda — edit the rendered document while keeping clean, portable Markdown source](media/marketing/marketplace-hero.png)
+**English** · [日本語](docs/README.ja.md)
 
 **Edit the document you see. Keep the Markdown you own.**
 
-Markda is a source-preserving Markdown editor for VS Code Desktop. Write directly in the rendered document—headings, tasks, tables, code, math, diagrams, and images included—while the file on disk remains clean, portable Markdown.
+Markda is a source-preserving Markdown editor for VS Code Desktop. It is for writers, developers, researchers, and note-takers who want the ease of editing a formatted document without giving up readable Markdown files. Edit headings, tasks, tables, code, math, diagrams, and images in place; the file on disk remains clean, portable Markdown.
 
-[Report a bug](https://github.com/tetsuji16/Markda/issues) · [Release history](https://github.com/tetsuji16/Markda/blob/main/CHANGELOG.md) · [Sponsor Markda](https://github.com/sponsors/tetsuji16)
+[Install Markda from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=tetsuji16.markda) · [Browse the source on GitHub](https://github.com/tetsuji16/Markda) · [Report a bug](https://github.com/tetsuji16/Markda/issues)
+
+Markda 0.1 is a preview release.
+
+## Get started
+
+1. Install Markda from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=tetsuji16.markda).
+2. Open a Markdown file. If it opens in another editor, run **Markda: Open with Markda** or choose **Reopen Editor With… → Markda** from the editor tab menu.
+3. Edit the rendered document. Use the `</>` button or **Markda: Toggle Source Code Mode** whenever you want to work with the Markdown source.
+
+Markda supports `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`, and `.txt` files. To return to VS Code's built-in editor, use **Reopen with Another Editor** in the Markda editor title.
+
+![Markda — edit the rendered document while keeping clean, portable Markdown source](media/marketing/marketplace-hero.png)
 
 ## Source-preserving by design
 
 ![Markda's compact product showcase in the live editor, demonstrating source mode, focus and typewriter modes, tables, tasks, math, code, and local Markdown rendering](media/screenshots/live-editing.png)
 
 The VS Code text document remains the single source of truth. Markda applies focused edits to that document while preserving untouched content and Markdown syntax. Switch to full source whenever you want to inspect or change it directly.
-
-## Latest update
-
-Version 0.1.26 adds section folding, local link checks, document templates, rename
-link updates, and backlinks. The editor toolbar stays unchanged; use the Outline
-menu, Files menu, Command Palette, and collapsed Backlinks view.
 
 ## Organize connected documents
 
@@ -70,13 +76,6 @@ renames performed outside VS Code are not rewritten.
 - See save synchronization, current section, document statistics, and
   actionable diagnostics in the editor status bar.
 
-## Getting started
-
-1. Open a Markdown file. Markda is registered for `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`, and `.txt` files.
-2. If another editor is active, run **Markda: Open with Markda** or choose **Reopen Editor With… → Markda** from the editor tab menu.
-3. Use the `</>` button or **Markda: Toggle Source Code Mode** to move between the live editor and Markdown source.
-4. To return to VS Code's built-in editor, use the **Reopen with Another Editor** button in the Markda editor title.
-
 The Markda activity-bar view provides document outline and Markdown file navigation.
 
 ## Useful commands and shortcuts
@@ -117,6 +116,7 @@ By default, remote resources require confirmation and unsafe HTML is disabled. I
 - VS Code Desktop 1.100 or later
 - Local or remote desktop extension hosts; this release is not a web extension for `vscode.dev`
 - HTML and PDF export are supported. Other formats can be configured as external export targets; their conversion tools are not bundled.
+- The extension UI is localized for English, Arabic, German, Spanish, French, Japanese, Korean, Brazilian Portuguese, Russian, Simplified Chinese, and Traditional Chinese. VS Code uses the display language selected in its settings.
 
 ## Privacy and security
 

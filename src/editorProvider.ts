@@ -6,7 +6,7 @@ import { getEditorSettings, getThemeMode } from './settings.js';
 import { getStatistics } from './statistics.js';
 import { findMinimalChange } from './textChange.js';
 import { OutlineProvider } from './outlineProvider.js';
-import { isRtlLocale } from './localization.js';
+import { getMessageCatalog, isRtlLocale } from './localization.js';
 import { isMarkdownDocumentPath, parseDocumentLink } from './documentLink.js';
 import { isPathInside, isRealPathInside, isRealPathOrNearestParentInside } from './pathSecurity.js';
 
@@ -518,6 +518,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
       themeBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.globalStorageUri, 'themes')).toString()}/`,
       assetBaseUri: `${view.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist')).toString()}/`,
       locale: vscode.env.language,
+      messages: getMessageCatalog(vscode.env.language),
       direction: isRtlLocale(vscode.env.language) ? 'rtl' : 'ltr',
       version: view.document.version,
       text: view.document.getText(), settings: getEditorSettings(view.document.uri, this.themeMode),
@@ -535,7 +536,7 @@ export class MarkdaEditorProvider implements vscode.CustomTextEditorProvider, vs
     const styles = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'));
     const initialData = escapeEmbeddedJson(JSON.stringify(initialization));
     return `<!doctype html>
-<html lang="${escapeHtmlAttribute(initialization.locale)}" dir="${initialization.direction}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="${escapeHtmlAttribute(initialization.locale)}" dir="ltr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:${allowRemoteImages ? ' https:' : ''}; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src ${webview.cspSource} 'nonce-${nonce}';">
 <link rel="stylesheet" href="${styles}"><title>markda</title></head>
 <body><div id="app" role="application" aria-label="${escapeHtmlAttribute(vscode.l10n.t('markda Markdown editor'))}"></div><script nonce="${nonce}">globalThis.__markdaInitial=${initialData};</script><script type="module" nonce="${nonce}" src="${script}"></script></body></html>`;

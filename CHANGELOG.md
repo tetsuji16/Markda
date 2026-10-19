@@ -2,6 +2,18 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.36 - 2026-10-19
+
+- Add complete extension UI and metadata translations for the 11 supported
+  locales, with checks for translation completeness and placeholder consistency.
+- Improve the English and Japanese Marketplace/GitHub README entry points with
+  clear installation guidance, localized command names, and current feature
+  information.
+- Refresh the GitHub repository description, Marketplace homepage link, and
+  discovery topics.
+
+## Unreleased
+
 ## 0.1.35 - 2026-10-19
 
 - Fix: keep editable fenced code and native controls on Markda's selected light or dark palette when the VS Code host uses the opposite theme.

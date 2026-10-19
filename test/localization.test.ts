@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { isRtlLocale, resolveLocale, supportedLocales, translate } from '../src/localization.js';
+import { isRtlLocale, messageKeys, resolveLocale, supportedLocales, translate } from '../src/localization.js';
 import { createHtmlDocument } from '../src/htmlExport.js';
 
 describe('localization', () => {
@@ -13,18 +13,32 @@ describe('localization', () => {
     expect(resolveLocale('unknown')).toBe('en');
   });
 
-  it('translates UI messages and falls back to English for missing entries', () => {
+  it('translates messages and falls back to English for unknown locales', () => {
     expect(translate('ja', 'insertTable')).toBe('表を挿入');
     expect(translate('ja', 'syncSaved')).toBe('同期済み');
     expect(translate('en', 'syncSaved')).toBe('Synced');
-    expect(translate('de-DE', 'largeTable', 4, 3)).toBe('Large table (4 rows × 3 columns)');
+    expect(translate('de-DE', 'largeTable', 4, 3)).toBe('Große Tabelle (4 Zeilen × 3 Spalten)');
     expect(translate('unknown', 'cancel')).toBe('Cancel');
+  });
+
+  it('preserves the English placeholder set in every supported locale', () => {
+    const placeholders = (message: string) => [...message.matchAll(/\{(\d+)\}/gu)].map((match) => match[1]).sort();
+    for (const locale of supportedLocales) {
+      if (locale !== 'en') {
+        expect(translate(locale, 'insertTable'), locale).not.toBe('Insert table');
+        expect(translate(locale, 'saveFailed'), locale).not.toBe('markda: The document could not be saved.');
+      }
+      for (const key of messageKeys) {
+        expect(placeholders(translate(locale, key)), `${locale}:${key}`).toEqual(placeholders(translate('en', key)));
+      }
+    }
   });
 
   it('marks RTL locales and exports valid language metadata', () => {
     expect(isRtlLocale('ar-SA')).toBe(true);
     expect(isRtlLocale('ja-JP')).toBe(false);
-    expect(createHtmlDocument('عنوان', '<p>نص</p>', 'ar-SA')).toContain('<html lang="ar-SA" dir="rtl">');
+    expect(createHtmlDocument('عنوان', '<p>نص</p>', 'ar-SA')).toContain('<html lang="ar-SA">');
+    expect(createHtmlDocument('عنوان', '<p>نص</p>', 'ar-SA')).toContain('<body dir="auto">');
   });
 
   it('ships a complete package localization file for every supported non-English locale', async () => {

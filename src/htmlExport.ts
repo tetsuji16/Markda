@@ -1,5 +1,3 @@
-import { isRtlLocale } from './localization.js';
-
 export function createHtmlDocument(
   title: string,
   body: string,
@@ -10,7 +8,7 @@ export function createHtmlDocument(
   trailingBodyHtml = '',
 ): string {
   return `<!doctype html>
-<html lang="${escapeHtml(locale)}" dir="${isRtlLocale(locale) ? 'rtl' : 'ltr'}">
+<html lang="${escapeHtml(locale)}">
 <head>
 <meta charset="utf-8">
 ${contentSecurityPolicy ? `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(contentSecurityPolicy)}">\n` : ''}<meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,7 +16,7 @@ ${baseHref ? `<base href="${escapeHtml(baseHref)}">` : ''}
 <title>${escapeHtml(title)}</title>
 <style>${exportCss}${additionalCss}</style>
 </head>
-<body><main class="markda-export">${body}</main>${trailingBodyHtml}</body>
+<body dir="auto"><main class="markda-export">${body}</main>${trailingBodyHtml}</body>
 </html>\n`;
 }
 
