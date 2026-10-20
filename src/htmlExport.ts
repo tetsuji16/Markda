@@ -36,6 +36,28 @@ export const blockedRemoteImagePlaceholder = 'data:image/svg+xml,' + encodeURICo
   '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="40" viewBox="0 0 240 40"><rect x=".5" y=".5" width="239" height="39" rx="4" fill="#f1f3f5" stroke="#8c959f"/><text x="12" y="25" fill="#57606a" font-family="sans-serif" font-size="13">Remote image blocked by Markda</text></svg>',
 );
 
+const paperHeightsMm: Record<string, number> = { A4: 297, A5: 210, Letter: 279.4, Legal: 355.6 };
+
+/**
+ * Page setup for PDF export. A rendered diagram is a single SVG that the
+ * browser cannot split across pages: when it is taller than the page, Chromium
+ * moves it to the next page and leaves the empty diagram frame behind, then
+ * cuts the drawing at every page boundary. Scale each diagram down to fit one
+ * page instead, keep its frame in one piece, and keep headings with the block
+ * that follows them.
+ */
+export function pdfPageCss(paper: string, marginMm: number): string {
+  const paperHeight = paperHeightsMm[paper] ?? paperHeightsMm.A4!;
+  const contentHeightPx = (paperHeight - 2 * marginMm) * 96 / 25.4;
+  // Leave room for the frame's padding and for a heading kept on the same page;
+  // a diagram as tall as the whole page would strand that heading alone.
+  const diagramHeightPx = Math.max(120, Math.floor(contentHeightPx - 160));
+  return `@page{size:${paper in paperHeightsMm ? paper : 'A4'};margin:${marginMm}mm}`
+    + '@media print{h1,h2,h3,h4,h5,h6{break-after:avoid}'
+    + 'pre[data-markda-diagram]{break-inside:avoid;overflow:visible}'
+    + `pre[data-markda-diagram] svg{display:block;margin:0 auto;max-width:100%;max-height:${diagramHeightPx}px}}`;
+}
+
 /** Runs the trusted, locally bundled diagram renderer and reports bounded completion. */
 export function mermaidExportScript(bundle: string, nonce: string, allowRemoteImages = false): string {
   if (!/^[\w-]+$/u.test(nonce)) throw new Error('Invalid script nonce.');
@@ -45,7 +67,7 @@ export function mermaidExportScript(bundle: string, nonce: string, allowRemoteIm
     + `root.dataset.markdaExportState='${nonce}:pending';let failed=false;const finish=async()=>{try{await Promise.all([...document.images].map(i=>i.decode()));await document.fonts.ready;root.dataset.markdaExportState='${nonce}:'+(failed?'error':'ready');`
     + `dispatchEvent(new Event('markda-export-ready'))}catch(e){root.dataset.markdaExportState='${nonce}:error';root.dataset.markdaExportError=String(e);dispatchEvent(new Event('markda-export-ready'))}};`
     + `const render=async()=>{try{const exported=window.markdaMermaid,m=exported.default||exported; m.initialize({startOnLoad:false,securityLevel:'strict',htmlLabels:false,theme:'default'});`
-    + `for(let i=0;i<diagrams.length;i++){const code=diagrams[i],host=code.parentElement;try{const result=await m.render('markda-export-'+i,code.textContent||'');host.innerHTML=result.svg}`
+    + `for(let i=0;i<diagrams.length;i++){const code=diagrams[i],host=code.parentElement;try{const result=await m.render('markda-export-'+i,code.textContent||'');host.innerHTML=result.svg;host.dataset.markdaDiagram='true'}`
     + `catch(e){failed=true;host.dataset.markdaDiagramError='true';host.setAttribute('data-markda-export-error',String(e));host.style.color='#b00020';host.textContent='Mermaid render error: '+String(e)}}await finish()}`
     + `catch(e){failed=true;root.dataset.markdaExportState='${nonce}:error';root.dataset.markdaExportError=String(e);dispatchEvent(new Event('markda-export-ready'))}};if(window.markdaMermaid)void render();else{failed=true;root.dataset.markdaExportState='${nonce}:error';root.dataset.markdaExportError='Mermaid renderer did not load';void finish()}})()</script>`;
 }

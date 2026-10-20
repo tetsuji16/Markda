@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
 import { createMarkdownRenderer, extractTitle } from './markdown.js';
 import {
   blockedRemoteImagePlaceholder, browserExportContentSecurityPolicy, createHtmlDocument, exportReadinessScript, heightProbeScript, isNetworkPathReference,
-  mermaidExportScript, parseProbedHeight,
+  mermaidExportScript, parseProbedHeight, pdfPageCss,
 } from './htmlExport.js';
 import { substituteVariables } from './externalExport.js';
 import {
@@ -76,7 +76,7 @@ export class ExportService {
       extractTitle(markdown, path.basename(document.fileName)),
       body,
       vscode.env.language,
-      `${await this.loadKatexCss()}\n@page{size:${safePaper};margin:${margin}mm}`,
+      `${await this.loadKatexCss()}\n${pdfPageCss(safePaper, margin)}`,
       baseHref,
       browserExportContentSecurityPolicy(allowRemoteImages, nonce),
       scripts,

@@ -2,6 +2,13 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.37 - 2026-10-20
+
+- Fix: PDF export no longer leaves an empty diagram frame on its own page.
+  A Mermaid diagram taller than the page is now scaled to fit one page instead
+  of being cut at page breaks, and a heading stays on the page of the block
+  that follows it.
+
 ## 0.1.36 - 2026-10-19
 
 - Add complete extension UI and metadata translations for the 11 supported

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   browserExportContentSecurityPolicy, createHtmlDocument, exportReadinessScript, heightProbeScript,
-  isNetworkPathReference, mermaidExportScript, parseProbedHeight,
+  isNetworkPathReference, mermaidExportScript, parseProbedHeight, pdfPageCss,
 } from '../src/htmlExport.js';
 import { substituteVariables } from '../src/externalExport.js';
 
@@ -48,6 +48,24 @@ describe('HTML export', () => {
     const html = createHtmlDocument('Title', '<p>body</p>', 'en', '', '', policy, heightProbeScript('n0nce'));
     expect(html).toMatch(/<\/main><script nonce="n0nce">[^<]*'n0nce:'[^<]*<\/script><\/body>/u);
     expect(() => heightProbeScript(`x'</script>`)).toThrow();
+  });
+
+  it('fits rendered diagrams on one PDF page instead of leaving an empty frame', () => {
+    // A4 is 297mm tall; 15mm margins leave 267mm (1009px), less 160px for a heading.
+    const css = pdfPageCss('A4', 15);
+    expect(css).toContain('@page{size:A4;margin:15mm}');
+    expect(css).toContain('pre[data-markda-diagram]{break-inside:avoid');
+    expect(css).toContain('max-height:849px');
+    expect(css).toContain('h1,h2,h3,h4,h5,h6{break-after:avoid}');
+    expect(css.startsWith('@page')).toBe(true);
+    // Diagram rules apply to print only, so image export keeps full-size diagrams.
+    expect(css.slice(css.indexOf('@media print'))).toContain('pre[data-markda-diagram] svg');
+    expect(pdfPageCss('Letter', 10)).toContain('max-height:820px');
+    expect(pdfPageCss('Legal', 0)).toContain('max-height:1184px');
+    expect(pdfPageCss('Unknown', 15)).toContain('@page{size:A4;margin:15mm}');
+    // The largest allowed margin still leaves a visible diagram.
+    expect(pdfPageCss('A5', 80)).toContain('max-height:120px');
+    expect(mermaidExportScript('window.markdaMermaid={};', 'export-nonce')).toContain("host.dataset.markdaDiagram='true'");
   });
 
   it('allows only nonce-tagged local Mermaid export code and signals readiness', () => {
