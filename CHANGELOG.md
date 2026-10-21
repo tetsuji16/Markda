@@ -2,6 +2,11 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.38 - 2026-10-21
+
+- Update the README and Marketplace listing entry points with the official
+  website, introduction video, and GUI walkthrough.
+
 ## 0.1.37 - 2026-10-20
 
 - Fix: PDF export no longer leaves an empty diagram frame on its own page.

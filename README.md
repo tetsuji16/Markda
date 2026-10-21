@@ -6,9 +6,11 @@
 
 Markda is a source-preserving Markdown editor for VS Code Desktop. It is for writers, developers, researchers, and note-takers who want the ease of editing a formatted document without giving up readable Markdown files. Edit headings, tasks, tables, code, math, diagrams, and images in place; the file on disk remains clean, portable Markdown.
 
-[Install Markda from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=tetsuji16.markda) · [Browse the source on GitHub](https://github.com/tetsuji16/Markda) · [Report a bug](https://github.com/tetsuji16/Markda/issues)
+[Official website](https://o-server.main.jp/markda/) · [Install from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=tetsuji16.markda) · [Browse the source on GitHub](https://github.com/tetsuji16/Markda) · [Report a bug](https://github.com/tetsuji16/Markda/issues)
 
 Markda 0.1 is a preview release.
+
+> **See Markda in action:** [Watch the 16-second introduction](media/videos/markda-intro.mp4) · [Watch the GUI walkthrough](media/videos/markda-gui-demo.mp4)
 
 ## Get started
 

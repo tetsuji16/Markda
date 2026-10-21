@@ -7,8 +7,11 @@
 pnpm-workspace.yaml
 release-smoke/**
 media/videos/**
+!media/videos/markda-intro.mp4
+!media/videos/markda-gui-demo.mp4
 .gitignore
 clean.diff
+tmp_extra.txt
 diff_main.txt
 opencode.json
 dev/**
