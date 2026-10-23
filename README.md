@@ -15,7 +15,7 @@ Markda 0.1 is a preview release.
 ## Get started
 
 1. Install Markda from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=tetsuji16.markda).
-2. Open a Markdown file. If it opens in another editor, run **Markda: Open with Markda** or choose **Reopen Editor With… → Markda** from the editor tab menu.
+2. Open a Markdown file. If it opens in VS Code’s standard text editor, select **Open with markda** in the editor title, run **Markda: Open with Markda**, or choose **Reopen Editor With… → Markda** from the editor tab menu.
 3. Edit the rendered document. Use the `</>` button or **Markda: Toggle Source Code Mode** whenever you want to work with the Markdown source.
 
 Markda supports `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`, and `.txt` files. To return to VS Code's built-in editor, use **Reopen with Another Editor** in the Markda editor title.

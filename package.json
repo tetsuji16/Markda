@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "%extension.description%",
-  "version": "0.1.40",
+  "version": "0.1.41",
   "publisher": "tetsuji16",
   "license": "MIT",
   "l10n": "./l10n",
@@ -138,7 +138,8 @@
       {
         "command": "markda.open",
         "title": "%command.open%",
-        "category": "markda"
+        "category": "markda",
+        "icon": "$(book)"
       },
       {
         "command": "markda.reopenWith",
@@ -459,6 +460,11 @@
     ],
     "menus": {
       "editor/title": [
+        {
+          "command": "markda.open",
+          "when": "activeEditor == workbench.editors.files.textFileEditor && resourceExtname =~ /\\.(md|markdown|mdown|mkd|mkdn|mdwn|txt)$/",
+          "group": "navigation@0"
+        },
         {
           "command": "markda.reopenWith",
           "when": "activeCustomEditorId == markda.editor",

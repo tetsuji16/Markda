@@ -2,6 +2,10 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.41 - 2026-10-24
+
+- Add an editor title action to open supported Markdown and text files with Markda from VS Code’s standard text editor.
+
 ## 0.1.40 - 2026-10-23
 
 - Fix styled HTML and PDF printing, and image exports, so scrollbars are hidden
