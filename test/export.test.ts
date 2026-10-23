@@ -57,6 +57,10 @@ describe('HTML export', () => {
     expect(css).toContain('pre[data-markda-diagram]{break-inside:avoid');
     expect(css).toContain('max-height:849px');
     expect(css).toContain('h1,h2,h3,h4,h5,h6{break-after:avoid}');
+    // Print scrollbars are hidden and code blocks stop scrolling so they print fully.
+    expect(css).toContain('*{scrollbar-width:none}');
+    expect(css).toContain('::-webkit-scrollbar{display:none}');
+    expect(css).toContain('pre{overflow:visible;white-space:pre-wrap;overflow-wrap:anywhere}');
     expect(css.startsWith('@page')).toBe(true);
     // Diagram rules apply to print only, so image export keeps full-size diagrams.
     expect(css.slice(css.indexOf('@media print'))).toContain('pre[data-markda-diagram] svg');

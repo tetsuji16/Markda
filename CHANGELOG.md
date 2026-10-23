@@ -2,6 +2,11 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.39 - 2026-10-23
+
+- Fix: PDF exports no longer show scrollbars on code blocks; print styles now
+  hide scrollbars and let code blocks print in full.
+
 ## 0.1.38 - 2026-10-21
 
 - Update the README and Marketplace listing entry points with the official

@@ -54,6 +54,8 @@ export function pdfPageCss(paper: string, marginMm: number): string {
   const diagramHeightPx = Math.max(120, Math.floor(contentHeightPx - 160));
   return `@page{size:${paper in paperHeightsMm ? paper : 'A4'};margin:${marginMm}mm}`
     + '@media print{h1,h2,h3,h4,h5,h6{break-after:avoid}'
+    + '*{scrollbar-width:none}::-webkit-scrollbar{display:none}'
+    + 'pre{overflow:visible;white-space:pre-wrap;overflow-wrap:anywhere}'
     + 'pre[data-markda-diagram]{break-inside:avoid;overflow:visible}'
     + `pre[data-markda-diagram] svg{display:block;margin:0 auto;max-width:100%;max-height:${diagramHeightPx}px}}`;
 }
