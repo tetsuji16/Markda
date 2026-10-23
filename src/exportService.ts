@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import * as vscode from 'vscode';
 import { createMarkdownRenderer, extractTitle } from './markdown.js';
 import {
-  blockedRemoteImagePlaceholder, browserExportContentSecurityPolicy, createHtmlDocument, exportReadinessScript, heightProbeScript, isNetworkPathReference,
+  blockedRemoteImagePlaceholder, browserExportContentSecurityPolicy, createHtmlDocument, exportContentFitCss, exportReadinessScript, heightProbeScript, isNetworkPathReference,
   mermaidExportScript, parseProbedHeight, pdfPageCss,
 } from './htmlExport.js';
 import { substituteVariables } from './externalExport.js';
@@ -128,7 +128,7 @@ export class ExportService {
       extractTitle(markdown, path.basename(document.fileName)),
       body,
       vscode.env.language,
-      `${await this.loadKatexCss()}\nbody{font-size:${fontSize}px}.markda-export{max-width:${width - 80}px;padding:40px}`,
+      `${await this.loadKatexCss()}\nbody{font-size:${fontSize}px}.markda-export{max-width:${width - 80}px;padding:40px}${exportContentFitCss()}`,
       baseHref,
       browserExportContentSecurityPolicy(allowRemoteImages, nonce),
       `${scripts}${heightProbeScript(nonce)}`,

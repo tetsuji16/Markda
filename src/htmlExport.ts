@@ -38,6 +38,15 @@ export const blockedRemoteImagePlaceholder = 'data:image/svg+xml,' + encodeURICo
 
 const paperHeightsMm: Record<string, number> = { A4: 297, A5: 210, Letter: 279.4, Legal: 355.6 };
 
+/** Shared content sizing rules for print output and fixed-width image captures. */
+export function exportContentFitCss(): string {
+  return '.markda-export{overflow-wrap:anywhere}'
+    + '.markda-export pre{overflow:visible;white-space:pre-wrap;overflow-wrap:anywhere}'
+    + '.markda-export table{table-layout:fixed;width:100%}'
+    + '.markda-export th,.markda-export td{padding:6px 4px}'
+    + '.markda-export .katex-display>.katex{white-space:normal}';
+}
+
 /**
  * Page setup for PDF export. A rendered diagram is a single SVG that the
  * browser cannot split across pages: when it is taller than the page, Chromium
@@ -54,8 +63,6 @@ export function pdfPageCss(paper: string, marginMm: number): string {
   const diagramHeightPx = Math.max(120, Math.floor(contentHeightPx - 160));
   return `@page{size:${paper in paperHeightsMm ? paper : 'A4'};margin:${marginMm}mm}`
     + '@media print{h1,h2,h3,h4,h5,h6{break-after:avoid}'
-    + '*{scrollbar-width:none}::-webkit-scrollbar{display:none}'
-    + 'pre{overflow:visible;white-space:pre-wrap;overflow-wrap:anywhere}'
     + 'pre[data-markda-diagram]{break-inside:avoid;overflow:visible}'
     + `pre[data-markda-diagram] svg{display:block;margin:0 auto;max-width:100%;max-height:${diagramHeightPx}px}}`;
 }
@@ -127,5 +134,6 @@ const exportCss = `
 .markda-export{max-width:860px;margin:0 auto;padding:48px 32px}h1,h2,h3{line-height:1.25;margin-top:1.6em}
 pre,code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}pre{padding:16px;overflow:auto;background:#f6f8fa;border-radius:6px}
 blockquote{margin-left:0;padding-left:1em;color:#59636e;border-left:4px solid #d0d7de}table{border-collapse:collapse;width:100%}
-th,td{border:1px solid #d0d7de;padding:6px 12px}img{max-width:100%}@media print{.markda-export{max-width:none;padding:0}}
+th,td{border:1px solid #d0d7de;padding:6px 12px}img{max-width:100%}
+@media print{.markda-export{max-width:none;padding:0}*{scrollbar-width:none}::-webkit-scrollbar{display:none}${exportContentFitCss()}}
 `;

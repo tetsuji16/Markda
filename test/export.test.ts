@@ -11,6 +11,11 @@ describe('HTML export', () => {
     expect(html).toContain('<title>&lt;unsafe&gt;</title>');
     expect(html).toContain('@media print');
     expect(html).toContain('<p>safe</p>');
+    expect(html).toContain('.markda-export{max-width:none;padding:0}');
+    expect(html).toContain('.markda-export{overflow-wrap:anywhere}');
+    expect(html).toContain('.markda-export pre{overflow:visible;white-space:pre-wrap;overflow-wrap:anywhere}');
+    expect(html).toContain('.markda-export table{table-layout:fixed;width:100%}');
+    expect(html).toContain('.markda-export .katex-display>.katex{white-space:normal}');
   });
 
   it('adds a base URL and substitutes external export arguments without invoking a shell', () => {
@@ -57,10 +62,6 @@ describe('HTML export', () => {
     expect(css).toContain('pre[data-markda-diagram]{break-inside:avoid');
     expect(css).toContain('max-height:849px');
     expect(css).toContain('h1,h2,h3,h4,h5,h6{break-after:avoid}');
-    // Print scrollbars are hidden and code blocks stop scrolling so they print fully.
-    expect(css).toContain('*{scrollbar-width:none}');
-    expect(css).toContain('::-webkit-scrollbar{display:none}');
-    expect(css).toContain('pre{overflow:visible;white-space:pre-wrap;overflow-wrap:anywhere}');
     expect(css.startsWith('@page')).toBe(true);
     // Diagram rules apply to print only, so image export keeps full-size diagrams.
     expect(css.slice(css.indexOf('@media print'))).toContain('pre[data-markda-diagram] svg');

@@ -2,6 +2,14 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.40 - 2026-10-23
+
+- Fix styled HTML and PDF printing, and image exports, so scrollbars are hidden
+  and long text, code blocks, tables, and ordinary display equations fit within
+  the page or image width.
+- Extremely wide, indivisible display equations may still extend beyond the
+  page or image width.
+
 ## 0.1.39 - 2026-10-23
 
 - Fix: PDF exports no longer show scrollbars on code blocks; print styles now
@@ -28,8 +36,6 @@ All notable changes to Markda are documented in this file.
   information.
 - Refresh the GitHub repository description, Marketplace homepage link, and
   discovery topics.
-
-## Unreleased
 
 ## 0.1.35 - 2026-10-19
 
