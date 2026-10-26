@@ -2,6 +2,10 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.42 - 2026-10-27
+
+- Add Simplified Chinese and Spanish user guides and language navigation.
+
 ## 0.1.41 - 2026-10-24
 
 - Add an editor title action to open supported Markdown and text files with Markda from VS Code’s standard text editor.
