@@ -2,6 +2,10 @@
 
 All notable changes to Markda are documented in this file.
 
+## 0.1.43 - 2026-10-27
+
+- Add a German user guide and include it in the localized guide navigation.
+
 ## 0.1.42 - 2026-10-27
 
 - Add Simplified Chinese and Spanish user guides and language navigation.

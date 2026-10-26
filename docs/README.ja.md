@@ -1,6 +1,6 @@
 # Markda
 
-[English](../README.md) · **日本語** · [简体中文](README.zh-cn.md) · [Español](README.es.md)
+[English](../README.md) · **日本語** · [简体中文](README.zh-cn.md) · [Español](README.es.md) · [Deutsch](README.de.md)
 
 **見たまま編集。Markdown は自分の手元に。**
 
