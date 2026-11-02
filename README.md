@@ -18,7 +18,7 @@ Markda 0.1 is a preview release.
 2. Open a Markdown file. If it opens in VS Code’s standard text editor, select **Open with markda** in the editor title, run **Markda: Open with Markda**, or choose **Reopen Editor With… → Markda** from the editor tab menu.
 3. Edit the rendered document. Use the `</>` button or **Markda: Toggle Source Code Mode** whenever you want to work with the Markdown source.
 
-Markda supports `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`, and `.txt` files. To return to VS Code's built-in editor, use **Reopen with Another Editor** in the Markda editor title.
+Markda supports `.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdwn`, and `.txt` files. Use **Markda: Change File Encoding** from the editor title menu to guess or select an encoding and reopen the current file. Save or discard changes before reopening; automatic detection may be inaccurate and can be retried manually. To return to VS Code's built-in editor, use **Reopen with Another Editor** in the Markda editor title.
 
 ![Markda — edit the rendered document while keeping clean, portable Markdown source](media/marketing/marketplace-hero.png)
 

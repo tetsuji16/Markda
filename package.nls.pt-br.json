@@ -88,5 +88,6 @@
   "view.backlinks": "Links de retorno",
   "config.checkLinks": "Verifique os links locais de arquivos, imagens e títulos após a edição. Os resultados aparecem em Problemas.",
   "config.updateLinks": "Revise as atualizações de links Markdown de entrada e saída quando arquivos ou pastas forem renomeados em um espaço de trabalho confiável.",
-  "config.templates": "Modelos de documentos personalizados. Use espaços reservados {{title}} e {{date}}."
+  "config.templates": "Modelos de documentos personalizados. Use espaços reservados {{title}} e {{date}}.",
+  "command.changeEncoding": "Alterar codificação do arquivo"
 }

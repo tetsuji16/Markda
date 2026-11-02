@@ -9,6 +9,7 @@ import {
   supportedFileTypes,
 } from './editorAssociations.js';
 import { MarkdaEditorProvider } from './editorProvider.js';
+import { changeEncoding } from './encoding.js';
 import { FileProvider } from './fileProvider.js';
 import { OutlineProvider } from './outlineProvider.js';
 import type { Heading } from './protocol.js';
@@ -63,6 +64,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidRenameFiles((event) => { files.renameFiles(event.files); links.invalidate(); if (backlinks.visible) void links.refreshBacklinks(editor.getActiveDocument()).catch(reportLinkError); }),
     register('markda.open', async (uri?: vscode.Uri) => openWithMarkda(uri)),
     register('markda.reopenWith', () => reopenWithAnotherEditor(editor.getActiveDocument())),
+    register('markda.changeEncoding', () => changeEncoding(editor.getActiveDocument())),
     register('markda.configureFileAssociations', () => configureFileAssociations()),
     register('markda.newFile', () => createMarkdownFile()),
     register('markda.newFromTemplate', () => createFromTemplate()),

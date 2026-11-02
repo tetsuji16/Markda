@@ -88,5 +88,6 @@
   "config.imageFontSize": "Font size in pixels for PNG image export.",
   "config.exportTargets": "Trusted external export commands. Variables: ${source}, ${destination}, ${documentDir}, ${documentName}, ${workspaceFolder}.",
   "config.exportTargetExtension": "Output extension such as docx. Leave empty for commands without an output file.",
-  "welcome.backlinks": "Documents linking to the current file appear here.\n[Refresh Backlinks](command:markda.refreshBacklinks)"
+  "welcome.backlinks": "Documents linking to the current file appear here.\n[Refresh Backlinks](command:markda.refreshBacklinks)",
+  "command.changeEncoding": "Change File Encoding"
 }

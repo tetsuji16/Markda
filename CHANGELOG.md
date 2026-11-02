@@ -1,3 +1,7 @@
+## 0.1.44 - 2026-11-02
+
+- Add automatic and manual file encoding selection, with unsaved-change protection.
+
 # Changelog
 
 All notable changes to Markda are documented in this file.
@@ -312,3 +316,4 @@ Initial preview release.
 - Table controls, image paste and drag-and-drop, outline, file navigation, and document search
 - Focus mode, typewriter mode, themes, document statistics, and styled or bare HTML export
 - Workspace Trust-aware resource and HTML security settings
+

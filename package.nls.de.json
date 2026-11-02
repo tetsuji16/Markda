@@ -88,5 +88,6 @@
   "view.backlinks": "Rückverweise",
   "config.checkLinks": "Überprüfen Sie nach der Bearbeitung lokale Datei-, Bild- und Überschriften-Links. Die Ergebnisse werden unter „Probleme“ angezeigt.",
   "config.updateLinks": "Überprüfen Sie eingehende und ausgehende Markdown-Link-Updates, wenn Dateien oder Ordner in einem vertrauenswürdigen Arbeitsbereich umbenannt werden.",
-  "config.templates": "Benutzerdefinierte Dokumentvorlagen. Verwenden Sie die Platzhalter {{title}} und {{date}}."
+  "config.templates": "Benutzerdefinierte Dokumentvorlagen. Verwenden Sie die Platzhalter {{title}} und {{date}}.",
+  "command.changeEncoding": "Dateikodierung ändern"
 }

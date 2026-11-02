@@ -88,5 +88,6 @@
   "view.backlinks": "Liens retour",
   "config.checkLinks": "Vérifiez les liens locaux vers les fichiers, les images et les titres après l'édition. Les résultats apparaissent dans Problèmes.",
   "config.updateLinks": "Examinez les mises à jour des liens Markdown entrants et sortants lorsque des fichiers ou des dossiers sont renommés dans un espace de travail approuvé.",
-  "config.templates": "Modèles de documents personnalisés. Utilisez les espaces réservés {{title}} et {{date}}."
+  "config.templates": "Modèles de documents personnalisés. Utilisez les espaces réservés {{title}} et {{date}}.",
+  "command.changeEncoding": "Modifier l’encodage du fichier"
 }

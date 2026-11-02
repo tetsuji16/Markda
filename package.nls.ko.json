@@ -88,5 +88,6 @@
   "view.backlinks": "백링크",
   "config.checkLinks": "편집 후 로컬 파일, 이미지, 제목 링크를 확인하세요. 결과는 문제에 나타납니다.",
   "config.updateLinks": "신뢰할 수 있는 작업 영역에서 파일이나 폴더의 이름이 바뀌면 들어오고 나가는 Markdown 링크 업데이트를 검토하세요.",
-  "config.templates": "사용자 정의 문서 템플릿. {{title}} 및 {{date}} 자리 표시자를 사용하세요."
+  "config.templates": "사용자 정의 문서 템플릿. {{title}} 및 {{date}} 자리 표시자를 사용하세요.",
+  "command.changeEncoding": "파일 인코딩 변경"
 }

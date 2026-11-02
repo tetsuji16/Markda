@@ -2,7 +2,7 @@
   "name": "markda",
   "displayName": "Markda",
   "description": "%extension.description%",
-  "version": "0.1.43",
+  "version": "0.1.44",
   "publisher": "tetsuji16",
   "license": "MIT",
   "l10n": "./l10n",
@@ -456,6 +456,12 @@
         "title": "%command.refreshBacklinks%",
         "category": "Markda",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "markda.changeEncoding",
+        "title": "%command.changeEncoding%",
+        "category": "markda",
+        "icon": "$(symbol-string)"
       }
     ],
     "menus": {
@@ -497,6 +503,11 @@
         },
         {
           "command": "markda.newFromTemplate",
+          "when": "activeCustomEditorId == markda.editor",
+          "group": "4_documents"
+        },
+        {
+          "command": "markda.changeEncoding",
           "when": "activeCustomEditorId == markda.editor",
           "group": "4_documents"
         }
@@ -1013,6 +1024,7 @@
     "@vscode/codicons": "^0.0.40",
     "dompurify": "^3.4.17",
     "entities": "^4.5.0",
+    "jschardet": "^4.1.0",
     "katex": "^0.16.22",
     "markdown-it": "^14.3.3",
     "markdown-it-emoji": "^3.1.0",

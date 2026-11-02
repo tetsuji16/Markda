@@ -17,7 +17,7 @@ const builds = [
     // Keep exportService as a real runtime boundary. Without externalizing this
     // relative import, esbuild folds MarkdownIt and its entity tables into the
     // activation bundle even though extension.ts uses dynamic import().
-    external: ['vscode', './exportService.js', './workspaceLinks.js', './localization.js'],
+    external: ['vscode', './exportService.js', './workspaceLinks.js', './localization.js', './encodingDetector.js'],
   },
   {
     ...common,
@@ -26,6 +26,13 @@ const builds = [
     platform: 'node',
     format: 'cjs',
     external: ['vscode'],
+  },
+  {
+    ...common,
+    entryPoints: ['src/encodingDetector.ts'],
+    outfile: 'dist/encodingDetector.js',
+    platform: 'node',
+    format: 'cjs',
   },
   {
     ...common,

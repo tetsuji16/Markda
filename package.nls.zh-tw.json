@@ -88,5 +88,6 @@
   "view.backlinks": "反向連結",
   "config.checkLinks": "編輯後檢查本機文件、圖像和標題連結。結果出現在問題中。",
   "config.updateLinks": "在受信任的工作區中重新命名檔案或資料夾時，請查看傳入和傳出的 Markdown 連結更新。",
-  "config.templates": "自訂文檔範本。使用 {{title}} 和 {{date}} 佔位符。"
+  "config.templates": "自訂文檔範本。使用 {{title}} 和 {{date}} 佔位符。",
+  "command.changeEncoding": "變更檔案編碼"
 }

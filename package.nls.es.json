@@ -88,5 +88,6 @@
   "view.backlinks": "Vínculos de retroceso",
   "config.checkLinks": "Verifique los enlaces de archivos, imágenes y encabezados locales después de editarlos. Los resultados aparecen en Problemas.",
   "config.updateLinks": "Revise las actualizaciones de enlaces de Markdown entrantes y salientes cuando se cambia el nombre de archivos o carpetas en un espacio de trabajo confiable.",
-  "config.templates": "Plantillas de documentos personalizados. Utilice marcadores de posición {{title}} y {{date}}."
+  "config.templates": "Plantillas de documentos personalizados. Utilice marcadores de posición {{title}} y {{date}}.",
+  "command.changeEncoding": "Cambiar codificación del archivo"
 }

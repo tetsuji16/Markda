@@ -88,5 +88,6 @@
   "view.backlinks": "バックリンク",
   "config.checkLinks": "編集後にローカルファイル、画像、見出しへのリンクを確認します。結果は「問題」に表示されます。",
   "config.updateLinks": "信頼されたワークスペースでファイルやフォルダーの名前を変更するとき、Markdownリンクの更新内容を確認します。",
-  "config.templates": "カスタムドキュメントテンプレートです。{{title}} と {{date}} のプレースホルダーを使用します。"
+  "config.templates": "カスタムドキュメントテンプレートです。{{title}} と {{date}} のプレースホルダーを使用します。",
+  "command.changeEncoding": "文字コードを変更"
 }
